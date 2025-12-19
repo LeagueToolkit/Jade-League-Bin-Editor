@@ -10,19 +10,8 @@
     
     <Window.Resources>
         <!-- Dark Styles -->
-        <Style x:Key="ModernButtonStyle" TargetType="Button">
-            <Setter Property="Background" Value="#007ACC"/>
-            <Setter Property="Foreground" Value="White"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Padding" Value="15,8"/>
-            <Setter Property="FontSize" Value="15"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="#1C97EA"/>
-                </Trigger>
-            </Style.Triggers>
-        </Style>
+        <!-- Dark Styles -->
+
 
         <Style TargetType="ListBox">
             <Setter Property="Background" Value="#252526"/>
@@ -60,7 +49,7 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ListBoxItem">
-                        <Border x:Name="ItemBorder" Background="{TemplateBinding Background}" CornerRadius="2">
+                        <Border x:Name="ItemBorder" Background="{TemplateBinding Background}" CornerRadius="{DynamicResource GlobalCornerRadius}">
                             <ContentPresenter/>
                         </Border>
                         <ControlTemplate.Triggers>
@@ -84,7 +73,7 @@
         </Style>
     </Window.Resources>
     
-    <Border BorderThickness="1" BorderBrush="#3E3E42">
+    <Border BorderThickness="1" BorderBrush="#3E3E42" CornerRadius="{DynamicResource GlobalCornerRadius}">
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
@@ -92,7 +81,7 @@
             </Grid.RowDefinitions>
             
             <!-- Custom Title Bar -->
-            <Border x:Name="TitleBar" Grid.Row="0" Background="#252526" Height="30" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+            <Border x:Name="TitleBar" Grid.Row="0" Background="#252526" Height="30" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown" CornerRadius="{DynamicResource GlobalCornerRadius}">
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0">
                     <Image Source="/jade.ico" Width="16" Height="16" Margin="0,0,8,0"/>
                     <TextBlock Text="Jade Themes" Foreground="#CCCCCC" FontSize="13" VerticalAlignment="Center"/>
@@ -121,6 +110,11 @@
                     <TextBlock x:Name="CurrentThemeText" Text="Current Theme: Dark Emptiness" FontSize="16" Foreground="#888888" Margin="0,0,0,15"/>
                 </StackPanel>
 
+                <CheckBox x:Name="RoundedCornersCheckBox" Grid.Row="0" Grid.Column="4" Content="Rounded Corners" 
+                          Foreground="#AAAAAA" VerticalAlignment="Top" HorizontalAlignment="Right"
+                          Checked="OnRoundedCornersToggle" Unchecked="OnRoundedCornersToggle"
+                          Margin="0,5,0,0"/>
+
                 <!-- UI Theme Selection -->
                 <Grid Grid.Row="2" Grid.Column="0">
                     <Grid.RowDefinitions>
@@ -128,23 +122,25 @@
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
                     <TextBlock Grid.Row="0" Text="UI Theme" Foreground="#888888" FontSize="14" Margin="0,0,0,8"/>
-                    <ListBox x:Name="ThemesListBox" Grid.Row="1" ItemsSource="{Binding Themes}" SelectionChanged="OnThemeSelectionChanged">
-                        <ListBox.ItemTemplate>
-                            <DataTemplate>
-                                <Grid Margin="4">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="{Binding DisplayName}" VerticalAlignment="Center" Foreground="#CCCCCC" FontSize="13"/>
-                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="8,0,0,0">
-                                        <Border Width="10" Height="10" Background="{Binding Background}" CornerRadius="2" Margin="1,0" BorderBrush="#3E3E42" BorderThickness="1"/>
-                                        <Border Width="10" Height="10" Background="{Binding StatusBarBackground}" CornerRadius="2" Margin="1,0" BorderBrush="#3E3E42" BorderThickness="1"/>
-                                    </StackPanel>
-                                </Grid>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
+                    <Border x:Name="UIThemeBox" Grid.Row="1" Background="#252526" BorderBrush="#3E3E42" BorderThickness="1" CornerRadius="{DynamicResource GlobalCornerRadius}" Padding="0">
+                        <ListBox x:Name="ThemesListBox" Background="Transparent" BorderThickness="0" ItemsSource="{Binding Themes}" SelectionChanged="OnThemeSelectionChanged">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="4">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding DisplayName}" VerticalAlignment="Center" Foreground="#CCCCCC" FontSize="13"/>
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="8,0,0,0">
+                                            <Border Width="10" Height="10" Background="{Binding Background}" CornerRadius="{DynamicResource GlobalCornerRadius}" Margin="1,0" BorderBrush="#3E3E42" BorderThickness="1"/>
+                                            <Border Width="10" Height="10" Background="{Binding StatusBarBackground}" CornerRadius="{DynamicResource GlobalCornerRadius}" Margin="1,0" BorderBrush="#3E3E42" BorderThickness="1"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </Border>
                 </Grid>
 
                 <!-- Bracket Theme Selection -->
@@ -159,29 +155,31 @@
                               Foreground="#AAAAAA" Margin="0,0,0,10"
                               Checked="OnOverrideChecked" Unchecked="OnOverrideChecked"/>
                     
-                    <ListBox x:Name="BracketThemesListBox" Grid.Row="2" ItemsSource="{Binding BracketThemes}" 
-                             IsEnabled="{Binding ElementName=OverrideBracketsCheckBox, Path=IsChecked}"
-                             SelectionChanged="OnBracketThemeSelectionChanged">
-                        <ListBox.ItemTemplate>
-                            <DataTemplate>
-                                <Grid Margin="4">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="{Binding DisplayName}" VerticalAlignment="Center" Foreground="#CCCCCC" FontSize="13"/>
-                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="8,0,0,0">
-                                        <Border Width="10" Height="10" Background="{Binding PreviewColor1}" CornerRadius="2" Margin="1,0" BorderBrush="#3E3E42" BorderThickness="1"/>
-                                        <Border Width="10" Height="10" Background="{Binding PreviewColor2}" CornerRadius="2" Margin="1,0" BorderBrush="#3E3E42" BorderThickness="1"/>
-                                    </StackPanel>
-                                </Grid>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
+                    <Border x:Name="BracketThemeBox" Grid.Row="2" Background="#252526" BorderBrush="#3E3E42" BorderThickness="1" CornerRadius="{DynamicResource GlobalCornerRadius}" Padding="0">
+                        <ListBox x:Name="BracketThemesListBox" Background="Transparent" BorderThickness="0" ItemsSource="{Binding BracketThemes}" 
+                                 IsEnabled="{Binding ElementName=OverrideBracketsCheckBox, Path=IsChecked}"
+                                 SelectionChanged="OnBracketThemeSelectionChanged">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="4">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding DisplayName}" VerticalAlignment="Center" Foreground="#CCCCCC" FontSize="13"/>
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="8,0,0,0">
+                                            <Border Width="10" Height="10" Background="{Binding PreviewColor1}" CornerRadius="{DynamicResource GlobalCornerRadius}" Margin="1,0" BorderBrush="#3E3E42" BorderThickness="1"/>
+                                            <Border Width="10" Height="10" Background="{Binding PreviewColor2}" CornerRadius="{DynamicResource GlobalCornerRadius}" Margin="1,0" BorderBrush="#3E3E42" BorderThickness="1"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </Border>
                 </Grid>
 
                 <!-- Preview Panel -->
-                <Border x:Name="PreviewPanelBorder" Grid.Row="2" Grid.Column="4" Background="#252526" BorderBrush="#3E3E42" BorderThickness="1" CornerRadius="4">
+                <Border x:Name="PreviewPanelBorder" Grid.Row="2" Grid.Column="4" Background="#252526" BorderBrush="#3E3E42" BorderThickness="1" CornerRadius="{DynamicResource GlobalCornerRadius}">
                     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                         <Border Padding="20">
                             <StackPanel x:Name="PreviewPanel">
@@ -202,7 +200,7 @@
                                                 <ColumnDefinition Width="Auto"/>
                                             </Grid.ColumnDefinitions>
                                             <TextBlock Text="{Binding Label}" Foreground="#AAAAAA" FontSize="13" VerticalAlignment="Center"/>
-                                            <Border Grid.Column="2" Width="30" Height="15" Background="{Binding Color}" CornerRadius="3" BorderBrush="#3E3E42" BorderThickness="1"/>
+                                            <Border Grid.Column="2" Width="30" Height="15" Background="{Binding Color}" CornerRadius="{DynamicResource GlobalCornerRadius}" BorderBrush="#3E3E42" BorderThickness="1"/>
                                         </Grid>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
@@ -211,7 +209,7 @@
                             <Separator Background="#3E3E42" Margin="0,15"/>
                             
                             <TextBlock Text="Syntax Preview" Foreground="#AAAAAA" FontSize="14" Margin="0,5,0,10"/>
-                            <Border x:Name="SampleTextBorder" Padding="15" Background="{Binding ElementName=ThemesListBox, Path=SelectedItem.EditorBackground}" CornerRadius="3">
+                            <Border x:Name="SampleTextBorder" Padding="15" Background="{Binding ElementName=ThemesListBox, Path=SelectedItem.EditorBackground}" CornerRadius="{DynamicResource GlobalCornerRadius}">
                                 <StackPanel>
                                     <TextBlock Text="Bracket hierarchy preview:" 
                                                Foreground="{Binding ElementName=ThemesListBox, Path=SelectedItem.Foreground}"
@@ -230,8 +228,8 @@
                 
                 <!-- Action Buttons -->
                 <StackPanel Grid.Row="3" Grid.ColumnSpan="5" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,25,0,0">
-                    <Button Content="Reload UI" Click="OnApplyTheme" Margin="0,0,15,0" Style="{StaticResource ModernButtonStyle}" Background="#2D7A2D"/>
-                    <Button Content="Close" Click="OnClose" Style="{StaticResource ModernButtonStyle}" Background="#3E3E42"/>
+                    <Button Content="Reload UI" Click="OnApplyTheme" Margin="0,0,15,0" Background="#2D7A2D"/>
+                    <Button Content="Close" Click="OnClose" Background="#3E3E42"/>
                 </StackPanel>
             </Grid>
         </Grid>

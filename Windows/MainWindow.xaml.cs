@@ -74,12 +74,12 @@ public partial class MainWindow : Window
             
             // Check if hash preloading is enabled
             var jadeDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "RitoShark", "Jade");
-            var settingsFile = Path.Combine(jadeDir, "settings.txt");
+            var prefsFile = Path.Combine(jadeDir, "preferences.txt");
             bool preloadHashes = false;
             
-            if (File.Exists(settingsFile))
+            if (File.Exists(prefsFile))
             {
-                var content = File.ReadAllText(settingsFile);
+                var content = File.ReadAllText(prefsFile);
                 if (content.Contains("PreloadHashes="))
                 {
                     preloadHashes = content.Contains("PreloadHashes=True");
@@ -155,11 +155,21 @@ public partial class MainWindow : Window
 
                 // Check for minimized startup flag
                 string[] args = Environment.GetCommandLineArgs();
-                if (args.Contains("--minimized"))
+                bool startMinimized = args.Contains("--minimized");
+                bool hasFile = !string.IsNullOrEmpty(App.StartupFilePath);
+
+                if (startMinimized && !hasFile)
                 {
-                    Logger.Info("Started minimized to tray");
+                    Logger.Info("Started minimized to tray (no file argument)");
                     this.Hide();
                     TrayService.SetVisible(true);
+                }
+                else if (hasFile)
+                {
+                    Logger.Info("Started with file, ensuring visibility");
+                    this.Show();
+                    this.Activate();
+                    TrayService.SetVisible(false);
                 }
 
                 UpdateWelcomeScreenVisibility();
@@ -288,6 +298,8 @@ public partial class MainWindow : Window
             "AMOLED" => Color.FromRgb(100, 100, 100),        // Medium gray on black
             "Void" => Color.FromRgb(140, 120, 180),          // Soft purple-gray
             "VioletSorrow" => Color.FromRgb(130, 100, 185),  // Deep sorrowful violet
+            "OrangeBurnout" => Color.FromRgb(180, 100, 50),  // Warm orange-gray
+            "PurpleGrief" => Color.FromRgb(160, 140, 170),   // Sorrowful violet-gray
             _ => Color.FromRgb(128, 128, 128)                // Default gray
         };
     }
@@ -733,6 +745,10 @@ public partial class MainWindow : Window
             return new SolidColorBrush(Color.FromRgb(15, 10, 30));
         else if (theme == "VioletSorrow")
             return new SolidColorBrush(Color.FromRgb(22, 12, 42));
+        else if (theme == "OrangeBurnout")
+            return new SolidColorBrush(Color.FromRgb(42, 20, 8));
+        else if (theme == "PurpleGrief")
+            return new SolidColorBrush(Color.FromRgb(30, 20, 35));
         return new SolidColorBrush(Color.FromRgb(30, 30, 30));
     }
     
@@ -755,6 +771,10 @@ public partial class MainWindow : Window
             return new SolidColorBrush(Color.FromRgb(180, 170, 220));
         else if (theme == "VioletSorrow")
             return new SolidColorBrush(Color.FromRgb(185, 170, 215));
+        else if (theme == "OrangeBurnout")
+            return new SolidColorBrush(Color.FromRgb(255, 228, 209));
+        else if (theme == "PurpleGrief")
+            return new SolidColorBrush(Color.FromRgb(220, 200, 230));
         return new SolidColorBrush(Color.FromRgb(212, 212, 212));
     }
     
@@ -777,6 +797,10 @@ public partial class MainWindow : Window
             return new SolidColorBrush(Color.FromRgb(26, 15, 46));
         else if (theme == "VioletSorrow")
             return new SolidColorBrush(Color.FromRgb(32, 20, 58));
+        else if (theme == "OrangeBurnout")
+            return new SolidColorBrush(Color.FromRgb(50, 25, 10));
+        else if (theme == "PurpleGrief")
+            return new SolidColorBrush(Color.FromRgb(35, 25, 40));
         return new SolidColorBrush(Color.FromRgb(37, 37, 38));
     }
     
@@ -1708,7 +1732,7 @@ public partial class MainWindow : Window
             var hashDir = Path.Combine(jadeDir, "hashes");
             
             // Check if preload is enabled
-            var settingsFile = Path.Combine(jadeDir, "settings.txt");
+            var settingsFile = Path.Combine(jadeDir, "preferences.txt");
             bool keepHashesLoaded = false; // Default to unload after use
             
             if (File.Exists(settingsFile))
@@ -2266,6 +2290,110 @@ public partial class MainWindow : Window
                 var scrollThumbHoverBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(95, 65, 145));
                 UpdateScrollBarStyles(scrollTrackBg, scrollThumbBg, scrollThumbHoverBg);
             }
+            else if (theme == "OrangeBurnout")
+            {
+                // Orange Burnout theme - deep brown-orange backgrounds with vibrant burnt orange accents
+                var bgColor = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(35, 15, 5)); // Very dark brown-orange
+                var editorBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(42, 20, 8)); // Deep brown-orange
+                var titleBarBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(50, 25, 10)); // Dark brown-orange
+                var menuBarBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(50, 25, 10)); // Dark brown-orange
+                var menuItemBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(42, 20, 8)); // Deep brown-orange
+                var menuItemHoverBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(85, 35, 10)); // Burnt orange hover
+                var statusBarBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(204, 85, 0)); // Burnt orange
+                var tabBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(50, 25, 10)); // Dark brown-orange
+                var selectedTabBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(110, 45, 15)); // Brighter brown-orange
+                var hoverTabBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(70, 30, 10)); // Medium brown-orange
+                textColor = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(255, 228, 209)); // Warm peach-white
+                
+                this.Background = bgColor;
+                
+                // Update title bar
+                if (TitleBar != null)
+                {
+                    TitleBar.Background = titleBarBg;
+                }
+                
+                // Update menu bar and menu items
+                if (MenuBar != null)
+                {
+                    MenuBar.Background = menuBarBg;
+                    UpdateMenuItemStyles(menuItemBg, menuItemHoverBg, textColor);
+                }
+                
+                // Update status bar
+                if (StatusBarBorder != null)
+                {
+                    StatusBarBorder.Background = statusBarBg;
+                }
+                
+                // Update welcome screen
+                if (WelcomeScreen != null)
+                {
+                    WelcomeScreen.Background = editorBg;
+                }
+                
+                // Update tab control and tab styles
+                if (EditorTabControl != null)
+                {
+                    EditorTabControl.Background = bgColor;
+                    UpdateTabItemStyles(tabBg, selectedTabBg, hoverTabBg, textColor);
+                    
+                    // Update all existing editor tabs
+                    foreach (TabItem tab in EditorTabControl.Items)
+                    {
+                        tab.Background = tabBg;
+                        UpdateTabEditorColors(tab, editorBg, textColor);
+                    }
+                }
+                
+                // Update scrollbar colors - intense burnt orange
+                var scrollTrackBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(55, 30, 15));
+                var scrollThumbBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(150, 65, 0));
+                var scrollThumbHoverBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(190, 85, 0));
+                UpdateScrollBarStyles(scrollTrackBg, scrollThumbBg, scrollThumbHoverBg);
+            }
+            else if (theme == "PurpleGrief")
+            {
+                // Purple Grief theme - dark sorrowful violet palette
+                var bgColor = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(25, 15, 30));
+                var editorBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(30, 20, 35));
+                var titleBarBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(35, 25, 40));
+                var menuBarBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(35, 25, 40));
+                var menuItemBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(30, 20, 35));
+                var menuItemHoverBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(60, 40, 70));
+                var statusBarBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(70, 40, 80));
+                var tabBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(35, 25, 40));
+                var selectedTabBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(80, 50, 90));
+                var hoverTabBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(55, 35, 65));
+                textColor = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(220, 200, 230));
+                
+                this.Background = bgColor;
+                
+                if (TitleBar != null) TitleBar.Background = titleBarBg;
+                if (MenuBar != null)
+                {
+                    MenuBar.Background = menuBarBg;
+                    UpdateMenuItemStyles(menuItemBg, menuItemHoverBg, textColor);
+                }
+                if (StatusBarBorder != null) StatusBarBorder.Background = statusBarBg;
+                if (WelcomeScreen != null) WelcomeScreen.Background = editorBg;
+                
+                if (EditorTabControl != null)
+                {
+                    EditorTabControl.Background = bgColor;
+                    UpdateTabItemStyles(tabBg, selectedTabBg, hoverTabBg, textColor);
+                    foreach (TabItem tab in EditorTabControl.Items)
+                    {
+                        tab.Background = tabBg;
+                        UpdateTabEditorColors(tab, editorBg, textColor);
+                    }
+                }
+
+                var scrollTrackBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(25, 15, 30));
+                var scrollThumbBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(60, 40, 70));
+                var scrollThumbHoverBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(80, 50, 90));
+                UpdateScrollBarStyles(scrollTrackBg, scrollThumbBg, scrollThumbHoverBg);
+            }
             else
             {
                 // Default Dark theme - current colors
@@ -2410,6 +2538,12 @@ public partial class MainWindow : Window
                     tooltipBorderColor = System.Windows.Media.Color.FromRgb(150, 170, 200);
                     _currentSearchHighlightColor = System.Windows.Media.Color.FromArgb(60, 0, 150, 255); // Deep Sky Blue
                     break;
+                case "PurpleGrief":
+                    tooltipBgColor = System.Windows.Media.Color.FromRgb(35, 25, 45);
+                    tooltipFgColor = System.Windows.Media.Color.FromRgb(220, 200, 230);
+                    tooltipBorderColor = System.Windows.Media.Color.FromRgb(80, 50, 100);
+                    _currentSearchHighlightColor = System.Windows.Media.Color.FromArgb(80, 190, 159, 225); // Lavender-ish
+                    break;
                 default: // Default / Dark
                     tooltipBgColor = System.Windows.Media.Color.FromRgb(30, 30, 30);
                     tooltipFgColor = System.Windows.Media.Color.FromRgb(212, 212, 212);
@@ -2519,6 +2653,20 @@ public partial class MainWindow : Window
             markerBgColor = System.Windows.Media.Color.FromRgb(22, 12, 42);
             selectedMarkerColor = System.Windows.Media.Color.FromRgb(190, 170, 230);
             selectedMarkerBgColor = System.Windows.Media.Color.FromRgb(32, 22, 62);
+        }
+        else if (theme == "OrangeBurnout")
+        {
+            markerColor = System.Windows.Media.Color.FromRgb(180, 100, 50);
+            markerBgColor = System.Windows.Media.Color.FromRgb(42, 20, 8);
+            selectedMarkerColor = System.Windows.Media.Color.FromRgb(220, 140, 80);
+            selectedMarkerBgColor = System.Windows.Media.Color.FromRgb(65, 35, 15);
+        }
+        else if (theme == "PurpleGrief")
+        {
+            markerColor = System.Windows.Media.Color.FromRgb(160, 140, 170);
+            markerBgColor = System.Windows.Media.Color.FromRgb(30, 20, 35);
+            selectedMarkerColor = System.Windows.Media.Color.FromRgb(200, 180, 210);
+            selectedMarkerBgColor = System.Windows.Media.Color.FromRgb(50, 35, 60);
         }
         else // Default
         {

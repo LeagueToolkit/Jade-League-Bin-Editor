@@ -3,14 +3,16 @@ using System.IO;
 using System.IO.Pipes;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Linq;
 using System.Windows;
 using Jade.Windows;
+using Jade.Services;
 
 namespace Jade;
 
 public partial class App : Application
 {
-    private const string MutexName = "JadeBinEditor_SingleInstance_Mutex";
+    private const string MutexName = "Global\\JadeBinEditor_SingleInstance_Mutex";
     private const string PipeName = "JadeBinEditor_SingleInstance_Pipe";
     
     private static Mutex? _mutex;
@@ -53,6 +55,31 @@ public partial class App : Application
         
         // Start listening for messages from other instances
         StartPipeServer();
+
+        // Create the main window manually
+        var mainWindow = new MainWindow();
+        this.MainWindow = mainWindow;
+
+        // Load rounded edges preference
+        LoadRoundedEdgesPreference();
+
+        // Check if we should start hidden
+        bool startMinimized = e.Args.Contains("--minimized");
+        bool hasFile = !string.IsNullOrEmpty(StartupFilePath);
+
+        if (startMinimized && !hasFile)
+        {
+            Services.Logger.Info("MainWindow initialized hidden (minimized to tray)");
+            // Do NOT call Show() yet
+        }
+        else
+        {
+            mainWindow.Show();
+            if (hasFile)
+            {
+                mainWindow.Activate();
+            }
+        }
     }
     
     protected override void OnExit(ExitEventArgs e)
@@ -104,15 +131,12 @@ public partial class App : Application
                         // Dispatch to UI thread
                         await Dispatcher.InvokeAsync(async () =>
                         {
+                            // Always use TrayService to ensure window is visible and active
+                            TrayService.ShowMainWindow();
+                            
                             var mainWindow = MainWindow as MainWindow;
                             if (mainWindow != null)
                             {
-                                // Bring window to front
-                                if (mainWindow.WindowState == WindowState.Minimized)
-                                    mainWindow.WindowState = WindowState.Normal;
-                                mainWindow.Activate();
-                                mainWindow.Focus();
-                                
                                 // Open file if it's not just an activation request
                                 if (message != "__ACTIVATE__" && File.Exists(message))
                                 {
@@ -134,5 +158,29 @@ public partial class App : Application
         }, token);
         
         Services.Logger.Info("Pipe server started for single-instance support");
+    }
+
+    private void LoadRoundedEdgesPreference()
+    {
+        try
+        {
+            string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            string prefFolder = Path.Combine(appData, "RitoShark", "Jade");
+            string prefPath = Path.Combine(prefFolder, "preferences.txt");
+            
+            if (File.Exists(prefPath))
+            {
+                var lines = File.ReadAllLines(prefPath);
+                var roundedLine = lines.FirstOrDefault(l => l.StartsWith("RoundedEdges="));
+                if (roundedLine != null && bool.TryParse(roundedLine.Split('=')[1], out bool rounded))
+                {
+                    Resources["GlobalCornerRadius"] = new CornerRadius(rounded ? 3 : 0);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Services.Logger.Error("Failed to load rounded edges preference", ex);
+        }
     }
 }

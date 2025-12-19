@@ -13,7 +13,7 @@
         <WindowChrome CaptionHeight="30"
                       ResizeBorderThickness="6"
                       GlassFrameThickness="0,0,0,1"
-                      CornerRadius="0"
+                      CornerRadius="{DynamicResource GlobalCornerRadius}"
                       UseAeroCaptionButtons="False"/>
     </WindowChrome.WindowChrome>
     
@@ -92,30 +92,7 @@
         </Style>
         
         <!-- Dark TextBox Style with Dark Selection -->
-        <Style TargetType="TextBox">
-            <Setter Property="SelectionBrush" Value="#264F78"/>
-            <Setter Property="SelectionTextBrush" Value="#FFFFFF"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="TextBox">
-                        <Border Background="{TemplateBinding Background}" 
-                                BorderBrush="{TemplateBinding BorderBrush}" 
-                                BorderThickness="{TemplateBinding BorderThickness}">
-                            <ScrollViewer x:Name="PART_ContentHost" 
-                                          Focusable="False"
-                                          HorizontalScrollBarVisibility="{TemplateBinding HorizontalScrollBarVisibility}"
-                                          VerticalScrollBarVisibility="{TemplateBinding VerticalScrollBarVisibility}">
-                                <ScrollViewer.Resources>
-                                    <Style TargetType="Rectangle">
-                                        <Setter Property="Fill" Value="{DynamicResource ScrollBarTrackBrush}"/>
-                                    </Style>
-                                </ScrollViewer.Resources>
-                            </ScrollViewer>
-                        </Border>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
+        <!-- TextBox Style Removed (Using Global) -->
         
         <!-- Scrollbar Color Resources -->
         <SolidColorBrush x:Key="ScrollBarTrackBrush" Color="#3E3E42"/>
@@ -216,7 +193,7 @@
                                 <Border Background="{TemplateBinding Background}" 
                                         BorderBrush="{TemplateBinding BorderBrush}" 
                                         BorderThickness="{TemplateBinding BorderThickness}"
-                                        CornerRadius="2"
+                                        CornerRadius="{DynamicResource GlobalCornerRadius}"
                                         SnapsToDevicePixels="True">
                                     <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" 
                                                       VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
@@ -249,7 +226,7 @@
                     <Setter Property="Template">
                         <Setter.Value>
                             <ControlTemplate TargetType="Button">
-                                <Border Background="{TemplateBinding Background}">
+                                <Border Background="{TemplateBinding Background}" CornerRadius="0">
                                     <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                 </Border>
                             </ControlTemplate>
@@ -301,7 +278,7 @@
                                 <Border Background="{TemplateBinding Background}" 
                                         BorderBrush="{TemplateBinding BorderBrush}" 
                                         BorderThickness="{TemplateBinding BorderThickness}"
-                                        CornerRadius="2"
+                                        CornerRadius="{DynamicResource GlobalCornerRadius}"
                                         SnapsToDevicePixels="True">
                                     <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" 
                                                       VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
@@ -450,7 +427,8 @@
                         <Setter.Value>
                             <ControlTemplate TargetType="TabItem">
                                 <Border x:Name="Border" Background="{TemplateBinding Background}" 
-                                        BorderThickness="0" Padding="{TemplateBinding Padding}">
+                                        BorderThickness="0" Padding="{TemplateBinding Padding}"
+                                        CornerRadius="{DynamicResource GlobalCornerRadius}">
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Text="{TemplateBinding Header}" 
                                                    Foreground="{TemplateBinding Foreground}"

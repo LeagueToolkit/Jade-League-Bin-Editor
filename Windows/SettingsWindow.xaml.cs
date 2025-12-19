@@ -13,6 +13,35 @@ public partial class SettingsWindow : Window
 {
     private readonly string _hashFolderPath;
     
+    private void SaveGeneralPreference(string key, string value)
+    {
+        try
+        {
+            string prefsFile = GetPreferencesFilePath();
+            var lines = File.Exists(prefsFile) ? File.ReadAllLines(prefsFile).ToList() : new List<string>();
+            
+            bool found = false;
+            for (int i = 0; i < lines.Count; i++)
+            {
+                if (lines[i].StartsWith(key + "="))
+                {
+                    lines[i] = $"{key}={value}";
+                    found = true;
+                    break;
+                }
+            }
+            
+            if (!found) lines.Add($"{key}={value}");
+            
+            File.WriteAllLines(prefsFile, lines);
+            Logger.Info($"Saved preference: {key}={value}");
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"Failed to save preference: {key}", ex);
+        }
+    }
+    
     public SettingsWindow()
     {
         InitializeComponent();
@@ -65,7 +94,7 @@ public partial class SettingsWindow : Window
         var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         var jadeDir = Path.Combine(appDataPath, "RitoShark", "Jade");
         Directory.CreateDirectory(jadeDir);
-        return Path.Combine(jadeDir, "settings.txt");
+        return Path.Combine(jadeDir, "preferences.txt");
     }
     
     private void LoadAutoClearPreference()
@@ -116,16 +145,7 @@ public partial class SettingsWindow : Window
     
     private void SaveAutoClearPreference(bool enabled)
     {
-        try
-        {
-            var prefsFile = GetPreferencesFilePath();
-            File.WriteAllText(prefsFile, $"AutoClearTemp={enabled}");
-            Logger.Info($"Saved auto-clear preference: {enabled}");
-        }
-        catch (Exception ex)
-        {
-            Logger.Error("Failed to save auto-clear preference", ex);
-        }
+        SaveGeneralPreference("AutoClearTemp", enabled.ToString());
     }
     
     private void UpdateHashStatus()
@@ -391,34 +411,7 @@ public partial class SettingsWindow : Window
     
     private void SaveAutoDownloadPreference(bool enabled)
     {
-        try
-        {
-            var prefsFile = GetPreferencesFilePath();
-            var lines = new System.Collections.Generic.List<string>();
-            
-            // Read existing preferences
-            if (File.Exists(prefsFile))
-            {
-                var existingLines = File.ReadAllLines(prefsFile);
-                foreach (var line in existingLines)
-                {
-                    if (!line.StartsWith("AutoDownloadHashes="))
-                    {
-                        lines.Add(line);
-                    }
-                }
-            }
-            
-            // Add the new preference
-            lines.Add($"AutoDownloadHashes={enabled}");
-            
-            File.WriteAllLines(prefsFile, lines);
-            Logger.Info($"Saved auto-download preference: {enabled}");
-        }
-        catch (Exception ex)
-        {
-            Logger.Error("Failed to save auto-download preference", ex);
-        }
+        SaveGeneralPreference("AutoDownloadHashes", enabled.ToString());
     }
     
     private void OnToggleAutoDownload(object sender, RoutedEventArgs e)
@@ -494,34 +487,7 @@ public partial class SettingsWindow : Window
     
     private void SavePreloadHashPreference(bool enabled)
     {
-        try
-        {
-            var prefsFile = GetPreferencesFilePath();
-            var lines = new System.Collections.Generic.List<string>();
-            
-            // Read existing preferences
-            if (File.Exists(prefsFile))
-            {
-                var existingLines = File.ReadAllLines(prefsFile);
-                foreach (var line in existingLines)
-                {
-                    if (!line.StartsWith("PreloadHashes="))
-                    {
-                        lines.Add(line);
-                    }
-                }
-            }
-            
-            // Add the new preference
-            lines.Add($"PreloadHashes={enabled}");
-            
-            File.WriteAllLines(prefsFile, lines);
-            Logger.Info($"Saved preload hash preference: {enabled}");
-        }
-        catch (Exception ex)
-        {
-            Logger.Error("Failed to save preload hash preference", ex);
-        }
+        SaveGeneralPreference("PreloadHashes", enabled.ToString());
     }
     
     private void OnTogglePreloadHash(object sender, RoutedEventArgs e)
@@ -570,7 +536,7 @@ public partial class SettingsWindow : Window
         {
             var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
             var jadeDir = Path.Combine(appDataPath, "RitoShark", "Jade");
-            var prefsFile = Path.Combine(jadeDir, "settings.txt");
+            var prefsFile = Path.Combine(jadeDir, "preferences.txt");
             
             // Check if auto-clear is enabled (default is true)
             bool autoClear = true;
@@ -613,7 +579,7 @@ public partial class SettingsWindow : Window
         {
             var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
             var jadeDir = Path.Combine(appDataPath, "RitoShark", "Jade");
-            var prefsFile = Path.Combine(jadeDir, "settings.txt");
+            var prefsFile = Path.Combine(jadeDir, "preferences.txt");
             
             // Check if auto-download is enabled (default is false)
             bool autoDownload = false;
@@ -685,24 +651,7 @@ public partial class SettingsWindow : Window
     
     private void SaveBinaryFormatPreference(bool enabled)
     {
-        try
-        {
-            var prefsFile = GetPreferencesFilePath();
-            var lines = File.Exists(prefsFile) ? File.ReadAllLines(prefsFile).ToList() : new System.Collections.Generic.List<string>();
-            
-            // Remove existing setting
-            lines.RemoveAll(l => l.StartsWith("UseBinaryHashFormat="));
-            
-            // Add new setting
-            lines.Add($"UseBinaryHashFormat={enabled}");
-            
-            File.WriteAllLines(prefsFile, lines);
-            Logger.Info($"Saved binary format preference: {enabled}");
-        }
-        catch (Exception ex)
-        {
-            Logger.Error("Failed to save binary format preference", ex);
-        }
+        SaveGeneralPreference("UseBinaryHashFormat", enabled.ToString());
     }
     
     private void UpdateBinaryFormatButton(bool enabled)
@@ -792,36 +741,18 @@ public partial class SettingsWindow : Window
         }
     }
 
-    private async void SaveMinimizeToTrayPreference(bool enabled)
+    private void SaveMinimizeToTrayPreference(bool enabled)
     {
-        try
-        {
-            string prefsFile = GetPreferencesFilePath();
-            var lines = File.Exists(prefsFile) ? (await File.ReadAllLinesAsync(prefsFile)).ToList() : new List<string>();
-            
-            bool found = false;
-            for (int i = 0; i < lines.Count; i++)
-            {
-                if (lines[i].StartsWith("MinimizeToTray="))
-                {
-                    lines[i] = "MinimizeToTray=" + (enabled ? "True" : "False");
-                    found = true;
-                }
-            }
-            
-            if (!found) lines.Add("MinimizeToTray=" + (enabled ? "True" : "False"));
-            
-            await File.WriteAllLinesAsync(prefsFile, lines);
-        }
-        catch { }
+        SaveGeneralPreference("MinimizeToTray", enabled.ToString());
     }
 
-    public async void OnToggleMinimizeToTray(object sender, RoutedEventArgs e)
+    public void OnToggleMinimizeToTray(object sender, RoutedEventArgs e)
     {
-        bool current = await LoadMinimizeToTrayPreference();
-        bool newVal = !current;
-        SaveMinimizeToTrayPreference(newVal);
-        UpdateMinimizeToTrayButton(newVal);
+        bool enabled = MinimizeToTrayToggleButton.Content?.ToString()?.Contains("Enabled") == true;
+        bool newEnabled = !enabled;
+        
+        UpdateMinimizeToTrayButton(newEnabled);
+        SaveMinimizeToTrayPreference(newEnabled);
     }
 
     private async Task<bool> LoadRunAtStartupPreference()
@@ -860,22 +791,7 @@ public partial class SettingsWindow : Window
     {
         try
         {
-            string prefsFile = GetPreferencesFilePath();
-            var lines = File.Exists(prefsFile) ? (await File.ReadAllLinesAsync(prefsFile)).ToList() : new List<string>();
-            
-            bool found = false;
-            for (int i = 0; i < lines.Count; i++)
-            {
-                if (lines[i].StartsWith("RunAtStartup="))
-                {
-                    lines[i] = "RunAtStartup=" + (enabled ? "True" : "False");
-                    found = true;
-                }
-            }
-            
-            if (!found) lines.Add("RunAtStartup=" + (enabled ? "True" : "False"));
-            
-            await File.WriteAllLinesAsync(prefsFile, lines);
+            SaveGeneralPreference("RunAtStartup", enabled.ToString());
             
             // Apply to Windows Registry
             UpdateWindowsStartupRegistry(enabled);
@@ -1176,6 +1092,18 @@ public partial class SettingsWindow : Window
                 bgColor = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(22, 12, 42));
                 titleBarBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(28, 18, 52));
                 textColor = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(185, 170, 215));
+            }
+            else if (theme == "OrangeBurnout")
+            {
+                bgColor = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(35, 15, 5));
+                titleBarBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(50, 25, 10));
+                textColor = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(255, 228, 209));
+            }
+            else if (theme == "PurpleGrief")
+            {
+                bgColor = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(25, 15, 30));
+                titleBarBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(35, 25, 40));
+                textColor = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(220, 200, 230));
             }
             else // Default
             {

@@ -403,6 +403,18 @@ public partial class IconPanelDialog : Window
             titleBarBg = new SolidColorBrush(Color.FromRgb(32, 20, 58));
             textColor = new SolidColorBrush(Color.FromRgb(185, 170, 215));
         }
+        else if (theme == "OrangeBurnout")
+        {
+            bgColor = new SolidColorBrush(Color.FromRgb(35, 15, 5));
+            titleBarBg = new SolidColorBrush(Color.FromRgb(50, 25, 10));
+            textColor = new SolidColorBrush(Color.FromRgb(255, 228, 209));
+        }
+        else if (theme == "PurpleGrief")
+        {
+            bgColor = new SolidColorBrush(Color.FromRgb(25, 15, 30));
+            titleBarBg = new SolidColorBrush(Color.FromRgb(35, 25, 40));
+            textColor = new SolidColorBrush(Color.FromRgb(220, 200, 230));
+        }
         else // Default
         {
             bgColor = new SolidColorBrush(Color.FromRgb(30, 30, 30));

@@ -129,6 +129,20 @@ public partial class ThemesWindow : Window
             Foreground = GetBrush(185, 170, 215), TabBackground = GetBrush(32, 20, 58),
             SelectedTabBackground = GetBrush(75, 50, 115)
         });
+        Themes.Add(new ThemeItem { 
+            Id = "OrangeBurnout", DisplayName = "Orange Burnout", 
+            Background = GetBrush(35, 15, 5), EditorBackground = GetBrush(42, 20, 8), 
+            TitleBarBackground = GetBrush(50, 25, 10), StatusBarBackground = GetBrush(204, 85, 0),
+            Foreground = GetBrush(255, 228, 209), TabBackground = GetBrush(50, 25, 10),
+            SelectedTabBackground = GetBrush(110, 45, 15)
+        });
+        Themes.Add(new ThemeItem { 
+            Id = "PurpleGrief", DisplayName = "Purple Grief", 
+            Background = GetBrush(25, 15, 30), EditorBackground = GetBrush(30, 20, 35), 
+            TitleBarBackground = GetBrush(35, 25, 40), StatusBarBackground = GetBrush(70, 40, 80),
+            Foreground = GetBrush(220, 200, 230), TabBackground = GetBrush(35, 25, 40),
+            SelectedTabBackground = GetBrush(80, 50, 90)
+        });
     }
 
     private void InitializeBracketThemes()
@@ -190,6 +204,8 @@ public partial class ThemesWindow : Window
             "VioletSorrow" => ("#9B7EDE", "#7EC8A3", "#E8A87C", "#C8A2E0", "#9B7EDE"),
             "HighContrast" => ("#FFFF00", "#00FF00", "#FF00FF", "#00FFFF", "#FFFF00"),
             "VSCode" => ("#569CD6", "#6A9955", "#CE9178", "#B5CEA8", "#9CDCFE"),
+            "OrangeBurnout" => ("#FF8C00", "#8B4513", "#FFD700", "#F4A460", "#FFA07A"),
+            "PurpleGrief" => ("#BE9FE1", "#6F4E7C", "#E1BEE7", "#9575CD", "#B39DDB"),
             _ => ("#569CD6", "#6A9955", "#CE9178", "#B5CEA8", "#569CD6")
         };
     }
@@ -216,6 +232,8 @@ public partial class ThemesWindow : Window
             "AMOLED" => index == 0 ? GetBrush(255, 215, 0) : index == 1 ? GetBrush(0, 255, 255) : GetBrush(255, 0, 255),
             "Void" => index == 0 ? GetBrush(255, 215, 0) : index == 1 ? GetBrush(186, 85, 211) : GetBrush(138, 43, 226),
             "VioletSorrow" => index == 0 ? GetBrush(147, 112, 219) : index == 1 ? GetBrush(138, 43, 226) : GetBrush(186, 85, 211),
+            "OrangeBurnout" => index == 0 ? GetBrush(255, 140, 0) : index == 1 ? GetBrush(218, 165, 32) : GetBrush(255, 69, 0),
+            "PurpleGrief" => index == 0 ? GetBrush(190, 159, 225) : index == 1 ? GetBrush(225, 190, 231) : GetBrush(149, 117, 205),
             _ => index == 0 ? GetBrush(255, 215, 0) : index == 1 ? GetBrush(218, 112, 214) : GetBrush(135, 206, 250) // Default/Classic
         };
     }
@@ -303,6 +321,18 @@ public partial class ThemesWindow : Window
                 overrideBrackets = content.Contains("OverrideBracketTheme=True");
             }
             OverrideBracketsCheckBox.IsChecked = overrideBrackets;
+
+            // Rounded Corners
+            bool roundedEdges = false;
+            if (File.Exists(prefsFile))
+            {
+                var content = File.ReadAllText(prefsFile);
+                roundedEdges = content.Contains("RoundedEdges=True");
+            }
+            if (this.FindName("RoundedCornersCheckBox") is CheckBox roundedCb)
+            {
+                roundedCb.IsChecked = roundedEdges;
+            }
             
             UpdateCurrentThemeText();
         }
@@ -388,6 +418,7 @@ public partial class ThemesWindow : Window
             "AMOLED" => "AMOLED",
             "Void" => "Purple Void",
             "VioletSorrow" => "Violet Sorrow",
+            "OrangeBurnout" => "Orange Burnout",
             _ => "Unknown"
         };
         
@@ -497,6 +528,51 @@ public partial class ThemesWindow : Window
         }
     }
     
+    private void OnRoundedCornersToggle(object sender, RoutedEventArgs e)
+    {
+        bool isRounded = RoundedCornersCheckBox.IsChecked == true;
+        Application.Current.Resources["GlobalCornerRadius"] = new CornerRadius(isRounded ? 3 : 0);
+        
+        // Save to preferences
+        SaveGeneralPreference("RoundedEdges", isRounded.ToString());
+    }
+
+    private void SaveGeneralPreference(string key, string value)
+    {
+        try
+        {
+            var prefsFile = GetPreferencesFilePath();
+            var lines = new System.Collections.Generic.List<string>();
+            
+            if (File.Exists(prefsFile))
+            {
+                lines.AddRange(File.ReadAllLines(prefsFile));
+            }
+            
+            bool found = false;
+            for (int i = 0; i < lines.Count; i++)
+            {
+                if (lines[i].StartsWith($"{key}="))
+                {
+                    lines[i] = $"{key}={value}";
+                    found = true;
+                    break;
+                }
+            }
+            
+            if (!found)
+            {
+                lines.Add($"{key}={value}");
+            }
+            
+            File.WriteAllLines(prefsFile, lines);
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"Failed to save {key} preference", ex);
+        }
+    }
+
     private void OnClose(object sender, RoutedEventArgs e)
     {
         Close();
@@ -522,27 +598,22 @@ public partial class ThemesWindow : Window
                 titleBar.Background = titleBarBg;
             }
 
-            // Update ListBox and Preview Panel backgrounds to follow theme
-            var listBox = this.FindName("ThemesListBox") as System.Windows.Controls.ListBox;
-            if (listBox != null)
+            // Update boxes to follow theme with boxed aesthetic (consistent with SettingsWindow)
+            var boxes = new[] { "UIThemeBox", "BracketThemeBox", "PreviewPanelBorder" };
+            var subtleBorder = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromArgb(40, 255, 255, 255));
+            
+            foreach (var boxName in boxes)
             {
-                listBox.Background = bgColor;
-                listBox.BorderBrush = titleBarBg;
+                if (this.FindName(boxName) is System.Windows.Controls.Border box)
+                {
+                    box.Background = titleBarBg;
+                    box.BorderBrush = subtleBorder;
+                }
             }
 
-            var syntaxListBox = this.FindName("BracketThemesListBox") as System.Windows.Controls.ListBox;
-            if (syntaxListBox != null)
-            {
-                syntaxListBox.Background = bgColor;
-                syntaxListBox.BorderBrush = titleBarBg;
-            }
-
-            var previewPanelBorder = this.FindName("PreviewPanelBorder") as System.Windows.Controls.Border;
-            if (previewPanelBorder != null)
-            {
-                previewPanelBorder.Background = bgColor;
-                previewPanelBorder.BorderBrush = titleBarBg;
-            }
+            // Ensure ListBoxes remain transparent
+            if (this.FindName("ThemesListBox") is System.Windows.Controls.ListBox tlb) tlb.Background = System.Windows.Media.Brushes.Transparent;
+            if (this.FindName("BracketThemesListBox") is System.Windows.Controls.ListBox blb) blb.Background = System.Windows.Media.Brushes.Transparent;
             
             // Update all TextBlocks
             UpdateTextBlockColors(this, textColor);

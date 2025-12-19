@@ -9,7 +9,7 @@
         ResizeMode="NoResize"
         ShowInTaskbar="False">
     
-    <Border BorderThickness="1" BorderBrush="#3E3E42">
+    <Border BorderThickness="1" BorderBrush="#3E3E42" CornerRadius="{DynamicResource GlobalCornerRadius}">
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
@@ -17,7 +17,7 @@
             </Grid.RowDefinitions>
             
             <!-- Custom Title Bar -->
-            <Border x:Name="TitleBar" Grid.Row="0" Background="#252526" Height="30" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+            <Border x:Name="TitleBar" Grid.Row="0" Background="#252526" Height="30" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown" CornerRadius="{DynamicResource GlobalCornerRadius}">
                 <TextBlock Text="Particle Editing" Foreground="#CCCCCC" FontSize="12" VerticalAlignment="Center" Margin="10,0"/>
             </Border>
             

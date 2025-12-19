@@ -10,28 +10,9 @@
         ShowInTaskbar="False">
     
     <Window.Resources>
-        <Style TargetType="Button">
-            <Setter Property="Background" Value="#007ACC"/>
-            <Setter Property="Foreground" Value="White"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Padding" Value="15,8"/>
-            <Setter Property="FontSize" Value="14"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="#1C97EA"/>
-                </Trigger>
-            </Style.Triggers>
-        </Style>
+        <!-- Button Style Removed (Using Global) -->
         
-        <Style TargetType="TextBox">
-            <Setter Property="Background" Value="#2D2D30"/>
-            <Setter Property="Foreground" Value="#CCCCCC"/>
-            <Setter Property="BorderBrush" Value="#3E3E42"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="Padding" Value="8,6"/>
-            <Setter Property="FontSize" Value="14"/>
-        </Style>
+        <!-- TextBox Style Removed (Using Global) -->
         
         <Style TargetType="CheckBox">
             <Setter Property="Foreground" Value="#CCCCCC"/>
@@ -39,7 +20,7 @@
         </Style>
     </Window.Resources>
     
-    <Border BorderThickness="1" BorderBrush="#3E3E42">
+    <Border BorderThickness="1" BorderBrush="#3E3E42" CornerRadius="{DynamicResource GlobalCornerRadius}">
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
@@ -47,7 +28,7 @@
             </Grid.RowDefinitions>
             
             <!-- Custom Title Bar -->
-            <Border x:Name="TitleBar" Grid.Row="0" Background="#252526" Height="30" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+            <Border x:Name="TitleBar" Grid.Row="0" Background="#252526" Height="30" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown" CornerRadius="{DynamicResource GlobalCornerRadius}">
                 <TextBlock Text="Find" Foreground="#CCCCCC" FontSize="12" VerticalAlignment="Center" Margin="10,0"/>
             </Border>
             
@@ -72,9 +53,9 @@
                 
                 <!-- Buttons -->
                 <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,15,0,0">
-                    <Button x:Name="FindPreviousButton" Content="Find Previous" Click="OnFindPrevious" Margin="0,0,10,0" Width="120" Padding="12,8"/>
-                    <Button x:Name="FindNextButton" Content="Find Next" Click="OnFindNext" Margin="0,0,10,0" Width="110" Padding="12,8"/>
-                    <Button x:Name="CloseButton" Content="Close" Click="OnClose" Width="90" Padding="12,8"/>
+                    <Button x:Name="FindPreviousButton" Style="{StaticResource ModernButtonStyle}" Content="Find Previous" Click="OnFindPrevious" Margin="0,0,10,0" Width="120" Height="38" Padding="12,0"/>
+                    <Button x:Name="FindNextButton" Style="{StaticResource ModernButtonStyle}" Content="Find Next" Click="OnFindNext" Margin="0,0,10,0" Width="110" Height="38" Padding="12,0"/>
+                    <Button x:Name="CloseButton" Style="{StaticResource ModernButtonStyle}" Content="Close" Click="OnClose" Width="90" Height="38" Padding="12,0"/>
                 </StackPanel>
             </Grid>
         </Grid>

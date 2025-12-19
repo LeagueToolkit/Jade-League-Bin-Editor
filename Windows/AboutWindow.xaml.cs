@@ -129,6 +129,22 @@ public partial class AboutWindow : Window
                 cardBg = new SolidColorBrush(Color.FromRgb(35, 25, 60));
                 accentColor = new SolidColorBrush(Color.FromRgb(180, 120, 220));
                 break;
+            case "OrangeBurnout":
+                bgColor = new SolidColorBrush(Color.FromRgb(35, 15, 5));
+                titleBarBg = new SolidColorBrush(Color.FromRgb(50, 25, 10));
+                textColor = new SolidColorBrush(Color.FromRgb(255, 228, 209));
+                mutedText = new SolidColorBrush(Color.FromRgb(180, 130, 100));
+                cardBg = new SolidColorBrush(Color.FromRgb(50, 25, 10));
+                accentColor = new SolidColorBrush(Color.FromRgb(204, 85, 0));
+                break;
+            case "PurpleGrief":
+                bgColor = new SolidColorBrush(Color.FromRgb(25, 15, 30));
+                titleBarBg = new SolidColorBrush(Color.FromRgb(35, 25, 40));
+                textColor = new SolidColorBrush(Color.FromRgb(220, 200, 230));
+                mutedText = new SolidColorBrush(Color.FromRgb(160, 140, 170));
+                cardBg = new SolidColorBrush(Color.FromRgb(35, 25, 45));
+                accentColor = new SolidColorBrush(Color.FromRgb(120, 80, 150));
+                break;
             default: // Default dark theme
                 bgColor = new SolidColorBrush(Color.FromRgb(30, 30, 30));
                 titleBarBg = new SolidColorBrush(Color.FromRgb(37, 37, 38));

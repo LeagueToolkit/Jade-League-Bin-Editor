@@ -88,6 +88,8 @@ public static class ThemeSyntaxHighlighting
             "VioletSorrow" => ("#9B7EDE", "#7EC8A3", "#E8A87C", "#C8A2E0", "#9B7EDE"),
             "HighContrast" => ("#FFFF00", "#00FF00", "#FF00FF", "#00FFFF", "#FFFF00"),
             "VSCode" => ("#569CD6", "#6A9955", "#CE9178", "#B5CEA8", "#9CDCFE"),
+            "OrangeBurnout" => ("#FF8C00", "#8B4513", "#FFD700", "#F4A460", "#FFA07A"),
+            "PurpleGrief" => ("#BE9FE1", "#6F4E7C", "#E1BEE7", "#9575CD", "#B39DDB"),
             _ => ("#569CD6", "#6A9955", "#CE9178", "#B5CEA8", "#569CD6") // Default VS Code colors
         };
     }

@@ -182,6 +182,26 @@ public partial class ReplaceDialog : Window
             buttonBg = new SolidColorBrush(Color.FromRgb(65, 30, 120));
             buttonHoverBg = new SolidColorBrush(Color.FromRgb(95, 55, 150));
         }
+        else if (theme == "OrangeBurnout")
+        {
+            bgColor = new SolidColorBrush(Color.FromRgb(35, 15, 5));
+            titleBarBg = new SolidColorBrush(Color.FromRgb(50, 25, 10));
+            textColor = new SolidColorBrush(Color.FromRgb(255, 228, 209));
+            inputBg = new SolidColorBrush(Color.FromRgb(42, 20, 8));
+            inputBorder = new SolidColorBrush(Color.FromRgb(85, 35, 10));
+            buttonBg = new SolidColorBrush(Color.FromRgb(150, 65, 0));
+            buttonHoverBg = new SolidColorBrush(Color.FromRgb(190, 85, 0));
+        }
+        else if (theme == "PurpleGrief")
+        {
+            bgColor = new SolidColorBrush(Color.FromRgb(25, 15, 30));
+            titleBarBg = new SolidColorBrush(Color.FromRgb(35, 25, 40));
+            textColor = new SolidColorBrush(Color.FromRgb(220, 200, 230));
+            inputBg = new SolidColorBrush(Color.FromRgb(35, 25, 45));
+            inputBorder = new SolidColorBrush(Color.FromRgb(80, 50, 100));
+            buttonBg = new SolidColorBrush(Color.FromRgb(70, 40, 80));
+            buttonHoverBg = new SolidColorBrush(Color.FromRgb(95, 65, 120));
+        }
         else // Default
         {
             bgColor = new SolidColorBrush(Color.FromRgb(30, 30, 30));
@@ -230,20 +250,38 @@ public partial class ReplaceDialog : Window
             WholeWordCheckBox.Foreground = textColor;
         }
         
-        // Update button style for hover effects
-        var buttonStyle = new Style(typeof(Button));
-        buttonStyle.Setters.Add(new Setter(Button.BackgroundProperty, buttonBg));
-        buttonStyle.Setters.Add(new Setter(Button.ForegroundProperty, buttonFg));
-        buttonStyle.Setters.Add(new Setter(Button.BorderThicknessProperty, new Thickness(0)));
-        buttonStyle.Setters.Add(new Setter(Button.PaddingProperty, new Thickness(12, 8, 12, 8)));
-        buttonStyle.Setters.Add(new Setter(Button.FontSizeProperty, 14.0));
-        buttonStyle.Setters.Add(new Setter(Button.CursorProperty, Cursors.Hand));
-        
-        var trigger = new Trigger { Property = Button.IsMouseOverProperty, Value = true };
-        trigger.Setters.Add(new Setter(Button.BackgroundProperty, buttonHoverBg));
-        buttonStyle.Triggers.Add(trigger);
-        
-        this.Resources[typeof(Button)] = buttonStyle;
+        if (FindNextButton != null)
+        {
+            FindNextButton.Background = buttonBg;
+            FindNextButton.Foreground = buttonFg;
+            FindNextButton.BorderThickness = new Thickness(0);
+            FindNextButton.Height = 38;
+            FindNextButton.Padding = new Thickness(12, 0, 12, 0);
+        }
+        if (ReplaceButton != null)
+        {
+            ReplaceButton.Background = buttonBg;
+            ReplaceButton.Foreground = buttonFg;
+            ReplaceButton.BorderThickness = new Thickness(0);
+            ReplaceButton.Height = 38;
+            ReplaceButton.Padding = new Thickness(12, 0, 12, 0);
+        }
+        if (ReplaceAllButton != null)
+        {
+            ReplaceAllButton.Background = buttonBg;
+            ReplaceAllButton.Foreground = buttonFg;
+            ReplaceAllButton.BorderThickness = new Thickness(0);
+            ReplaceAllButton.Height = 38;
+            ReplaceAllButton.Padding = new Thickness(12, 0, 12, 0);
+        }
+        if (CloseButton != null)
+        {
+            CloseButton.Background = buttonBg;
+            CloseButton.Foreground = buttonFg;
+            CloseButton.BorderThickness = new Thickness(0);
+            CloseButton.Height = 38;
+            CloseButton.Padding = new Thickness(12, 0, 12, 0);
+        }
     }
     
     private void UpdateTextBlockColors(DependencyObject parent, SolidColorBrush color)

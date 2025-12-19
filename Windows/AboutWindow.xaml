@@ -8,7 +8,7 @@
         AllowsTransparency="True"
         ResizeMode="NoResize">
     
-    <Border x:Name="MainBorder" BorderThickness="1" BorderBrush="#3E3E42">
+    <Border x:Name="MainBorder" BorderThickness="1" BorderBrush="#3E3E42" CornerRadius="{DynamicResource GlobalCornerRadius}">
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
@@ -16,13 +16,13 @@
             </Grid.RowDefinitions>
             
             <!-- Custom Title Bar -->
-            <Border x:Name="TitleBar" Grid.Row="0" Background="#252526" Height="30" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+            <Border x:Name="TitleBar" Grid.Row="0" Background="#252526" Height="30" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown" CornerRadius="{DynamicResource GlobalCornerRadius}">
                 <Grid>
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0">
                         <Image Source="/jade.ico" Width="16" Height="16" Margin="0,0,8,0"/>
                         <TextBlock x:Name="TitleText" Text="About Jade" Foreground="#CCCCCC" FontSize="12" VerticalAlignment="Center"/>
                     </StackPanel>
-                    <Button Content="✕" Width="30" Height="30" Click="OnClose" 
+                    <Button Style="{StaticResource WindowControlButtonStyle}" Content="✕" Width="30" Height="30" Click="OnClose" 
                             Background="Transparent" Foreground="#CCCCCC" BorderThickness="0"
                             FontSize="14" HorizontalAlignment="Right" VerticalContentAlignment="Center"/>
                 </Grid>
@@ -49,7 +49,7 @@
                     </StackPanel>
                     
                     <!-- Version -->
-                    <Border x:Name="VersionBorder" Background="#2D2D30" CornerRadius="4" Padding="10" Margin="0,0,0,10">
+                    <Border x:Name="VersionBorder" Background="#2D2D30" CornerRadius="{DynamicResource GlobalCornerRadius}" Padding="10" Margin="0,0,0,10">
                         <StackPanel>
                             <TextBlock x:Name="VersionLabel" Text="Version" FontSize="11" Foreground="#808080"/>
                             <TextBlock x:Name="VersionText" Text="1.0.0" FontSize="15" Foreground="White" Margin="0,2,0,0"/>
@@ -57,7 +57,7 @@
                     </Border>
                     
                     <!-- Creator -->
-                    <Border x:Name="CreatorBorder" Background="#2D2D30" CornerRadius="4" Padding="10">
+                    <Border x:Name="CreatorBorder" Background="#2D2D30" CornerRadius="{DynamicResource GlobalCornerRadius}" Padding="10">
                         <StackPanel>
                             <TextBlock x:Name="CreatorLabel" Text="Created by" FontSize="11" Foreground="#808080"/>
                             <TextBlock x:Name="CreatorText" Text="budlibu500" FontSize="15" Foreground="White" Margin="0,2,0,0"/>
@@ -67,7 +67,7 @@
                 </StackPanel>
                 
                 <!-- Right Column: Support Section -->
-                <Border x:Name="SupportBorder" Grid.Column="2" Background="#252526" CornerRadius="4" Padding="12">
+                <Border x:Name="SupportBorder" Grid.Column="2" Background="#252526" CornerRadius="{DynamicResource GlobalCornerRadius}" Padding="12">
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>

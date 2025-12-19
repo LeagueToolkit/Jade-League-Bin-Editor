@@ -33,11 +33,15 @@ public class DiffHighlighter : DocumentColorizingTransformer
 {
     private readonly List<DiffLine> _diffs;
     private readonly bool _isLeft;
+    private readonly Color _addedColor;
+    private readonly Color _deletedColor;
     
-    public DiffHighlighter(List<DiffLine> diffs, bool isLeft)
+    public DiffHighlighter(List<DiffLine> diffs, bool isLeft, Color addedColor, Color deletedColor)
     {
         _diffs = diffs;
         _isLeft = isLeft;
+        _addedColor = addedColor;
+        _deletedColor = deletedColor;
     }
     
     protected override void ColorizeLine(DocumentLine line)
@@ -50,14 +54,13 @@ public class DiffHighlighter : DocumentColorizingTransformer
         {
             Color bgColor = Colors.Transparent;
             
-            // VS Code style: Red for deletions/changes, Green for additions
             if (_isLeft)
             {
                 // Left side: show deletions and modifications in red
                 bgColor = diff.Type switch
                 {
-                    DiffType.Deleted => Color.FromArgb(80, 255, 0, 0),   // Red for deleted
-                    DiffType.Modified => Color.FromArgb(80, 255, 0, 0),  // Red for modified
+                    DiffType.Deleted => _deletedColor,
+                    DiffType.Modified => _deletedColor,
                     _ => Colors.Transparent
                 };
             }
@@ -66,8 +69,8 @@ public class DiffHighlighter : DocumentColorizingTransformer
                 // Right side: show additions and modifications in green
                 bgColor = diff.Type switch
                 {
-                    DiffType.Added => Color.FromArgb(80, 0, 255, 0),     // Green for added
-                    DiffType.Modified => Color.FromArgb(80, 0, 255, 0),  // Green for modified
+                    DiffType.Added => _addedColor,
+                    DiffType.Modified => _addedColor,
                     _ => Colors.Transparent
                 };
             }
@@ -88,6 +91,8 @@ public partial class CompareDialog : Window
     private readonly List<EditorTab> _tabs;
     private List<DiffLine> _differences = new();
     private int _currentDiffIndex = -1;
+    private Color _addedColor = Color.FromArgb(80, 0, 255, 0);
+    private Color _deletedColor = Color.FromArgb(80, 255, 0, 0);
     
     public CompareDialog(List<EditorTab> tabs)
     {
@@ -245,8 +250,8 @@ public partial class CompareDialog : Window
             LeftEditor.TextArea.TextView.LineTransformers.Clear();
             RightEditor.TextArea.TextView.LineTransformers.Clear();
             
-            LeftEditor.TextArea.TextView.LineTransformers.Add(new DiffHighlighter(_differences, true));
-            RightEditor.TextArea.TextView.LineTransformers.Add(new DiffHighlighter(_differences, false));
+            LeftEditor.TextArea.TextView.LineTransformers.Add(new DiffHighlighter(_differences, true, _addedColor, _deletedColor));
+            RightEditor.TextArea.TextView.LineTransformers.Add(new DiffHighlighter(_differences, false, _addedColor, _deletedColor));
             
             // Update status
             var addedCount = _differences.Count(d => d.Type == DiffType.Added);
@@ -731,8 +736,8 @@ public partial class CompareDialog : Window
             LeftEditor.TextArea.TextView.LineTransformers.Clear();
             RightEditor.TextArea.TextView.LineTransformers.Clear();
             
-            LeftEditor.TextArea.TextView.LineTransformers.Add(new DiffHighlighter(_differences, true));
-            RightEditor.TextArea.TextView.LineTransformers.Add(new DiffHighlighter(_differences, false));
+            LeftEditor.TextArea.TextView.LineTransformers.Add(new DiffHighlighter(_differences, true, _addedColor, _deletedColor));
+            RightEditor.TextArea.TextView.LineTransformers.Add(new DiffHighlighter(_differences, false, _addedColor, _deletedColor));
             
             // Update status
             var addedCount = _differences.Count(d => d.Type == DiffType.Added);
@@ -809,6 +814,8 @@ public partial class CompareDialog : Window
                 comboBg = new SolidColorBrush(Color.FromRgb(15, 25, 40));
                 comboBorder = new SolidColorBrush(Color.FromRgb(30, 45, 65));
                 statusBarBg = new SolidColorBrush(Color.FromRgb(0, 90, 158));
+                _addedColor = Color.FromArgb(80, 0, 180, 0);
+                _deletedColor = Color.FromArgb(80, 180, 0, 0);
                 break;
             case "DarkRed":
                 bgColor = new SolidColorBrush(Color.FromRgb(40, 15, 20));
@@ -820,6 +827,8 @@ public partial class CompareDialog : Window
                 comboBg = new SolidColorBrush(Color.FromRgb(40, 15, 20));
                 comboBorder = new SolidColorBrush(Color.FromRgb(65, 30, 40));
                 statusBarBg = new SolidColorBrush(Color.FromRgb(158, 0, 40));
+                _addedColor = Color.FromArgb(80, 0, 255, 0);
+                _deletedColor = Color.FromArgb(80, 255, 0, 0);
                 break;
             case "LightPink":
                 bgColor = new SolidColorBrush(Color.FromRgb(210, 165, 190)); // Match ThemesWindow bgColor
@@ -831,6 +840,8 @@ public partial class CompareDialog : Window
                 comboBg = new SolidColorBrush(Color.FromRgb(200, 155, 180));
                 comboBorder = new SolidColorBrush(Color.FromRgb(170, 120, 150));
                 statusBarBg = new SolidColorBrush(Color.FromRgb(199, 21, 133)); // Match titleBarBg
+                _addedColor = Color.FromArgb(80, 0, 150, 0);
+                _deletedColor = Color.FromArgb(80, 200, 0, 0);
                 break;
             case "PastelBlue":
                 bgColor = new SolidColorBrush(Color.FromRgb(210, 240, 255)); // Match ThemesWindow bgColor
@@ -842,6 +853,8 @@ public partial class CompareDialog : Window
                 comboBg = new SolidColorBrush(Color.FromRgb(230, 245, 255));
                 comboBorder = new SolidColorBrush(Color.FromRgb(180, 220, 245));
                 statusBarBg = new SolidColorBrush(Color.FromRgb(80, 200, 255)); // Match titleBarBg
+                _addedColor = Color.FromArgb(80, 0, 120, 0);
+                _deletedColor = Color.FromArgb(80, 180, 0, 0);
                 break;
             case "VioletSorrow":
                 bgColor = new SolidColorBrush(Color.FromRgb(18, 10, 35));
@@ -853,6 +866,8 @@ public partial class CompareDialog : Window
                 comboBg = new SolidColorBrush(Color.FromRgb(18, 10, 35));
                 comboBorder = new SolidColorBrush(Color.FromRgb(70, 45, 110));
                 statusBarBg = new SolidColorBrush(Color.FromRgb(65, 30, 120));
+                _addedColor = Color.FromArgb(80, 100, 200, 100);
+                _deletedColor = Color.FromArgb(80, 200, 100, 100);
                 break;
             case "ForestGreen":
                 bgColor = new SolidColorBrush(Color.FromRgb(20, 35, 25));
@@ -864,6 +879,8 @@ public partial class CompareDialog : Window
                 comboBg = new SolidColorBrush(Color.FromRgb(20, 35, 25));
                 comboBorder = new SolidColorBrush(Color.FromRgb(40, 70, 50));
                 statusBarBg = new SolidColorBrush(Color.FromRgb(34, 139, 34));
+                _addedColor = Color.FromArgb(80, 0, 150, 0);
+                _deletedColor = Color.FromArgb(80, 150, 0, 0);
                 break;
             case "AMOLED":
                 bgColor = new SolidColorBrush(Color.FromRgb(0, 0, 0));
@@ -875,6 +892,8 @@ public partial class CompareDialog : Window
                 comboBg = new SolidColorBrush(Color.FromRgb(5, 5, 5));
                 comboBorder = new SolidColorBrush(Color.FromRgb(25, 25, 25));
                 statusBarBg = new SolidColorBrush(Color.FromRgb(20, 20, 20));
+                _addedColor = Color.FromArgb(80, 0, 100, 0);
+                _deletedColor = Color.FromArgb(80, 100, 0, 0);
                 break;
             case "Void":
                 bgColor = new SolidColorBrush(Color.FromRgb(10, 5, 20));
@@ -886,6 +905,34 @@ public partial class CompareDialog : Window
                 comboBg = new SolidColorBrush(Color.FromRgb(10, 5, 20));
                 comboBorder = new SolidColorBrush(Color.FromRgb(35, 25, 60));
                 statusBarBg = new SolidColorBrush(Color.FromRgb(25, 15, 80));
+                _addedColor = Color.FromArgb(80, 0, 80, 0);
+                _deletedColor = Color.FromArgb(80, 80, 0, 0);
+                break;
+            case "OrangeBurnout":
+                bgColor = new SolidColorBrush(Color.FromRgb(35, 15, 5));
+                editorBg = new SolidColorBrush(Color.FromRgb(42, 20, 8));
+                titleBarBg = new SolidColorBrush(Color.FromRgb(50, 25, 10));
+                selectionBg = new SolidColorBrush(Color.FromRgb(110, 45, 15));
+                textColor = new SolidColorBrush(Color.FromRgb(255, 228, 209));
+                lineNumberColor = Color.FromRgb(180, 100, 50);
+                comboBg = new SolidColorBrush(Color.FromRgb(35, 15, 5));
+                comboBorder = new SolidColorBrush(Color.FromRgb(85, 35, 10));
+                statusBarBg = new SolidColorBrush(Color.FromRgb(204, 85, 0));
+                _addedColor = Color.FromArgb(80, 40, 160, 40);
+                _deletedColor = Color.FromArgb(80, 160, 40, 40);
+                break;
+            case "PurpleGrief":
+                bgColor = new SolidColorBrush(Color.FromRgb(25, 15, 30));
+                editorBg = new SolidColorBrush(Color.FromRgb(30, 20, 35));
+                titleBarBg = new SolidColorBrush(Color.FromRgb(35, 25, 40));
+                selectionBg = new SolidColorBrush(Color.FromRgb(80, 50, 90));
+                textColor = new SolidColorBrush(Color.FromRgb(220, 200, 230));
+                lineNumberColor = Color.FromRgb(160, 140, 170);
+                comboBg = new SolidColorBrush(Color.FromRgb(25, 15, 30));
+                comboBorder = new SolidColorBrush(Color.FromRgb(80, 50, 100));
+                statusBarBg = new SolidColorBrush(Color.FromRgb(70, 40, 80));
+                _addedColor = Color.FromArgb(80, 60, 180, 60);
+                _deletedColor = Color.FromArgb(80, 180, 60, 60);
                 break;
             default:
                 bgColor = new SolidColorBrush(Color.FromRgb(30, 30, 30));
@@ -897,6 +944,8 @@ public partial class CompareDialog : Window
                 comboBg = new SolidColorBrush(Color.FromRgb(45, 45, 48));
                 comboBorder = new SolidColorBrush(Color.FromRgb(62, 62, 66));
                 statusBarBg = new SolidColorBrush(Color.FromRgb(0, 122, 204));
+                _addedColor = Color.FromArgb(80, 0, 255, 0);
+                _deletedColor = Color.FromArgb(80, 255, 0, 0);
                 break;
         }
         
@@ -977,6 +1026,10 @@ public partial class CompareDialog : Window
             case "Void":
                 buttonBg = new SolidColorBrush(Color.FromRgb(25, 15, 80));
                 buttonHoverBg = new SolidColorBrush(Color.FromRgb(40, 30, 100));
+                break;
+            case "OrangeBurnout":
+                buttonBg = new SolidColorBrush(Color.FromRgb(150, 65, 0));
+                buttonHoverBg = new SolidColorBrush(Color.FromRgb(190, 85, 0));
                 break;
             default:
                 buttonBg = new SolidColorBrush(Color.FromRgb(0, 122, 204));
@@ -1085,6 +1138,11 @@ public partial class CompareDialog : Window
                 trackBg = new SolidColorBrush(Color.FromRgb(25, 20, 45));
                 thumbBg = new SolidColorBrush(Color.FromRgb(60, 50, 100));
                 thumbHoverBg = new SolidColorBrush(Color.FromRgb(80, 70, 130));
+                break;
+            case "OrangeBurnout":
+                trackBg = new SolidColorBrush(Color.FromRgb(50, 25, 10));
+                thumbBg = new SolidColorBrush(Color.FromRgb(110, 45, 15));
+                thumbHoverBg = new SolidColorBrush(Color.FromRgb(150, 65, 20));
                 break;
             default:
                 trackBg = new SolidColorBrush(Color.FromRgb(62, 62, 66));

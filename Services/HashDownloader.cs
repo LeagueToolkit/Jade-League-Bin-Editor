@@ -174,7 +174,7 @@ public class HashDownloader
             try
             {
                 var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-                var prefsFile = Path.Combine(appDataPath, "RitoShark", "Jade", "settings.txt");
+                var prefsFile = Path.Combine(appDataPath, "RitoShark", "Jade", "preferences.txt");
                 if (File.Exists(prefsFile))
                 {
                     var content = File.ReadAllText(prefsFile);
