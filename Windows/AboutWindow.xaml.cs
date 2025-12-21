@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
+using Jade.Services;
 
 namespace Jade.Windows;
 
@@ -33,30 +34,7 @@ public partial class AboutWindow : Window
     
     private string GetCurrentTheme()
     {
-        try
-        {
-            var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            var prefsFile = Path.Combine(appDataPath, "RitoShark", "Jade", "preferences.txt");
-            
-            if (File.Exists(prefsFile))
-            {
-                var content = File.ReadAllText(prefsFile);
-                if (content.Contains("Theme="))
-                {
-                    var lines = content.Split('\n');
-                    foreach (var line in lines)
-                    {
-                        if (line.StartsWith("Theme="))
-                        {
-                            return line.Substring(6).Trim();
-                        }
-                    }
-                }
-            }
-        }
-        catch { }
-        
-        return "Default";
+        return ThemeHelper.ReadPreference("Theme", "Default");
     }
     
     private void ApplyWindowTheme(string theme)
@@ -144,6 +122,14 @@ public partial class AboutWindow : Window
                 mutedText = new SolidColorBrush(Color.FromRgb(160, 140, 170));
                 cardBg = new SolidColorBrush(Color.FromRgb(35, 25, 45));
                 accentColor = new SolidColorBrush(Color.FromRgb(120, 80, 150));
+                break;
+            case "Custom":
+                bgColor = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_Bg", "#0F1928"));
+                titleBarBg = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_TitleBar", "#0F1928"));
+                textColor = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_Text", "#D4D4D4"));
+                mutedText = ThemeHelper.GetBrighterBrush(textColor, 0.7);
+                cardBg = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_EditorBg", "#141E2D"));
+                accentColor = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_StatusBar", "#005A9E"));
                 break;
             default: // Default dark theme
                 bgColor = new SolidColorBrush(Color.FromRgb(30, 30, 30));

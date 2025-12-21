@@ -771,30 +771,7 @@ public partial class CompareDialog : Window
     
     private string GetCurrentTheme()
     {
-        try
-        {
-            var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            var prefsFile = Path.Combine(appDataPath, "RitoShark", "Jade", "preferences.txt");
-            
-            if (File.Exists(prefsFile))
-            {
-                var content = File.ReadAllText(prefsFile);
-                if (content.Contains("Theme="))
-                {
-                    var lines = content.Split('\n');
-                    foreach (var line in lines)
-                    {
-                        if (line.StartsWith("Theme="))
-                        {
-                            return line.Substring(6).Trim();
-                        }
-                    }
-                }
-            }
-        }
-        catch { }
-        
-        return "Default";
+        return ThemeHelper.ReadPreference("Theme", "Default");
     }
     
     private void ApplyTheme(string theme)
@@ -934,6 +911,19 @@ public partial class CompareDialog : Window
                 _addedColor = Color.FromArgb(80, 60, 180, 60);
                 _deletedColor = Color.FromArgb(80, 180, 60, 60);
                 break;
+            case "Custom":
+                bgColor = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_Bg", "#0F1928"));
+                editorBg = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_EditorBg", "#141E2D"));
+                titleBarBg = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_TitleBar", "#0F1928"));
+                selectionBg = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_SelectedTab", "#1E2A3E"));
+                textColor = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_Text", "#D4D4D4"));
+                lineNumberColor = ThemeHelper.GetBrighterColor(editorBg.Color, 2.5);
+                comboBg = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_Bg", "#0F1928"));
+                comboBorder = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_StatusBar", "#005A9E"));
+                statusBarBg = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_StatusBar", "#005A9E"));
+                _addedColor = Color.FromArgb(80, 0, 180, 0);
+                _deletedColor = Color.FromArgb(80, 180, 0, 0);
+                break;
             default:
                 bgColor = new SolidColorBrush(Color.FromRgb(30, 30, 30));
                 editorBg = new SolidColorBrush(Color.FromRgb(30, 30, 30));
@@ -1027,10 +1017,11 @@ public partial class CompareDialog : Window
                 buttonBg = new SolidColorBrush(Color.FromRgb(25, 15, 80));
                 buttonHoverBg = new SolidColorBrush(Color.FromRgb(40, 30, 100));
                 break;
-            case "OrangeBurnout":
-                buttonBg = new SolidColorBrush(Color.FromRgb(150, 65, 0));
-                buttonHoverBg = new SolidColorBrush(Color.FromRgb(190, 85, 0));
+            case "Custom":
+                buttonBg = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_StatusBar", "#005A9E"));
+                buttonHoverBg = ThemeHelper.GetBrighterBrush(buttonBg, 1.2);
                 break;
+            case "OrangeBurnout":
             default:
                 buttonBg = new SolidColorBrush(Color.FromRgb(0, 122, 204));
                 buttonHoverBg = new SolidColorBrush(Color.FromRgb(28, 151, 234));
@@ -1138,6 +1129,13 @@ public partial class CompareDialog : Window
                 trackBg = new SolidColorBrush(Color.FromRgb(25, 20, 45));
                 thumbBg = new SolidColorBrush(Color.FromRgb(60, 50, 100));
                 thumbHoverBg = new SolidColorBrush(Color.FromRgb(80, 70, 130));
+                break;
+            case "Custom":
+                var scrollBg = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_Bg", "#0F1928"));
+                var scrollThumb = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_StatusBar", "#005A9E"));
+                trackBg = ThemeHelper.GetBrighterBrush(scrollBg, 1.2);
+                thumbBg = scrollThumb;
+                thumbHoverBg = ThemeHelper.GetBrighterBrush(scrollThumb, 1.2);
                 break;
             case "OrangeBurnout":
                 trackBg = new SolidColorBrush(Color.FromRgb(50, 25, 10));

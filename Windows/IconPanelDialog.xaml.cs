@@ -325,30 +325,7 @@ public partial class IconPanelDialog : Window
     
     private string GetCurrentTheme()
     {
-        try
-        {
-            var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            var prefsFile = Path.Combine(appDataPath, "RitoShark", "Jade", "preferences.txt");
-            
-            if (File.Exists(prefsFile))
-            {
-                var content = File.ReadAllText(prefsFile);
-                if (content.Contains("Theme="))
-                {
-                    var lines = content.Split('\n');
-                    foreach (var line in lines)
-                    {
-                        if (line.StartsWith("Theme="))
-                        {
-                            return line.Substring(6).Trim();
-                        }
-                    }
-                }
-            }
-        }
-        catch { }
-        
-        return "Default";
+        return ThemeHelper.ReadPreference("Theme", "Default");
     }
     
     private void ApplyTheme(string theme)
@@ -414,6 +391,12 @@ public partial class IconPanelDialog : Window
             bgColor = new SolidColorBrush(Color.FromRgb(25, 15, 30));
             titleBarBg = new SolidColorBrush(Color.FromRgb(35, 25, 40));
             textColor = new SolidColorBrush(Color.FromRgb(220, 200, 230));
+        }
+        else if (theme == "Custom")
+        {
+            bgColor = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_Bg", "#0F1928"));
+            titleBarBg = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_TitleBar", "#0F1928"));
+            textColor = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_Text", "#D4D4D4"));
         }
         else // Default
         {

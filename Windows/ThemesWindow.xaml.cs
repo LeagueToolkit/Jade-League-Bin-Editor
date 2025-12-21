@@ -58,6 +58,19 @@ public partial class ThemesWindow : Window
         // Apply current theme to this window
         ApplyWindowTheme(_currentTheme);
         
+        // Load custom theme settings
+        LoadCustomThemeSettings();
+        
+        // Update initial preview
+        if (ThemesListBox.SelectedItem is ThemeItem selectedTheme)
+        {
+            UpdatePalettePreview(selectedTheme);
+        }
+        else if (UseCustomThemeCheckBox?.IsChecked == true)
+        {
+            UpdatePalettePreview(null!);
+        }
+
         // Set DataContext for binding
         this.DataContext = this;
         
@@ -213,7 +226,8 @@ public partial class ThemesWindow : Window
     private System.Windows.Media.SolidColorBrush GetBrushFromHex(string hex)
     {
         try {
-            return (System.Windows.Media.SolidColorBrush)new System.Windows.Media.BrushConverter().ConvertFrom(hex);
+            var brush = new System.Windows.Media.BrushConverter().ConvertFrom(hex) as System.Windows.Media.SolidColorBrush;
+            return brush ?? System.Windows.Media.Brushes.Gray;
         } catch {
             return System.Windows.Media.Brushes.Gray;
         }
@@ -333,6 +347,34 @@ public partial class ThemesWindow : Window
             {
                 roundedCb.IsChecked = roundedEdges;
             }
+
+            // Custom Theme
+        LoadCustomThemeSettings();
+        bool useCustomTheme = false;
+            if (File.Exists(prefsFile))
+            {
+                var content = File.ReadAllText(prefsFile);
+                useCustomTheme = content.Contains("UseCustomTheme=True");
+            }
+            UseCustomThemeCheckBox.IsChecked = useCustomTheme;
+            if (useCustomTheme)
+            {
+                if (CustomThemePanel != null) CustomThemePanel.Visibility = Visibility.Visible;
+                if (ThemesListBox != null) ThemesListBox.Visibility = Visibility.Collapsed;
+                _currentTheme = "Custom";
+                UpdatePalettePreview(null!);
+            }
+            else
+            {
+                if (CustomThemePanel != null) CustomThemePanel.Visibility = Visibility.Collapsed;
+                if (ThemesListBox != null) ThemesListBox.Visibility = Visibility.Visible;
+                
+                if (ThemesListBox?.SelectedItem is ThemeItem selected)
+                {
+                    _currentTheme = selected.Id;
+                    UpdatePalettePreview(selected);
+                }
+            }
             
             UpdateCurrentThemeText();
         }
@@ -383,18 +425,41 @@ public partial class ThemesWindow : Window
         // Preview is handled by XAML binding to SelectedItem
     }
 
-    private void UpdatePalettePreview(ThemeItem theme)
+    private void UpdatePalettePreview(ThemeItem? theme)
     {
-        var palette = new System.Collections.Generic.List<ColorPreviewItem>
+        var palette = new System.Collections.Generic.List<ColorPreviewItem>();
+        
+        System.Windows.Media.SolidColorBrush bg, editorBg, titleBar, statusBar, text, tabBg, selectedTab;
+
+        if (_currentTheme == "Custom" || UseCustomThemeCheckBox.IsChecked == true)
         {
-            new ColorPreviewItem { Label = "Window Background", Color = theme.Background },
-            new ColorPreviewItem { Label = "Editor Background", Color = theme.EditorBackground },
-            new ColorPreviewItem { Label = "Title Bar", Color = theme.TitleBarBackground },
-            new ColorPreviewItem { Label = "Status Bar", Color = theme.StatusBarBackground },
-            new ColorPreviewItem { Label = "Foreground Text", Color = theme.Foreground },
-            new ColorPreviewItem { Label = "Tab Background", Color = theme.TabBackground },
-            new ColorPreviewItem { Label = "Selected Tab", Color = theme.SelectedTabBackground }
-        };
+            bg = GetBrushFromHex(CustomBgHex.Text);
+            editorBg = GetBrushFromHex(CustomEditorBgHex.Text);
+            titleBar = GetBrushFromHex(CustomTitleBarHex.Text);
+            statusBar = GetBrushFromHex(CustomStatusBarHex.Text);
+            text = GetBrushFromHex(CustomTextHex.Text);
+            tabBg = GetBrushFromHex(CustomTabBgHex.Text);
+            selectedTab = GetBrushFromHex(CustomSelectedTabHex.Text);
+        }
+        else if (theme != null)
+        {
+            bg = theme.Background;
+            editorBg = theme.EditorBackground;
+            titleBar = theme.TitleBarBackground;
+            statusBar = theme.StatusBarBackground;
+            text = theme.Foreground;
+            tabBg = theme.TabBackground;
+            selectedTab = theme.SelectedTabBackground;
+        }
+        else return;
+
+        palette.Add(new ColorPreviewItem { Label = "Window Background", Color = bg });
+        palette.Add(new ColorPreviewItem { Label = "Editor Background", Color = editorBg });
+        palette.Add(new ColorPreviewItem { Label = "Title Bar", Color = titleBar });
+        palette.Add(new ColorPreviewItem { Label = "Status Bar", Color = statusBar });
+        palette.Add(new ColorPreviewItem { Label = "Foreground Text", Color = text });
+        palette.Add(new ColorPreviewItem { Label = "Tab Background", Color = tabBg });
+        palette.Add(new ColorPreviewItem { Label = "Selected Tab", Color = selectedTab });
         
         ColorPaletteList.ItemsSource = palette;
     }
@@ -419,6 +484,7 @@ public partial class ThemesWindow : Window
             "Void" => "Purple Void",
             "VioletSorrow" => "Violet Sorrow",
             "OrangeBurnout" => "Orange Burnout",
+            "Custom" => "Custom Theme",
             _ => "Unknown"
         };
         
@@ -500,8 +566,46 @@ public partial class ThemesWindow : Window
     {
         try
         {
-            if (ThemesListBox.SelectedItem is ThemeItem selectedTheme && 
-                BracketThemesListBox.SelectedItem is BracketThemeItem selectedBracketTheme)
+            bool useCustom = UseCustomThemeCheckBox.IsChecked == true;
+            
+            if (useCustom)
+            {
+                SaveGeneralPreference("Custom_Bg", CustomBgHex.Text);
+                SaveGeneralPreference("Custom_EditorBg", CustomEditorBgHex.Text);
+                SaveGeneralPreference("Custom_TitleBar", CustomTitleBarHex.Text);
+                SaveGeneralPreference("Custom_StatusBar", CustomStatusBarHex.Text);
+                SaveGeneralPreference("Custom_Text", CustomTextHex.Text);
+                SaveGeneralPreference("Custom_TabBg", CustomTabBgHex.Text);
+                SaveGeneralPreference("Custom_SelectedTab", CustomSelectedTabHex.Text);
+                
+                // ALSO SAVE BRACKET THEME even in custom mode
+                if (BracketThemesListBox.SelectedItem is BracketThemeItem selectedBracketTheme)
+                {
+                    bool overrideBrackets = OverrideBracketsCheckBox.IsChecked == true;
+                    SavePreferences("Custom", selectedBracketTheme.Id, overrideBrackets);
+                }
+                else
+                {
+                    _currentTheme = "Custom";
+                    SaveGeneralPreference("Theme", "Custom");
+                    SaveGeneralPreference("UseCustomTheme", "True");
+                }
+                
+                var mainWindow = Application.Current.MainWindow as MainWindow;
+                if (mainWindow != null)
+                {
+                    mainWindow.ApplyTheme("Custom");
+                    mainWindow.LoadTheme();
+                }
+                
+                ApplyCustomWindowTheme();
+                UpdatePalettePreview(null!);
+                UpdateCurrentThemeText();
+                
+                MessageBox.Show("Custom theme settings applied successfully!", "Applied", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            else if (ThemesListBox?.SelectedItem is ThemeItem selectedTheme && 
+                BracketThemesListBox?.SelectedItem is BracketThemeItem selectedBracketTheme)
             {
                 bool overrideBrackets = OverrideBracketsCheckBox.IsChecked == true;
                 SavePreferences(selectedTheme.Id, selectedBracketTheme.Id, overrideBrackets);
@@ -580,6 +684,11 @@ public partial class ThemesWindow : Window
     
     private void ApplyWindowTheme(string theme)
     {
+        if (theme == "Custom")
+        {
+            ApplyCustomWindowTheme();
+            return;
+        }
         try
         {
             var themeItem = Themes.FirstOrDefault(t => t.Id == theme) ?? Themes.FirstOrDefault(t => t.Id == "Default");
@@ -617,6 +726,9 @@ public partial class ThemesWindow : Window
             
             // Update all TextBlocks
             UpdateTextBlockColors(this, textColor);
+
+            // Set local resources for TextBoxes to follow theme
+            SetThemeResources(bgColor, textColor, subtleBorder);
         }
         catch (Exception ex)
         {
@@ -624,6 +736,13 @@ public partial class ThemesWindow : Window
         }
     }
     
+    private void SetThemeResources(System.Windows.Media.SolidColorBrush bg, System.Windows.Media.SolidColorBrush fg, System.Windows.Media.SolidColorBrush border)
+    {
+        this.Resources["TextBoxBackground"] = bg;
+        this.Resources["TextBoxForeground"] = fg;
+        this.Resources["TextBoxBorder"] = border;
+    }
+
     private void UpdateTextBlockColors(System.Windows.DependencyObject parent, System.Windows.Media.SolidColorBrush color)
     {
         int childCount = System.Windows.Media.VisualTreeHelper.GetChildrenCount(parent);
@@ -636,5 +755,228 @@ public partial class ThemesWindow : Window
             }
             UpdateTextBlockColors(child, color);
         }
+    }
+
+    private void OnCustomThemeToggle(object sender, RoutedEventArgs e)
+    {
+        if (CustomThemePanel == null || ThemesListBox == null) return;
+
+        bool useCustom = UseCustomThemeCheckBox.IsChecked == true;
+        CustomThemePanel.Visibility = useCustom ? Visibility.Visible : Visibility.Collapsed;
+        ThemesListBox.Visibility = useCustom ? Visibility.Collapsed : Visibility.Visible;
+        
+        // Ensure preview panel is always visible
+        if (PreviewPanelBorder != null) PreviewPanelBorder.Visibility = Visibility.Visible;
+        
+        SaveGeneralPreference("UseCustomTheme", useCustom.ToString());
+        
+        if (useCustom)
+        {
+            _currentTheme = "Custom";
+            UpdateCurrentThemeText();
+            
+            // If custom colors are default/empty, populate from currently selected theme
+            if (string.IsNullOrWhiteSpace(CustomBgHex.Text) || CustomBgHex.Text == "#0F1928")
+            {
+                if (ThemesListBox.SelectedItem is ThemeItem selectedTheme)
+                {
+                    CustomBgHex.Text = ColorToHex(selectedTheme.Background.Color);
+                    CustomEditorBgHex.Text = ColorToHex(selectedTheme.EditorBackground.Color);
+                    CustomTitleBarHex.Text = ColorToHex(selectedTheme.TitleBarBackground.Color);
+                    CustomStatusBarHex.Text = ColorToHex(selectedTheme.StatusBarBackground.Color); 
+                    CustomTextHex.Text = ColorToHex(selectedTheme.Foreground.Color);
+                    CustomTabBgHex.Text = ColorToHex(selectedTheme.TabBackground.Color);
+                    CustomSelectedTabHex.Text = ColorToHex(selectedTheme.SelectedTabBackground.Color);
+                }
+            }
+            UpdatePalettePreview(null);
+        }
+        else
+        {
+            if (ThemesListBox.SelectedItem is ThemeItem selectedTheme)
+            {
+                _currentTheme = selectedTheme.Id;
+                UpdateCurrentThemeText();
+                UpdatePalettePreview(selectedTheme);
+            }
+        }
+    }
+
+    private string ColorToHex(System.Windows.Media.Color color)
+    {
+        return $"#{color.R:X2}{color.G:X2}{color.B:X2}";
+    }
+
+    private void OnCustomColorChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_currentTheme == "Custom")
+        {
+            UpdatePalettePreview(null!);
+        }
+    }
+
+    private void OnPickColor(object sender, RoutedEventArgs e)
+    {
+        if (sender is System.Windows.Controls.Button button && button.Tag is string targetName)
+        {
+            var textBox = this.FindName(targetName) as System.Windows.Controls.TextBox;
+            if (textBox != null)
+            {
+                if (ShowColorPickerDialog(textBox.Text, out string newHex))
+                {
+                    textBox.Text = newHex;
+                }
+            }
+        }
+    }
+
+    private void OnColorPreviewClick(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is FrameworkElement element && element.Tag is string targetName)
+        {
+            var textBox = this.FindName(targetName) as System.Windows.Controls.TextBox;
+            if (textBox != null)
+            {
+                if (ShowColorPickerDialog(textBox.Text, out string newHex))
+                {
+                    textBox.Text = newHex;
+                }
+            }
+        }
+    }
+
+    private bool ShowColorPickerDialog(string currentHex, out string newHex)
+    {
+        newHex = currentHex;
+        try
+        {
+            using var dialog = new System.Windows.Forms.ColorDialog();
+            dialog.FullOpen = true;
+            
+            try
+            {
+                var currentBrush = GetBrushFromHex(currentHex);
+                var color = currentBrush.Color;
+                dialog.Color = System.Drawing.Color.FromArgb(color.A, color.R, color.G, color.B);
+            }
+            catch { }
+
+            if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+            {
+                newHex = $"#{dialog.Color.R:X2}{dialog.Color.G:X2}{dialog.Color.B:X2}";
+                return true;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("Failed to show color picker dialog", ex);
+        }
+        return false;
+    }
+
+    private void ApplyCustomWindowTheme()
+    {
+        try
+        {
+            var bg = GetBrushFromHex(CustomBgHex.Text);
+            var editorBg = GetBrushFromHex(CustomEditorBgHex.Text);
+            var titleBar = GetBrushFromHex(CustomTitleBarHex.Text);
+            var text = GetBrushFromHex(CustomTextHex.Text);
+
+            this.Background = editorBg;
+            if (TitleBar != null) TitleBar.Background = titleBar;
+            
+            var boxes = new[] { "UIThemeBox", "BracketThemeBox", "PreviewPanelBorder" };
+            var subtleBorder = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromArgb(40, 255, 255, 255));
+            
+            foreach (var boxName in boxes)
+            {
+                if (this.FindName(boxName) is System.Windows.Controls.Border box)
+                {
+                    box.Background = bg;
+                    box.BorderBrush = subtleBorder;
+                }
+            }
+
+            UpdateTextBlockColors(this, text);
+        
+            // Set local resources for TextBoxes to follow theme
+            SetThemeResources(bg, text, subtleBorder);
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("Failed to apply custom window theme", ex);
+        }
+    }
+
+    private void LoadCustomThemeSettings()
+    {
+        try
+        {
+            CustomBgHex.Text = ReadPreference("Custom_Bg", "#0F1928");
+            CustomEditorBgHex.Text = ReadPreference("Custom_EditorBg", "#141E2D");
+            CustomTitleBarHex.Text = ReadPreference("Custom_TitleBar", "#0F1928");
+            CustomStatusBarHex.Text = ReadPreference("Custom_StatusBar", "#005A9E");
+            CustomTextHex.Text = ReadPreference("Custom_Text", "#D4D4D4");
+            CustomTabBgHex.Text = ReadPreference("Custom_TabBg", "#1E1E1E");
+            CustomSelectedTabHex.Text = ReadPreference("Custom_SelectedTab", "#007ACC");
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("Failed to load custom theme settings", ex);
+        }
+    }
+    private string ReadPreference(string key, string defaultValue)
+    {
+        try
+        {
+            var prefsFile = GetPreferencesFilePath();
+            if (!File.Exists(prefsFile)) return defaultValue;
+
+            var lines = File.ReadAllLines(prefsFile);
+            foreach (var line in lines)
+            {
+                if (line.StartsWith($"{key}="))
+                {
+                    return line.Substring(key.Length + 1).Trim();
+                }
+            }
+        }
+        catch { }
+        return defaultValue;
+    }
+
+    private System.Windows.Media.SolidColorBrush GetBrighterBrush(System.Windows.Media.SolidColorBrush brush, double factor)
+    {
+        var color = brush.Color;
+        return new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(
+            (byte)Math.Min(255, color.R * factor),
+            (byte)Math.Min(255, color.G * factor),
+            (byte)Math.Min(255, color.B * factor)
+        ));
+    }
+}
+
+public class InverseBooleanConverter : System.Windows.Data.IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture)
+    {
+        if (value is bool b)
+        {
+            bool result = !b;
+            if (parameter?.ToString() == "Visibility")
+            {
+                return result ? Visibility.Visible : Visibility.Collapsed;
+            }
+            return result;
+        }
+        return value;
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture)
+    {
+        if (value is bool b) return !b;
+        if (value is Visibility v) return v != Visibility.Visible;
+        return value;
     }
 }

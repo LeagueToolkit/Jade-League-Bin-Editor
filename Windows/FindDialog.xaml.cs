@@ -70,30 +70,7 @@ public partial class FindDialog : Window
     
     private string GetCurrentTheme()
     {
-        try
-        {
-            var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            var prefsFile = Path.Combine(appDataPath, "RitoShark", "Jade", "preferences.txt");
-            
-            if (File.Exists(prefsFile))
-            {
-                var content = File.ReadAllText(prefsFile);
-                if (content.Contains("Theme="))
-                {
-                    var lines = content.Split('\n');
-                    foreach (var line in lines)
-                    {
-                        if (line.StartsWith("Theme="))
-                        {
-                            return line.Substring(6).Trim();
-                        }
-                    }
-                }
-            }
-        }
-        catch { }
-        
-        return "Default";
+        return ThemeHelper.ReadPreference("Theme", "Default");
     }
     
     private void ApplyTheme(string theme)
@@ -172,35 +149,15 @@ public partial class FindDialog : Window
             buttonBg = new SolidColorBrush(Color.FromRgb(25, 15, 80));
             buttonHoverBg = new SolidColorBrush(Color.FromRgb(40, 30, 100));
         }
-        else if (theme == "VioletSorrow")
+        else if (theme == "Custom")
         {
-            bgColor = new SolidColorBrush(Color.FromRgb(22, 12, 42));
-            titleBarBg = new SolidColorBrush(Color.FromRgb(32, 20, 58));
-            textColor = new SolidColorBrush(Color.FromRgb(185, 170, 215));
-            inputBg = new SolidColorBrush(Color.FromRgb(18, 10, 35));
-            inputBorder = new SolidColorBrush(Color.FromRgb(70, 45, 110));
-            buttonBg = new SolidColorBrush(Color.FromRgb(65, 30, 120));
-            buttonHoverBg = new SolidColorBrush(Color.FromRgb(95, 55, 150));
-        }
-        else if (theme == "OrangeBurnout")
-        {
-            bgColor = new SolidColorBrush(Color.FromRgb(35, 15, 5));
-            titleBarBg = new SolidColorBrush(Color.FromRgb(50, 25, 10));
-            textColor = new SolidColorBrush(Color.FromRgb(255, 228, 209));
-            inputBg = new SolidColorBrush(Color.FromRgb(42, 20, 8));
-            inputBorder = new SolidColorBrush(Color.FromRgb(85, 35, 10));
-            buttonBg = new SolidColorBrush(Color.FromRgb(150, 65, 0));
-            buttonHoverBg = new SolidColorBrush(Color.FromRgb(190, 85, 0));
-        }
-        else if (theme == "PurpleGrief")
-        {
-            bgColor = new SolidColorBrush(Color.FromRgb(25, 15, 30));
-            titleBarBg = new SolidColorBrush(Color.FromRgb(35, 25, 40));
-            textColor = new SolidColorBrush(Color.FromRgb(220, 200, 230));
-            inputBg = new SolidColorBrush(Color.FromRgb(35, 25, 45));
-            inputBorder = new SolidColorBrush(Color.FromRgb(80, 50, 100));
-            buttonBg = new SolidColorBrush(Color.FromRgb(70, 40, 80));
-            buttonHoverBg = new SolidColorBrush(Color.FromRgb(95, 65, 120));
+            bgColor = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_Bg", "#0F1928"));
+            titleBarBg = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_TitleBar", "#0F1928"));
+            textColor = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_Text", "#D4D4D4"));
+            inputBg = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_EditorBg", "#141E2D"));
+            inputBorder = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_StatusBar", "#005A9E"));
+            buttonBg = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_StatusBar", "#005A9E"));
+            buttonHoverBg = ThemeHelper.GetBrighterBrush(buttonBg, 1.2);
         }
         else // Default
         {

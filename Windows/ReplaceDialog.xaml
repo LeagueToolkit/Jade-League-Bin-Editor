@@ -62,7 +62,7 @@
                     <Button x:Name="FindNextButton" Style="{StaticResource ModernButtonStyle}" Content="Find Next" Click="OnFindNext" Margin="0,0,8,0" Width="110" Height="38" Padding="12,0"/>
                     <Button x:Name="ReplaceButton" Style="{StaticResource ModernButtonStyle}" Content="Replace" Click="OnReplace" Margin="0,0,8,0" Width="110" Height="38" Padding="12,0"/>
                     <Button x:Name="ReplaceAllButton" Style="{StaticResource ModernButtonStyle}" Content="Replace All" Click="OnReplaceAll" Margin="0,0,8,0" Width="110" Height="38" Padding="12,0"/>
-                    <Button x:Name="CloseButton" Style="{StaticResource ModernButtonStyle}" Content="Close" Click="OnClose" Width="110" Height="38" Padding="12,0"/>
+                    <Button x:Name="CloseButton" Style="{StaticResource ModernButtonStyle}" Content="Close" Click="OnClose" Width="90" Height="38" Padding="12,0"/>
                 </StackPanel>
             </Grid>
         </Grid>

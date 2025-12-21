@@ -333,6 +333,7 @@
                     
                     <!-- Action Buttons -->
                     <Button x:Name="ThemesButton" Style="{StaticResource TitleBarToolbarButton}" Content="🎨" ToolTip="Themes" Click="OnThemes" WindowChrome.IsHitTestVisibleInChrome="True"/>
+                    <Button x:Name="PreferencesButton" Style="{StaticResource TitleBarToolbarButton}" Content="📝" ToolTip="Preferences" Click="OnPreferences" WindowChrome.IsHitTestVisibleInChrome="True"/>
                     <Button x:Name="SettingsButton" Style="{StaticResource TitleBarToolbarButton}" Content="⚙" ToolTip="Settings" Click="OnSettings" WindowChrome.IsHitTestVisibleInChrome="True"/>
                     <Button x:Name="AboutButton" Style="{StaticResource TitleBarToolbarButton}" Content="❓" ToolTip="About Jade" Click="OnAbout" WindowChrome.IsHitTestVisibleInChrome="True"/>
                 </StackPanel>

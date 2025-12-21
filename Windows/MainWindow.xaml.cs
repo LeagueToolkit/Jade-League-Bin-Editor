@@ -751,9 +751,11 @@ public partial class MainWindow : Window
         else if (theme == "OrangeBurnout")
             return new SolidColorBrush(Color.FromRgb(42, 20, 8));
         else if (theme == "PurpleGrief")
-            return new SolidColorBrush(Color.FromRgb(30, 20, 35));
-        return new SolidColorBrush(Color.FromRgb(30, 30, 30));
-    }
+        return new SolidColorBrush(Color.FromRgb(30, 20, 35));
+    else if (theme == "Custom")
+        return GetBrushFromHex(ReadPreference("Custom_EditorBg", "#141E2D"));
+    return new SolidColorBrush(Color.FromRgb(30, 30, 30));
+}
     
     private SolidColorBrush GetCurrentEditorForeground()
     {
@@ -777,9 +779,11 @@ public partial class MainWindow : Window
         else if (theme == "OrangeBurnout")
             return new SolidColorBrush(Color.FromRgb(255, 228, 209));
         else if (theme == "PurpleGrief")
-            return new SolidColorBrush(Color.FromRgb(220, 200, 230));
-        return new SolidColorBrush(Color.FromRgb(212, 212, 212));
-    }
+        return new SolidColorBrush(Color.FromRgb(220, 200, 230));
+    else if (theme == "Custom")
+        return GetBrushFromHex(ReadPreference("Custom_Text", "#D4D4D4"));
+    return new SolidColorBrush(Color.FromRgb(212, 212, 212));
+}
     
     private SolidColorBrush GetCurrentTabBackground()
     {
@@ -803,9 +807,11 @@ public partial class MainWindow : Window
         else if (theme == "OrangeBurnout")
             return new SolidColorBrush(Color.FromRgb(50, 25, 10));
         else if (theme == "PurpleGrief")
-            return new SolidColorBrush(Color.FromRgb(35, 25, 40));
-        return new SolidColorBrush(Color.FromRgb(37, 37, 38));
-    }
+        return new SolidColorBrush(Color.FromRgb(35, 25, 40));
+    else if (theme == "Custom")
+        return GetBrushFromHex(ReadPreference("Custom_Bg", "#0F1928"));
+    return new SolidColorBrush(Color.FromRgb(37, 37, 38));
+}
     
     private string GetCurrentTheme()
     {
@@ -1152,32 +1158,40 @@ public partial class MainWindow : Window
         }
     }
 
-    private void PerformUndo(TextEditor editor)
+    private void PerformUndo(TextEditor? editor)
     {
-        if (editor != null && editor.CanUndo)
+        if (editor == null) return;
+        try
         {
-            // Ensure editor has focus FIRST so keyboard shortcuts work
-            if (!editor.IsFocused)
+            if (editor.CanUndo)
             {
-                editor.Focus();
-            }
-            
-            // Save scroll position
-            var verticalOffset = editor.VerticalOffset;
-            var horizontalOffset = editor.HorizontalOffset;
-            
-            // Perform undo
-            editor.Undo();
-            
-            // Restore scroll position using Input priority to ensure it happens after all internal updates
-            Dispatcher.InvokeAsync(() =>
-            {
-                if (editor != null)
+                // Ensure editor has focus FIRST so keyboard shortcuts work
+                if (!editor.IsFocused)
                 {
-                    editor.ScrollToVerticalOffset(verticalOffset);
-                    editor.ScrollToHorizontalOffset(horizontalOffset);
+                    editor.Focus();
                 }
-            }, System.Windows.Threading.DispatcherPriority.Input);
+                
+                // Save scroll position
+                var verticalOffset = editor.VerticalOffset;
+                var horizontalOffset = editor.HorizontalOffset;
+                
+                // Perform undo
+                editor.Undo();
+                
+                // Restore scroll position using Input priority to ensure it happens after all internal updates
+                Dispatcher.InvokeAsync(() =>
+                {
+                    if (editor != null)
+                    {
+                        editor.ScrollToVerticalOffset(verticalOffset);
+                        editor.ScrollToHorizontalOffset(horizontalOffset);
+                    }
+                }, System.Windows.Threading.DispatcherPriority.Input);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("Failed to perform undo", ex);
         }
     }
 
@@ -1224,32 +1238,40 @@ public partial class MainWindow : Window
         PerformUndo(GetCurrentEditor());
     }
 
-    private void PerformRedo(TextEditor editor)
+    private void PerformRedo(TextEditor? editor)
     {
-        if (editor != null && editor.CanRedo)
+        if (editor == null) return;
+        try
         {
-            // Ensure editor has focus FIRST so keyboard shortcuts work
-            if (!editor.IsFocused)
+            if (editor.CanRedo)
             {
-                editor.Focus();
-            }
-            
-            // Save scroll position
-            var verticalOffset = editor.VerticalOffset;
-            var horizontalOffset = editor.HorizontalOffset;
-            
-            // Perform redo
-            editor.Redo();
-            
-            // Restore scroll position
-            Dispatcher.InvokeAsync(() =>
-            {
-                if (editor != null)
+                // Ensure editor has focus FIRST
+                if (!editor.IsFocused)
                 {
-                    editor.ScrollToVerticalOffset(verticalOffset);
-                    editor.ScrollToHorizontalOffset(horizontalOffset);
+                    editor.Focus();
                 }
-            }, System.Windows.Threading.DispatcherPriority.Input);
+                
+                // Save scroll position
+                var verticalOffset = editor.VerticalOffset;
+                var horizontalOffset = editor.HorizontalOffset;
+                
+                // Perform redo
+                editor.Redo();
+                
+                // Restore scroll position
+                Dispatcher.InvokeAsync(() =>
+                {
+                    if (editor != null)
+                    {
+                        editor.ScrollToVerticalOffset(verticalOffset);
+                        editor.ScrollToHorizontalOffset(horizontalOffset);
+                    }
+                }, System.Windows.Threading.DispatcherPriority.Input);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("Failed to perform redo", ex);
         }
     }
 
@@ -1467,6 +1489,25 @@ public partial class MainWindow : Window
         {
             Logger.Error("Failed to open settings", ex);
             MessageBox.Show($"Failed to open settings: {ex.Message}", "Error",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void OnPreferences(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Logger.Info("Opening preferences window");
+            var preferencesWindow = new PreferencesWindow
+            {
+                Owner = this
+            };
+            preferencesWindow.ShowDialog();
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("Failed to open preferences", ex);
+            MessageBox.Show($"Failed to open preferences: {ex.Message}", "Error",
                 MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
@@ -1921,6 +1962,8 @@ public partial class MainWindow : Window
             // Initialize textColor default
             var textColor = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(212, 212, 212));
 
+            // Custom theme check will be part of the main else-if chain below
+
             if (theme == "DarkBlue")
             {
                 // Dark Blue theme - pleasant blue colors
@@ -1936,52 +1979,11 @@ public partial class MainWindow : Window
                 var hoverTabBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(35, 50, 70));
                 textColor = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(220, 230, 240));
                 
-                this.Background = bgColor;
-                
-                // Update title bar
-                if (TitleBar != null)
-                {
-                    TitleBar.Background = titleBarBg;
-                }
-                
-                // Update menu bar and menu items
-                if (MenuBar != null)
-                {
-                    MenuBar.Background = menuBarBg;
-                    UpdateMenuItemStyles(menuItemBg, menuItemHoverBg, textColor);
-                }
-                
-                // Update status bar
-                if (StatusBarBorder != null)
-                {
-                    StatusBarBorder.Background = statusBarBg;
-                }
-                
-                // Update welcome screen
-                if (WelcomeScreen != null)
-                {
-                    WelcomeScreen.Background = editorBg;
-                }
-                
-                // Update tab control and tab styles
-                if (EditorTabControl != null)
-                {
-                    EditorTabControl.Background = bgColor;
-                    UpdateTabItemStyles(tabBg, selectedTabBg, hoverTabBg, textColor);
-                    
-                    // Update all existing editor tabs
-                    foreach (TabItem tab in EditorTabControl.Items)
-                    {
-                        tab.Background = tabBg;
-                        UpdateTabEditorColors(tab, editorBg, textColor);
-                    }
-                }
-                
-                // Update scrollbar colors
                 var scrollTrackBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(30, 40, 55));
                 var scrollThumbBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(60, 90, 130));
                 var scrollThumbHoverBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(80, 120, 170));
-                UpdateScrollBarStyles(scrollTrackBg, scrollThumbBg, scrollThumbHoverBg);
+
+                ApplyThemeLogic(bgColor, editorBg, titleBarBg, menuBarBg, menuItemBg, menuItemHoverBg, statusBarBg, tabBg, selectedTabBg, hoverTabBg, textColor, scrollTrackBg, scrollThumbBg, scrollThumbHoverBg);
             }
             else if (theme == "DarkRed")
             {
@@ -1998,52 +2000,11 @@ public partial class MainWindow : Window
                 var hoverTabBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(70, 35, 45));
                 textColor = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(240, 220, 225));
                 
-                this.Background = bgColor;
-                
-                // Update title bar
-                if (TitleBar != null)
-                {
-                    TitleBar.Background = titleBarBg;
-                }
-                
-                // Update menu bar and menu items
-                if (MenuBar != null)
-                {
-                    MenuBar.Background = menuBarBg;
-                    UpdateMenuItemStyles(menuItemBg, menuItemHoverBg, textColor);
-                }
-                
-                // Update status bar
-                if (StatusBarBorder != null)
-                {
-                    StatusBarBorder.Background = statusBarBg;
-                }
-                
-                // Update welcome screen
-                if (WelcomeScreen != null)
-                {
-                    WelcomeScreen.Background = editorBg;
-                }
-                
-                // Update tab control and tab styles
-                if (EditorTabControl != null)
-                {
-                    EditorTabControl.Background = bgColor;
-                    UpdateTabItemStyles(tabBg, selectedTabBg, hoverTabBg, textColor);
-                    
-                    // Update all existing editor tabs
-                    foreach (TabItem tab in EditorTabControl.Items)
-                    {
-                        tab.Background = tabBg;
-                        UpdateTabEditorColors(tab, editorBg, textColor);
-                    }
-                }
-                
-                // Update scrollbar colors
                 var scrollTrackBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(55, 25, 35));
                 var scrollThumbBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(130, 60, 80));
                 var scrollThumbHoverBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(170, 80, 110));
-                UpdateScrollBarStyles(scrollTrackBg, scrollThumbBg, scrollThumbHoverBg);
+
+                ApplyThemeLogic(bgColor, editorBg, titleBarBg, menuBarBg, menuItemBg, menuItemHoverBg, statusBarBg, tabBg, selectedTabBg, hoverTabBg, textColor, scrollTrackBg, scrollThumbBg, scrollThumbHoverBg);
             }
             else if (theme == "LightPink")
             {
@@ -2060,52 +2021,11 @@ public partial class MainWindow : Window
                 var hoverTabBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(190, 140, 170));
                 textColor = System.Windows.Media.Brushes.Black;
                 
-                this.Background = bgColor;
-                
-                // Update title bar
-                if (TitleBar != null)
-                {
-                    TitleBar.Background = titleBarBg;
-                }
-                
-                // Update menu bar and menu items
-                if (MenuBar != null)
-                {
-                    MenuBar.Background = menuBarBg;
-                    UpdateMenuItemStyles(menuItemBg, menuItemHoverBg, textColor);
-                }
-                
-                // Update status bar
-                if (StatusBarBorder != null)
-                {
-                    StatusBarBorder.Background = statusBarBg;
-                }
-                
-                // Update welcome screen
-                if (WelcomeScreen != null)
-                {
-                    WelcomeScreen.Background = editorBg;
-                }
-                
-                // Update tab control and tab styles
-                if (EditorTabControl != null)
-                {
-                    EditorTabControl.Background = bgColor;
-                    UpdateTabItemStyles(tabBg, selectedTabBg, hoverTabBg, textColor);
-                    
-                    // Update all existing editor tabs
-                    foreach (TabItem tab in EditorTabControl.Items)
-                    {
-                        tab.Background = tabBg;
-                        UpdateTabEditorColors(tab, editorBg, textColor);
-                    }
-                }
-                
-                // Update scrollbar colors
-                var scrollTrackBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(220, 180, 200));
-                var scrollThumbBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(180, 120, 160));
-                var scrollThumbHoverBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(150, 90, 130));
-                UpdateScrollBarStyles(scrollTrackBg, scrollThumbBg, scrollThumbHoverBg);
+                var scrollTrackBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(250, 200, 230));
+                var scrollThumbBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(199, 21, 133));
+                var scrollThumbHoverBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(255, 105, 180));
+
+                ApplyThemeLogic(bgColor, editorBg, titleBarBg, menuBarBg, menuItemBg, menuItemHoverBg, statusBarBg, tabBg, selectedTabBg, hoverTabBg, textColor, scrollTrackBg, scrollThumbBg, scrollThumbHoverBg);
             }
             else if (theme == "PastelBlue")
             {
@@ -2184,52 +2104,11 @@ public partial class MainWindow : Window
                 var hoverTabBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(40, 65, 45));
                 textColor = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(200, 230, 210));
                 
-                this.Background = bgColor;
-                
-                // Update title bar
-                if (TitleBar != null)
-                {
-                    TitleBar.Background = titleBarBg;
-                }
-                
-                // Update menu bar and menu items
-                if (MenuBar != null)
-                {
-                    MenuBar.Background = menuBarBg;
-                    UpdateMenuItemStyles(menuItemBg, menuItemHoverBg, textColor);
-                }
-                
-                // Update status bar
-                if (StatusBarBorder != null)
-                {
-                    StatusBarBorder.Background = statusBarBg;
-                }
-                
-                // Update welcome screen
-                if (WelcomeScreen != null)
-                {
-                    WelcomeScreen.Background = editorBg;
-                }
-                
-                // Update tab control and tab styles
-                if (EditorTabControl != null)
-                {
-                    EditorTabControl.Background = bgColor;
-                    UpdateTabItemStyles(tabBg, selectedTabBg, hoverTabBg, textColor);
-                    
-                    // Update all existing editor tabs
-                    foreach (TabItem tab in EditorTabControl.Items)
-                    {
-                        tab.Background = tabBg;
-                        UpdateTabEditorColors(tab, editorBg, textColor);
-                    }
-                }
-                
-                // Update scrollbar colors
                 var scrollTrackBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(35, 55, 40));
                 var scrollThumbBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(70, 120, 85));
                 var scrollThumbHoverBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(90, 150, 110));
-                UpdateScrollBarStyles(scrollTrackBg, scrollThumbBg, scrollThumbHoverBg);
+
+                ApplyThemeLogic(bgColor, editorBg, titleBarBg, menuBarBg, menuItemBg, menuItemHoverBg, statusBarBg, tabBg, selectedTabBg, hoverTabBg, textColor, scrollTrackBg, scrollThumbBg, scrollThumbHoverBg);
             }
             else if (theme == "AMOLED")
             {
@@ -2246,52 +2125,11 @@ public partial class MainWindow : Window
                 var hoverTabBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(20, 20, 20)); // Very dark gray
                 textColor = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(180, 180, 180)); // Light gray text
                 
-                this.Background = bgColor;
-                
-                // Update title bar
-                if (TitleBar != null)
-                {
-                    TitleBar.Background = titleBarBg;
-                }
-                
-                // Update menu bar and menu items
-                if (MenuBar != null)
-                {
-                    MenuBar.Background = menuBarBg;
-                    UpdateMenuItemStyles(menuItemBg, menuItemHoverBg, textColor);
-                }
-                
-                // Update status bar
-                if (StatusBarBorder != null)
-                {
-                    StatusBarBorder.Background = statusBarBg;
-                }
-                
-                // Update welcome screen
-                if (WelcomeScreen != null)
-                {
-                    WelcomeScreen.Background = editorBg;
-                }
-                
-                // Update tab control and tab styles
-                if (EditorTabControl != null)
-                {
-                    EditorTabControl.Background = bgColor;
-                    UpdateTabItemStyles(tabBg, selectedTabBg, hoverTabBg, textColor);
-                    
-                    // Update all existing editor tabs
-                    foreach (TabItem tab in EditorTabControl.Items)
-                    {
-                        tab.Background = tabBg;
-                        UpdateTabEditorColors(tab, editorBg, textColor);
-                    }
-                }
-                
-                // Update scrollbar colors - minimal contrast
                 var scrollTrackBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(15, 15, 15));
                 var scrollThumbBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(40, 40, 40));
                 var scrollThumbHoverBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(60, 60, 60));
-                UpdateScrollBarStyles(scrollTrackBg, scrollThumbBg, scrollThumbHoverBg);
+
+                ApplyThemeLogic(bgColor, editorBg, titleBarBg, menuBarBg, menuItemBg, menuItemHoverBg, statusBarBg, tabBg, selectedTabBg, hoverTabBg, textColor, scrollTrackBg, scrollThumbBg, scrollThumbHoverBg);
             }
             else if (theme == "Void")
             {
@@ -2308,52 +2146,11 @@ public partial class MainWindow : Window
                 var hoverTabBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(30, 20, 55)); // Medium purple
                 textColor = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(180, 170, 220)); // Light purple-gray
                 
-                this.Background = bgColor;
-                
-                // Update title bar
-                if (TitleBar != null)
-                {
-                    TitleBar.Background = titleBarBg;
-                }
-                
-                // Update menu bar and menu items
-                if (MenuBar != null)
-                {
-                    MenuBar.Background = menuBarBg;
-                    UpdateMenuItemStyles(menuItemBg, menuItemHoverBg, textColor);
-                }
-                
-                // Update status bar
-                if (StatusBarBorder != null)
-                {
-                    StatusBarBorder.Background = statusBarBg;
-                }
-                
-                // Update welcome screen
-                if (WelcomeScreen != null)
-                {
-                    WelcomeScreen.Background = editorBg;
-                }
-                
-                // Update tab control and tab styles
-                if (EditorTabControl != null)
-                {
-                    EditorTabControl.Background = bgColor;
-                    UpdateTabItemStyles(tabBg, selectedTabBg, hoverTabBg, textColor);
-                    
-                    // Update all existing editor tabs
-                    foreach (TabItem tab in EditorTabControl.Items)
-                    {
-                        tab.Background = tabBg;
-                        UpdateTabEditorColors(tab, editorBg, textColor);
-                    }
-                }
-                
-                // Update scrollbar colors - purple tinted
                 var scrollTrackBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(25, 20, 45));
                 var scrollThumbBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(60, 50, 100));
                 var scrollThumbHoverBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(80, 70, 130));
-                UpdateScrollBarStyles(scrollTrackBg, scrollThumbBg, scrollThumbHoverBg);
+
+                ApplyThemeLogic(bgColor, editorBg, titleBarBg, menuBarBg, menuItemBg, menuItemHoverBg, statusBarBg, tabBg, selectedTabBg, hoverTabBg, textColor, scrollTrackBg, scrollThumbBg, scrollThumbHoverBg);
             }
             else if (theme == "VioletSorrow")
             {
@@ -2487,41 +2284,41 @@ public partial class MainWindow : Window
                 var titleBarBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(35, 25, 40));
                 var menuBarBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(35, 25, 40));
                 var menuItemBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(30, 20, 35));
-                var menuItemHoverBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(60, 40, 70));
-                var statusBarBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(70, 40, 80));
+                var menuItemHoverBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(45, 30, 55));
+                var statusBarBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(60, 40, 75));
                 var tabBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(35, 25, 40));
-                var selectedTabBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(80, 50, 90));
-                var hoverTabBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(55, 35, 65));
-                textColor = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(220, 200, 230));
+                var selectedTabBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(55, 35, 70));
+                var hoverTabBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(45, 30, 55));
+                textColor = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(200, 180, 210));
                 
-                this.Background = bgColor;
-                
-                if (TitleBar != null) TitleBar.Background = titleBarBg;
-                if (MenuBar != null)
-                {
-                    MenuBar.Background = menuBarBg;
-                    UpdateMenuItemStyles(menuItemBg, menuItemHoverBg, textColor);
-                }
-                if (StatusBarBorder != null) StatusBarBorder.Background = statusBarBg;
-                if (WelcomeScreen != null) WelcomeScreen.Background = editorBg;
-                
-                if (EditorTabControl != null)
-                {
-                    EditorTabControl.Background = bgColor;
-                    UpdateTabItemStyles(tabBg, selectedTabBg, hoverTabBg, textColor);
-                    foreach (TabItem tab in EditorTabControl.Items)
-                    {
-                        tab.Background = tabBg;
-                        UpdateTabEditorColors(tab, editorBg, textColor);
-                    }
-                }
+                var scrollTrackBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(20, 12, 25));
+                var scrollThumbBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(50, 35, 65));
+                var scrollThumbHoverBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(70, 50, 90));
 
-                var scrollTrackBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(25, 15, 30));
-                var scrollThumbBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(60, 40, 70));
-                var scrollThumbHoverBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(80, 50, 90));
-                UpdateScrollBarStyles(scrollTrackBg, scrollThumbBg, scrollThumbHoverBg);
+                ApplyThemeLogic(bgColor, editorBg, titleBarBg, menuBarBg, menuItemBg, menuItemHoverBg, statusBarBg, tabBg, selectedTabBg, hoverTabBg, textColor, scrollTrackBg, scrollThumbBg, scrollThumbHoverBg);
             }
-            else
+            else if (theme == "Custom")
+            {
+                // Custom theme - colors loaded from preferences
+                var customBg = GetBrushFromHex(ReadPreference("Custom_Bg", "#0F1928"));
+                var customEditorBg = GetBrushFromHex(ReadPreference("Custom_EditorBg", "#141E2D"));
+                var customTitleBar = GetBrushFromHex(ReadPreference("Custom_TitleBar", "#0F1928"));
+                var customStatusBar = GetBrushFromHex(ReadPreference("Custom_StatusBar", "#005A9E"));
+                var customText = GetBrushFromHex(ReadPreference("Custom_Text", "#D4D4D4"));
+                var customTabBg = GetBrushFromHex(ReadPreference("Custom_TabBg", "#1E1E1E"));
+                var customSelectedTab = GetBrushFromHex(ReadPreference("Custom_SelectedTab", "#007ACC"));
+                
+                // Derive others
+                var customHoverTab = GetBrighterBrush(customTabBg, 1.15);
+                var customScrollThumb = customStatusBar;
+                var customScrollBg = customBg;
+                
+                var scrollThumbHover = GetBrighterBrush(customScrollThumb, 1.2);
+                textColor = customText;
+
+                ApplyThemeLogic(customBg, customEditorBg, customTitleBar, customTitleBar, customEditorBg, customStatusBar, customStatusBar, customTabBg, customSelectedTab, customHoverTab, customText, customScrollBg, customScrollThumb, scrollThumbHover);
+            }
+            else // Default
             {
                 // Default Dark theme - current colors
                 var bgColor = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(30, 30, 30));
@@ -2536,52 +2333,11 @@ public partial class MainWindow : Window
                 var hoverTabBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(50, 50, 52));
                 textColor = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(212, 212, 212));
                 
-                this.Background = bgColor;
-                
-                // Update title bar
-                if (TitleBar != null)
-                {
-                    TitleBar.Background = titleBarBg;
-                }
-                
-                // Update menu bar and menu items
-                if (MenuBar != null)
-                {
-                    MenuBar.Background = menuBarBg;
-                    UpdateMenuItemStyles(menuItemBg, menuItemHoverBg, textColor);
-                }
-                
-                // Update status bar
-                if (StatusBarBorder != null)
-                {
-                    StatusBarBorder.Background = statusBarBg;
-                }
-                
-                // Update welcome screen
-                if (WelcomeScreen != null)
-                {
-                    WelcomeScreen.Background = editorBg;
-                }
-                
-                // Update tab control and tab styles
-                if (EditorTabControl != null)
-                {
-                    EditorTabControl.Background = bgColor;
-                    UpdateTabItemStyles(tabBg, selectedTabBg, hoverTabBg, textColor);
-                    
-                    // Update all existing editor tabs
-                    foreach (TabItem tab in EditorTabControl.Items)
-                    {
-                        tab.Background = tabBg;
-                        UpdateTabEditorColors(tab, editorBg, textColor);
-                    }
-                }
-                
-                // Update scrollbar colors - default dark theme
                 var scrollTrackBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(62, 62, 66));
                 var scrollThumbBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(104, 104, 104));
                 var scrollThumbHoverBg = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(158, 158, 158));
-                UpdateScrollBarStyles(scrollTrackBg, scrollThumbBg, scrollThumbHoverBg);
+
+                ApplyThemeLogic(bgColor, editorBg, titleBarBg, menuBarBg, menuItemBg, menuItemHoverBg, statusBarBg, tabBg, selectedTabBg, hoverTabBg, textColor, scrollTrackBg, scrollThumbBg, scrollThumbHoverBg);
             }
             
             // Update folding marker colors
@@ -2670,6 +2426,15 @@ public partial class MainWindow : Window
                     tooltipFgColor = System.Windows.Media.Color.FromRgb(220, 200, 230);
                     tooltipBorderColor = System.Windows.Media.Color.FromRgb(80, 50, 100);
                     _currentSearchHighlightColor = System.Windows.Media.Color.FromArgb(80, 190, 159, 225); // Lavender-ish
+                    break;
+                case "Custom":
+                    var customBg = GetBrushFromHex(ReadPreference("Custom_Bg", "#0F1928")).Color;
+                    var customAccent = GetBrushFromHex(ReadPreference("Custom_Accent", "#005A9E")).Color;
+                    var customText = GetBrushFromHex(ReadPreference("Custom_Text", "#D4D4D4")).Color;
+                    tooltipBgColor = customBg;
+                    tooltipFgColor = customText;
+                    tooltipBorderColor = customAccent;
+                    _currentSearchHighlightColor = System.Windows.Media.Color.FromArgb(80, customAccent.R, customAccent.G, customAccent.B);
                     break;
                 default: // Default / Dark
                     tooltipBgColor = System.Windows.Media.Color.FromRgb(30, 30, 30);
@@ -2794,6 +2559,14 @@ public partial class MainWindow : Window
             markerBgColor = System.Windows.Media.Color.FromRgb(30, 20, 35);
             selectedMarkerColor = System.Windows.Media.Color.FromRgb(200, 180, 210);
             selectedMarkerBgColor = System.Windows.Media.Color.FromRgb(50, 35, 60);
+        }
+        else if (theme == "Custom")
+        {
+            var editorBg = GetBrushFromHex(ReadPreference("Custom_EditorBg", "#141E2D")).Color;
+            markerColor = System.Windows.Media.Color.FromRgb(150, 150, 150);
+            markerBgColor = editorBg;
+            selectedMarkerColor = System.Windows.Media.Color.FromRgb(200, 200, 200);
+            selectedMarkerBgColor = editorBg;
         }
         else // Default
         {
@@ -3000,7 +2773,7 @@ public partial class MainWindow : Window
             var buttons = new List<Control>
             {
                 IconButton, ParticleButton, FindButton, ReplaceButton,
-                ThemesButton, SettingsButton, AboutButton, 
+                ThemesButton, PreferencesButton, SettingsButton, AboutButton, 
                 MaximizeButton, MinimizeButton, CloseButton
             };
             
@@ -3426,5 +3199,83 @@ public partial class MainWindow : Window
         {
             // Ignore temporary counter errors
         }
+    }
+
+    private void ApplyThemeLogic(SolidColorBrush bgColor, SolidColorBrush editorBg, SolidColorBrush titleBarBg, 
+                                SolidColorBrush menuBarBg, SolidColorBrush menuItemBg, SolidColorBrush menuItemHoverBg, 
+                                SolidColorBrush statusBarBg, SolidColorBrush tabBg, SolidColorBrush selectedTabBg, 
+                                SolidColorBrush hoverTabBg, SolidColorBrush textColor, 
+                                SolidColorBrush scrollTrackBg, SolidColorBrush scrollThumbBg, SolidColorBrush scrollThumbHoverBg)
+    {
+        this.Background = bgColor;
+        if (TitleBar != null) TitleBar.Background = titleBarBg;
+        if (MenuBar != null)
+        {
+            MenuBar.Background = menuBarBg;
+            UpdateMenuItemStyles(menuItemBg, menuItemHoverBg, textColor);
+        }
+        if (StatusBarBorder != null) StatusBarBorder.Background = statusBarBg;
+        if (WelcomeScreen != null) WelcomeScreen.Background = editorBg;
+        if (EditorTabControl != null)
+        {
+            EditorTabControl.Background = bgColor;
+            UpdateTabItemStyles(tabBg, selectedTabBg, hoverTabBg, textColor);
+            foreach (TabItem tab in EditorTabControl.Items)
+            {
+                tab.Background = tabBg;
+                UpdateTabEditorColors(tab, editorBg, textColor);
+            }
+        }
+        UpdateScrollBarStyles(scrollTrackBg, scrollThumbBg, scrollThumbHoverBg);
+    }
+
+    private SolidColorBrush GetBrighterBrush(SolidColorBrush brush, double factor)
+    {
+        try {
+            var color = brush.Color;
+            return new SolidColorBrush(System.Windows.Media.Color.FromRgb(
+                (byte)Math.Min(255, color.R * factor),
+                (byte)Math.Min(255, color.G * factor),
+                (byte)Math.Min(255, color.B * factor)));
+        } catch { return brush; }
+    }
+
+    private System.Windows.Media.SolidColorBrush GetBrushFromHex(string hex)
+    {
+        try {
+            var brush = new System.Windows.Media.BrushConverter().ConvertFrom(hex) as System.Windows.Media.SolidColorBrush;
+            return brush ?? System.Windows.Media.Brushes.Gray;
+        } catch {
+            return System.Windows.Media.Brushes.Gray;
+        }
+    }
+
+    private string GetPreferencesFilePath()
+    {
+        var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        var jadeDir = Path.Combine(appDataPath, "RitoShark", "Jade");
+        Directory.CreateDirectory(jadeDir);
+        return Path.Combine(jadeDir, "preferences.txt");
+    }
+
+    private string ReadPreference(string key, string defaultValue)
+    {
+        try
+        {
+            var prefsFile = GetPreferencesFilePath();
+            if (File.Exists(prefsFile))
+            {
+                var lines = File.ReadAllLines(prefsFile);
+                foreach (var line in lines)
+                {
+                    if (line.StartsWith($"{key}="))
+                    {
+                        return line.Substring(key.Length + 1).Trim();
+                    }
+                }
+            }
+        }
+        catch { }
+        return defaultValue;
     }
 }
