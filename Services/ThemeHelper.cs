@@ -40,6 +40,44 @@ public static class ThemeHelper
         return defaultValue;
     }
 
+    public static void WritePreference(string key, string value)
+    {
+        try
+        {
+            var prefsFile = GetPreferencesFilePath();
+            var lines = new System.Collections.Generic.List<string>();
+            bool found = false;
+            
+            if (File.Exists(prefsFile))
+            {
+                foreach (var line in File.ReadAllLines(prefsFile))
+                {
+                    var trimmedLine = line.Trim();
+                    if (trimmedLine.StartsWith($"{key}="))
+                    {
+                        lines.Add($"{key}={value}");
+                        found = true;
+                    }
+                    else if (!string.IsNullOrWhiteSpace(trimmedLine))
+                    {
+                        lines.Add(line);
+                    }
+                }
+            }
+            
+            if (!found)
+            {
+                lines.Add($"{key}={value}");
+            }
+            
+            File.WriteAllLines(prefsFile, lines);
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"Failed to write preference {key}", ex);
+        }
+    }
+
     public static SolidColorBrush GetBrushFromHex(string hex)
     {
         try
