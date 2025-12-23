@@ -415,8 +415,7 @@
                         Background="#1E1E1E"
                         BorderThickness="0"
                         Visibility="Collapsed"
-                        SelectionChanged="OnTabSelectionChanged"
-                        PreviewMouseWheel="OnTabControlMouseWheel">
+                        SelectionChanged="OnTabSelectionChanged">
             <TabControl.Style>
                 <Style TargetType="TabControl">
                     <Setter Property="Background" Value="#1E1E1E"/>
@@ -429,7 +428,7 @@
                                         <RowDefinition Height="*"/>
                                     </Grid.RowDefinitions>
                                     
-                                    <Grid Grid.Row="0" Background="{TemplateBinding Background}">
+                                    <Grid Grid.Row="0" Background="{TemplateBinding Background}" PreviewMouseWheel="OnTabControlMouseWheel">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="Auto"/>
