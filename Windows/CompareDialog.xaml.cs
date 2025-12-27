@@ -112,14 +112,13 @@ public partial class CompareDialog : Window
             }
         };
         
-        LoadAndApplyTheme();
         PopulateFileComboBoxes();
         
         // Add Shift+Scroll support
         LeftEditor.PreviewMouseWheel += OnEditorMouseWheel;
         RightEditor.PreviewMouseWheel += OnEditorMouseWheel;
     }
-    
+
     private void OnEditorMouseWheel(object sender, MouseWheelEventArgs e)
     {
         if (Keyboard.Modifiers.HasFlag(ModifierKeys.Shift))
@@ -238,9 +237,23 @@ public partial class CompareDialog : Window
             RightEditor.Text = rightTab.Editor.Text;
             
             // Apply syntax highlighting
-            var currentTheme = GetCurrentTheme();
-            LeftEditor.SyntaxHighlighting = ThemeSyntaxHighlighting.GetHighlightingForTheme(currentTheme);
-            RightEditor.SyntaxHighlighting = ThemeSyntaxHighlighting.GetHighlightingForTheme(currentTheme);
+            // Apply syntax highlighting
+            // Use ThemeHelper to fetch correct colors
+            var currentTheme = ThemeManager.GetCurrentTheme();
+            
+            // Handle syntax theme override
+            string syntaxTheme = currentTheme;
+            if (bool.TryParse(ThemeHelper.ReadPreference("OverrideBracketTheme", "False"), out bool overrideSyntax) && overrideSyntax)
+            {
+                syntaxTheme = ThemeHelper.ReadPreference("BracketTheme", currentTheme);
+            }
+
+            var (keyword, comment, stringColor, number, property) = ThemeHelper.GetThemeSyntaxColors(syntaxTheme);
+            
+            LeftEditor.SyntaxHighlighting = ThemeSyntaxHighlighting.GetHighlightingForTheme(
+                keyword, comment, stringColor, number, property);
+            RightEditor.SyntaxHighlighting = ThemeSyntaxHighlighting.GetHighlightingForTheme(
+                keyword, comment, stringColor, number, property);
             
             // Perform diff
             _differences = PerformDiff(leftTab.Editor.Text, rightTab.Editor.Text);
@@ -755,405 +768,7 @@ public partial class CompareDialog : Window
             Logger.Error("Failed to refresh diff", ex);
         }
     }
-    
-    private void LoadAndApplyTheme()
-    {
-        try
-        {
-            var theme = GetCurrentTheme();
-            ApplyTheme(theme);
-        }
-        catch (Exception ex)
-        {
-            Logger.Error("Failed to load theme for CompareDialog", ex);
-        }
-    }
-    
-    private string GetCurrentTheme()
-    {
-        return ThemeHelper.ReadPreference("Theme", "Default");
-    }
-    
-    private void ApplyTheme(string theme)
-    {
-        SolidColorBrush bgColor, editorBg, titleBarBg, textColor, selectionBg, comboBg, comboBorder, statusBarBg;
-        Color lineNumberColor;
-        
-        switch (theme)
-        {
-            case "DarkBlue":
-                bgColor = new SolidColorBrush(Color.FromRgb(15, 25, 40));
-                editorBg = new SolidColorBrush(Color.FromRgb(20, 30, 45));
-                titleBarBg = new SolidColorBrush(Color.FromRgb(25, 35, 50));
-                selectionBg = new SolidColorBrush(Color.FromRgb(25, 35, 50));
-                textColor = new SolidColorBrush(Color.FromRgb(220, 230, 240));
-                lineNumberColor = Color.FromRgb(100, 140, 180);
-                comboBg = new SolidColorBrush(Color.FromRgb(15, 25, 40));
-                comboBorder = new SolidColorBrush(Color.FromRgb(30, 45, 65));
-                statusBarBg = new SolidColorBrush(Color.FromRgb(0, 90, 158));
-                _addedColor = Color.FromArgb(80, 0, 180, 0);
-                _deletedColor = Color.FromArgb(80, 180, 0, 0);
-                break;
-            case "DarkRed":
-                bgColor = new SolidColorBrush(Color.FromRgb(40, 15, 20));
-                editorBg = new SolidColorBrush(Color.FromRgb(45, 20, 25));
-                titleBarBg = new SolidColorBrush(Color.FromRgb(50, 25, 30));
-                selectionBg = new SolidColorBrush(Color.FromRgb(50, 25, 30));
-                textColor = new SolidColorBrush(Color.FromRgb(240, 220, 225));
-                lineNumberColor = Color.FromRgb(180, 100, 120);
-                comboBg = new SolidColorBrush(Color.FromRgb(40, 15, 20));
-                comboBorder = new SolidColorBrush(Color.FromRgb(65, 30, 40));
-                statusBarBg = new SolidColorBrush(Color.FromRgb(158, 0, 40));
-                _addedColor = Color.FromArgb(80, 0, 255, 0);
-                _deletedColor = Color.FromArgb(80, 255, 0, 0);
-                break;
-            case "LightPink":
-                bgColor = new SolidColorBrush(Color.FromRgb(210, 165, 190)); // Match ThemesWindow bgColor
-                editorBg = new SolidColorBrush(Color.FromRgb(210, 165, 190)); // Match bgColor
-                titleBarBg = new SolidColorBrush(Color.FromRgb(180, 130, 160)); // Match ThemesWindow titleBarBg
-                selectionBg = new SolidColorBrush(Color.FromRgb(180, 130, 160));
-                textColor = new SolidColorBrush(Color.FromRgb(30, 15, 25)); // Match ThemesWindow textColor
-                lineNumberColor = Color.FromRgb(80, 50, 70);
-                comboBg = new SolidColorBrush(Color.FromRgb(200, 155, 180));
-                comboBorder = new SolidColorBrush(Color.FromRgb(170, 120, 150));
-                statusBarBg = new SolidColorBrush(Color.FromRgb(199, 21, 133)); // Match titleBarBg
-                _addedColor = Color.FromArgb(80, 0, 150, 0);
-                _deletedColor = Color.FromArgb(80, 200, 0, 0);
-                break;
-            case "PastelBlue":
-                bgColor = new SolidColorBrush(Color.FromRgb(210, 240, 255)); // Match ThemesWindow bgColor
-                editorBg = new SolidColorBrush(Color.FromRgb(210, 240, 255)); // Match bgColor
-                titleBarBg = new SolidColorBrush(Color.FromRgb(255, 240, 250)); // Match ThemesWindow titleBarBg
-                selectionBg = new SolidColorBrush(Color.FromRgb(255, 240, 250));
-                textColor = new SolidColorBrush(Color.FromRgb(40, 25, 60)); // Match ThemesWindow textColor
-                lineNumberColor = Color.FromRgb(100, 80, 140);
-                comboBg = new SolidColorBrush(Color.FromRgb(230, 245, 255));
-                comboBorder = new SolidColorBrush(Color.FromRgb(180, 220, 245));
-                statusBarBg = new SolidColorBrush(Color.FromRgb(80, 200, 255)); // Match titleBarBg
-                _addedColor = Color.FromArgb(80, 0, 120, 0);
-                _deletedColor = Color.FromArgb(80, 180, 0, 0);
-                break;
-            case "VioletSorrow":
-                bgColor = new SolidColorBrush(Color.FromRgb(18, 10, 35));
-                editorBg = new SolidColorBrush(Color.FromRgb(22, 12, 42));
-                titleBarBg = new SolidColorBrush(Color.FromRgb(28, 18, 52));
-                selectionBg = new SolidColorBrush(Color.FromRgb(32, 20, 58));
-                textColor = new SolidColorBrush(Color.FromRgb(185, 170, 215));
-                lineNumberColor = Color.FromRgb(130, 100, 185);
-                comboBg = new SolidColorBrush(Color.FromRgb(18, 10, 35));
-                comboBorder = new SolidColorBrush(Color.FromRgb(70, 45, 110));
-                statusBarBg = new SolidColorBrush(Color.FromRgb(65, 30, 120));
-                _addedColor = Color.FromArgb(80, 100, 200, 100);
-                _deletedColor = Color.FromArgb(80, 200, 100, 100);
-                break;
-            case "ForestGreen":
-                bgColor = new SolidColorBrush(Color.FromRgb(20, 35, 25));
-                editorBg = new SolidColorBrush(Color.FromRgb(25, 45, 30));
-                titleBarBg = new SolidColorBrush(Color.FromRgb(30, 50, 35));
-                selectionBg = new SolidColorBrush(Color.FromRgb(30, 50, 35));
-                textColor = new SolidColorBrush(Color.FromRgb(200, 230, 210));
-                lineNumberColor = Color.FromRgb(100, 150, 120);
-                comboBg = new SolidColorBrush(Color.FromRgb(20, 35, 25));
-                comboBorder = new SolidColorBrush(Color.FromRgb(40, 70, 50));
-                statusBarBg = new SolidColorBrush(Color.FromRgb(34, 139, 34));
-                _addedColor = Color.FromArgb(80, 0, 150, 0);
-                _deletedColor = Color.FromArgb(80, 150, 0, 0);
-                break;
-            case "AMOLED":
-                bgColor = new SolidColorBrush(Color.FromRgb(0, 0, 0));
-                editorBg = new SolidColorBrush(Color.FromRgb(0, 0, 0));
-                titleBarBg = new SolidColorBrush(Color.FromRgb(10, 10, 10));
-                selectionBg = new SolidColorBrush(Color.FromRgb(10, 10, 10));
-                textColor = new SolidColorBrush(Color.FromRgb(180, 180, 180));
-                lineNumberColor = Color.FromRgb(100, 100, 100);
-                comboBg = new SolidColorBrush(Color.FromRgb(5, 5, 5));
-                comboBorder = new SolidColorBrush(Color.FromRgb(25, 25, 25));
-                statusBarBg = new SolidColorBrush(Color.FromRgb(20, 20, 20));
-                _addedColor = Color.FromArgb(80, 0, 100, 0);
-                _deletedColor = Color.FromArgb(80, 100, 0, 0);
-                break;
-            case "Void":
-                bgColor = new SolidColorBrush(Color.FromRgb(10, 5, 20));
-                editorBg = new SolidColorBrush(Color.FromRgb(15, 10, 30));
-                titleBarBg = new SolidColorBrush(Color.FromRgb(20, 15, 40));
-                selectionBg = new SolidColorBrush(Color.FromRgb(26, 15, 46));
-                textColor = new SolidColorBrush(Color.FromRgb(180, 170, 220));
-                lineNumberColor = Color.FromRgb(140, 120, 180);
-                comboBg = new SolidColorBrush(Color.FromRgb(10, 5, 20));
-                comboBorder = new SolidColorBrush(Color.FromRgb(35, 25, 60));
-                statusBarBg = new SolidColorBrush(Color.FromRgb(25, 15, 80));
-                _addedColor = Color.FromArgb(80, 0, 80, 0);
-                _deletedColor = Color.FromArgb(80, 80, 0, 0);
-                break;
-            case "OrangeBurnout":
-                bgColor = new SolidColorBrush(Color.FromRgb(35, 15, 5));
-                editorBg = new SolidColorBrush(Color.FromRgb(42, 20, 8));
-                titleBarBg = new SolidColorBrush(Color.FromRgb(50, 25, 10));
-                selectionBg = new SolidColorBrush(Color.FromRgb(110, 45, 15));
-                textColor = new SolidColorBrush(Color.FromRgb(255, 228, 209));
-                lineNumberColor = Color.FromRgb(180, 100, 50);
-                comboBg = new SolidColorBrush(Color.FromRgb(35, 15, 5));
-                comboBorder = new SolidColorBrush(Color.FromRgb(85, 35, 10));
-                statusBarBg = new SolidColorBrush(Color.FromRgb(204, 85, 0));
-                _addedColor = Color.FromArgb(80, 40, 160, 40);
-                _deletedColor = Color.FromArgb(80, 160, 40, 40);
-                break;
-            case "PurpleGrief":
-                bgColor = new SolidColorBrush(Color.FromRgb(25, 15, 30));
-                editorBg = new SolidColorBrush(Color.FromRgb(30, 20, 35));
-                titleBarBg = new SolidColorBrush(Color.FromRgb(35, 25, 40));
-                selectionBg = new SolidColorBrush(Color.FromRgb(80, 50, 90));
-                textColor = new SolidColorBrush(Color.FromRgb(220, 200, 230));
-                lineNumberColor = Color.FromRgb(160, 140, 170);
-                comboBg = new SolidColorBrush(Color.FromRgb(25, 15, 30));
-                comboBorder = new SolidColorBrush(Color.FromRgb(80, 50, 100));
-                statusBarBg = new SolidColorBrush(Color.FromRgb(70, 40, 80));
-                _addedColor = Color.FromArgb(80, 60, 180, 60);
-                _deletedColor = Color.FromArgb(80, 180, 60, 60);
-                break;
-            case "Custom":
-                bgColor = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_Bg", "#0F1928"));
-                editorBg = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_EditorBg", "#141E2D"));
-                titleBarBg = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_TitleBar", "#0F1928"));
-                selectionBg = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_SelectedTab", "#1E2A3E"));
-                textColor = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_Text", "#D4D4D4"));
-                lineNumberColor = ThemeHelper.GetBrighterColor(editorBg.Color, 2.5);
-                comboBg = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_Bg", "#0F1928"));
-                comboBorder = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_StatusBar", "#005A9E"));
-                statusBarBg = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_StatusBar", "#005A9E"));
-                _addedColor = Color.FromArgb(80, 0, 180, 0);
-                _deletedColor = Color.FromArgb(80, 180, 0, 0);
-                break;
-            default:
-                bgColor = new SolidColorBrush(Color.FromRgb(30, 30, 30));
-                editorBg = new SolidColorBrush(Color.FromRgb(30, 30, 30));
-                titleBarBg = new SolidColorBrush(Color.FromRgb(37, 37, 38));
-                selectionBg = new SolidColorBrush(Color.FromRgb(37, 37, 38));
-                textColor = new SolidColorBrush(Color.FromRgb(212, 212, 212));
-                lineNumberColor = Color.FromRgb(128, 128, 128);
-                comboBg = new SolidColorBrush(Color.FromRgb(45, 45, 48));
-                comboBorder = new SolidColorBrush(Color.FromRgb(62, 62, 66));
-                statusBarBg = new SolidColorBrush(Color.FromRgb(0, 122, 204));
-                _addedColor = Color.FromArgb(80, 0, 255, 0);
-                _deletedColor = Color.FromArgb(80, 255, 0, 0);
-                break;
-        }
-        
-        this.Background = bgColor;
-        
-        if (TitleBar != null)
-            TitleBar.Background = titleBarBg;
-        
-        // Update file selection grid
-        if (FileSelectionGrid != null)
-        {
-            FileSelectionGrid.Background = selectionBg;
-            
-            // Update TextBlocks in file selection
-            foreach (var child in FileSelectionGrid.Children)
-            {
-                if (child is System.Windows.Controls.TextBlock tb)
-                {
-                    tb.Foreground = textColor;
-                }
-            }
-        }
-        
-        // Update ComboBox colors in resources
-        this.Resources["ComboBoxBackground"] = comboBg;
-        this.Resources["ComboBoxForeground"] = textColor;
-        this.Resources["ComboBoxBorder"] = comboBorder;
-        this.Resources["ComboBoxHoverBackground"] = selectionBg;
-        
-        if (LeftFileComboBox != null)
-        {
-            LeftFileComboBox.Background = comboBg;
-            LeftFileComboBox.Foreground = textColor;
-            LeftFileComboBox.BorderBrush = comboBorder;
-            LeftFileComboBox.UpdateLayout();
-        }
-        
-        if (RightFileComboBox != null)
-        {
-            RightFileComboBox.Background = comboBg;
-            RightFileComboBox.Foreground = textColor;
-            RightFileComboBox.BorderBrush = comboBorder;
-            RightFileComboBox.UpdateLayout();
-        }
-        
-        // Update navigation buttons
-        SolidColorBrush buttonBg, buttonHoverBg;
-        switch (theme)
-        {
-            case "DarkBlue":
-                buttonBg = new SolidColorBrush(Color.FromRgb(0, 90, 158));
-                buttonHoverBg = new SolidColorBrush(Color.FromRgb(28, 151, 234));
-                break;
-            case "DarkRed":
-                buttonBg = new SolidColorBrush(Color.FromRgb(158, 0, 40));
-                buttonHoverBg = new SolidColorBrush(Color.FromRgb(200, 30, 70));
-                break;
-            case "LightPink":
-                buttonBg = new SolidColorBrush(Color.FromRgb(140, 70, 120)); // Darker for better visibility
-                buttonHoverBg = new SolidColorBrush(Color.FromRgb(160, 90, 140));
-                break;
-            case "PastelBlue":
-                buttonBg = new SolidColorBrush(Color.FromRgb(60, 130, 200)); // Darker for better visibility
-                buttonHoverBg = new SolidColorBrush(Color.FromRgb(80, 150, 220));
-                break;
-            case "VioletSorrow":
-                buttonBg = new SolidColorBrush(Color.FromRgb(65, 30, 120));
-                buttonHoverBg = new SolidColorBrush(Color.FromRgb(95, 55, 150));
-                break;
-            case "ForestGreen":
-                buttonBg = new SolidColorBrush(Color.FromRgb(34, 139, 34));
-                buttonHoverBg = new SolidColorBrush(Color.FromRgb(50, 170, 50));
-                break;
-            case "AMOLED":
-                buttonBg = new SolidColorBrush(Color.FromRgb(40, 40, 40));
-                buttonHoverBg = new SolidColorBrush(Color.FromRgb(60, 60, 60));
-                break;
-            case "Void":
-                buttonBg = new SolidColorBrush(Color.FromRgb(25, 15, 80));
-                buttonHoverBg = new SolidColorBrush(Color.FromRgb(40, 30, 100));
-                break;
-            case "Custom":
-                buttonBg = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_StatusBar", "#005A9E"));
-                buttonHoverBg = ThemeHelper.GetBrighterBrush(buttonBg, 1.2);
-                break;
-            case "OrangeBurnout":
-            default:
-                buttonBg = new SolidColorBrush(Color.FromRgb(0, 122, 204));
-                buttonHoverBg = new SolidColorBrush(Color.FromRgb(28, 151, 234));
-                break;
-        }
-        
-        var buttonStyle = new Style(typeof(System.Windows.Controls.Button));
-        buttonStyle.Setters.Add(new Setter(System.Windows.Controls.Button.BackgroundProperty, buttonBg));
-        buttonStyle.Setters.Add(new Setter(System.Windows.Controls.Button.ForegroundProperty, new SolidColorBrush(Colors.White)));
-        buttonStyle.Setters.Add(new Setter(System.Windows.Controls.Button.BorderThicknessProperty, new Thickness(0)));
-        buttonStyle.Setters.Add(new Setter(System.Windows.Controls.Button.CursorProperty, Cursors.Hand));
-        
-        var hoverTrigger = new Trigger { Property = System.Windows.Controls.Button.IsMouseOverProperty, Value = true };
-        hoverTrigger.Setters.Add(new Setter(System.Windows.Controls.Button.BackgroundProperty, buttonHoverBg));
-        buttonStyle.Triggers.Add(hoverTrigger);
-        
-        this.Resources[typeof(System.Windows.Controls.Button)] = buttonStyle;
-        
-        // Update status bar
-        if (StatusBarBorder != null)
-        {
-            StatusBarBorder.Background = statusBarBg;
-        }
-        
-        if (StatusText != null)
-        {
-            // Use dark text for light themes
-            var statusTextColor = (theme == "LightPink" || theme == "PastelBlue") 
-                ? new SolidColorBrush(Color.FromRgb(30, 20, 40))
-                : new SolidColorBrush(Colors.White);
-            StatusText.Foreground = statusTextColor;
-        }
-        
-        // Update editor borders (which contain the actual background)
-        var leftEditorBorder = this.FindName("LeftEditorBorder") as System.Windows.Controls.Border;
-        if (leftEditorBorder != null)
-        {
-            leftEditorBorder.Background = editorBg;
-        }
-        
-        var rightEditorBorder = this.FindName("RightEditorBorder") as System.Windows.Controls.Border;
-        if (rightEditorBorder != null)
-        {
-            rightEditorBorder.Background = editorBg;
-        }
-        
-        if (LeftEditor != null)
-        {
-            LeftEditor.Foreground = textColor;
-            LeftEditor.LineNumbersForeground = new SolidColorBrush(lineNumberColor);
-        }
-        
-        if (RightEditor != null)
-        {
-            RightEditor.Foreground = textColor;
-            RightEditor.LineNumbersForeground = new SolidColorBrush(lineNumberColor);
-        }
-        
-        // Update scrollbar colors based on theme
-        UpdateScrollBarColors(theme);
-    }
-    
-    private void UpdateScrollBarColors(string theme)
-    {
-        SolidColorBrush trackBg, thumbBg, thumbHoverBg;
-        
-        switch (theme)
-        {
-            case "DarkBlue":
-                trackBg = new SolidColorBrush(Color.FromRgb(30, 40, 55));
-                thumbBg = new SolidColorBrush(Color.FromRgb(60, 90, 130));
-                thumbHoverBg = new SolidColorBrush(Color.FromRgb(80, 120, 170));
-                break;
-            case "DarkRed":
-                trackBg = new SolidColorBrush(Color.FromRgb(55, 25, 35));
-                thumbBg = new SolidColorBrush(Color.FromRgb(130, 60, 80));
-                thumbHoverBg = new SolidColorBrush(Color.FromRgb(170, 80, 110));
-                break;
-            case "LightPink":
-                trackBg = new SolidColorBrush(Color.FromRgb(220, 175, 200));
-                thumbBg = new SolidColorBrush(Color.FromRgb(180, 130, 160));
-                thumbHoverBg = new SolidColorBrush(Color.FromRgb(160, 110, 140));
-                break;
-            case "PastelBlue":
-                trackBg = new SolidColorBrush(Color.FromRgb(200, 235, 250));
-                thumbBg = new SolidColorBrush(Color.FromRgb(150, 200, 230));
-                thumbHoverBg = new SolidColorBrush(Color.FromRgb(120, 180, 220));
-                break;
-            case "VioletSorrow":
-                trackBg = new SolidColorBrush(Color.FromRgb(28, 18, 52));
-                thumbBg = new SolidColorBrush(Color.FromRgb(70, 45, 110));
-                thumbHoverBg = new SolidColorBrush(Color.FromRgb(95, 65, 145));
-                break;
-            case "ForestGreen":
-                trackBg = new SolidColorBrush(Color.FromRgb(35, 55, 40));
-                thumbBg = new SolidColorBrush(Color.FromRgb(70, 120, 85));
-                thumbHoverBg = new SolidColorBrush(Color.FromRgb(90, 150, 110));
-                break;
-            case "AMOLED":
-                trackBg = new SolidColorBrush(Color.FromRgb(15, 15, 15));
-                thumbBg = new SolidColorBrush(Color.FromRgb(40, 40, 40));
-                thumbHoverBg = new SolidColorBrush(Color.FromRgb(60, 60, 60));
-                break;
-            case "Void":
-                trackBg = new SolidColorBrush(Color.FromRgb(25, 20, 45));
-                thumbBg = new SolidColorBrush(Color.FromRgb(60, 50, 100));
-                thumbHoverBg = new SolidColorBrush(Color.FromRgb(80, 70, 130));
-                break;
-            case "Custom":
-                var scrollBg = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_Bg", "#0F1928"));
-                var scrollThumb = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_StatusBar", "#005A9E"));
-                trackBg = ThemeHelper.GetBrighterBrush(scrollBg, 1.2);
-                thumbBg = scrollThumb;
-                thumbHoverBg = ThemeHelper.GetBrighterBrush(scrollThumb, 1.2);
-                break;
-            case "OrangeBurnout":
-                trackBg = new SolidColorBrush(Color.FromRgb(50, 25, 10));
-                thumbBg = new SolidColorBrush(Color.FromRgb(110, 45, 15));
-                thumbHoverBg = new SolidColorBrush(Color.FromRgb(150, 65, 20));
-                break;
-            default:
-                trackBg = new SolidColorBrush(Color.FromRgb(62, 62, 66));
-                thumbBg = new SolidColorBrush(Color.FromRgb(104, 104, 104));
-                thumbHoverBg = new SolidColorBrush(Color.FromRgb(158, 158, 158));
-                break;
-        }
-        
-        this.Resources["ScrollBarTrackBrush"] = trackBg;
-        this.Resources["ScrollBarThumbBrush"] = thumbBg;
-        this.Resources["ScrollBarThumbHoverBrush"] = thumbHoverBg;
-    }
-    
+
     private void TitleBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (e.ClickCount == 2)

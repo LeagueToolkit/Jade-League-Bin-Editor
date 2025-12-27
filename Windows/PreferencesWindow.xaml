@@ -10,12 +10,12 @@
     
     <Window.Resources>
         <Style TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#CCCCCC"/>
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}"/>
             <Setter Property="FontSize" Value="14"/>
         </Style>
     </Window.Resources>
     
-    <Border BorderThickness="1" BorderBrush="#3E3E42" CornerRadius="{DynamicResource GlobalCornerRadius}">
+    <Border BorderThickness="1" BorderBrush="{DynamicResource SubtleBorderBrush}" Background="{DynamicResource WindowBackgroundBrush}" CornerRadius="{DynamicResource GlobalCornerRadius}">
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
@@ -23,10 +23,10 @@
             </Grid.RowDefinitions>
             
             <!-- Custom Title Bar -->
-            <Border x:Name="TitleBar" Grid.Row="0" Background="#252526" Height="30" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown" CornerRadius="{DynamicResource GlobalCornerRadius}">
+            <Border x:Name="TitleBar" Grid.Row="0" Background="{DynamicResource TitleBarBackgroundBrush}" Height="30" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown" CornerRadius="{DynamicResource GlobalCornerRadius}">
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0">
                     <Image Source="/jade.ico" Width="16" Height="16" Margin="0,0,8,0"/>
-                    <TextBlock Text="Jade Preferences" Foreground="#CCCCCC" FontSize="12" VerticalAlignment="Center"/>
+                    <TextBlock Text="Jade Preferences" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="12" VerticalAlignment="Center"/>
                 </StackPanel>
             </Border>
             
@@ -41,12 +41,12 @@
                 
                 <!-- Title -->
                 <StackPanel Grid.Row="0">
-                    <TextBlock Text="Preferences" FontSize="32" FontWeight="Bold" Foreground="White" Margin="0,0,0,5"/>
-                    <TextBlock Text="Configure your experience" FontSize="16" Foreground="#888888"/>
+                    <TextBlock Text="Preferences" FontSize="32" FontWeight="Bold" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,5"/>
+                    <TextBlock Text="Configure your experience" FontSize="16" Foreground="{DynamicResource MutedTextBrush}"/>
                 </StackPanel>
 
                 <!-- Preference Options -->
-                <Border x:Name="ContentBorder" Grid.Row="2" Background="#252526" BorderBrush="#3E3E42" BorderThickness="1" CornerRadius="{DynamicResource GlobalCornerRadius}" Padding="20">
+                <Border x:Name="ContentBorder" Grid.Row="2" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource SubtleBorderBrush}" BorderThickness="1" CornerRadius="{DynamicResource GlobalCornerRadius}" Padding="20">
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <StackPanel>
                             <!-- Import Linked Bin Files Option -->
@@ -54,12 +54,12 @@
                                 <CheckBox x:Name="ImportLinkedBinsCheckBox" 
                                           Content="Import Linked Bin Files" 
                                           FontSize="16" 
-                                          Foreground="#CCCCCC"
+                                          Foreground="{DynamicResource PrimaryTextBrush}"
                                           Checked="OnImportLinkedBinsChanged"
                                           Unchecked="OnImportLinkedBinsChanged"/>
                                 <TextBlock Text="When enabled, opening a bin file will automatically open all linked bin files found in the DATA folder." 
                                            TextWrapping="Wrap" 
-                                           Foreground="#888888" 
+                                           Foreground="{DynamicResource MutedTextBrush}" 
                                            FontSize="12" 
                                            Margin="20,5,0,0"/>
                                 
@@ -67,14 +67,14 @@
                                 <CheckBox x:Name="RecursiveLinkedBinsCheckBox" 
                                           Content="Also load files linked inside imported files" 
                                           FontSize="14" 
-                                          Foreground="#AAAAAA"
+                                          Foreground="{DynamicResource MutedTextBrush}"
                                           Margin="30,10,0,0"
                                           IsEnabled="{Binding IsChecked, ElementName=ImportLinkedBinsCheckBox}"
                                           Checked="OnRecursiveLinkedBinsChanged"
                                           Unchecked="OnRecursiveLinkedBinsChanged"/>
                                 <TextBlock Text="Recursively opens linked files from within the imported linked files (may open many tabs)." 
                                            TextWrapping="Wrap" 
-                                           Foreground="#666666" 
+                                           Foreground="{DynamicResource MutedTextBrush}" 
                                            FontSize="11" 
                                            Margin="50,3,0,0"/>
                             </StackPanel>
@@ -86,7 +86,7 @@
         
                 <!-- Action Buttons -->
                 <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
-                    <Button Content="Close" Click="OnClose" Background="#3E3E42"/>
+                    <Button Content="Close" Click="OnClose" Background="{DynamicResource SubtleBorderBrush}"/>
                 </StackPanel>
             </Grid>
         </Grid>

@@ -55,9 +55,6 @@ public partial class ThemesWindow : Window
         // Load theme preferences
         LoadThemePreference();
         
-        // Apply current theme to this window
-        ApplyWindowTheme(_currentTheme);
-        
         // Load custom theme settings
         LoadCustomThemeSettings();
         
@@ -201,9 +198,21 @@ public partial class ThemesWindow : Window
             NumberColor = GetBrushFromHex(vscodeColors.number),
             PropertyColor = GetBrushFromHex(vscodeColors.propertyColor)
         });
+
+        // Add Standard Flint as a standalone syntax theme (matches Monaco ritobin theme)
+        var flintColors = GetFullSyntaxColors("StandardFlint");
+        BracketThemes.Add(new BracketThemeItem {
+            Id = "StandardFlint", DisplayName = "Standard Flint",
+            PreviewColor1 = GetBrush(255, 215, 0), PreviewColor2 = GetBrush(218, 112, 214), PreviewColor3 = GetBrush(23, 159, 255),
+            KeywordColor = GetBrushFromHex(flintColors.keyword),
+            CommentColor = GetBrushFromHex(flintColors.comment),
+            StringColor = GetBrushFromHex(flintColors.stringColor),
+            NumberColor = GetBrushFromHex(flintColors.number),
+            PropertyColor = GetBrushFromHex(flintColors.propertyColor)
+        });
     }
 
-    private (string keyword, string comment, string stringColor, string number, string propertyColor) GetFullSyntaxColors(string themeId)
+    public static (string keyword, string comment, string stringColor, string number, string propertyColor) GetFullSyntaxColors(string themeId)
     {
         return themeId switch
         {
@@ -219,6 +228,9 @@ public partial class ThemesWindow : Window
             "VSCode" => ("#569CD6", "#6A9955", "#CE9178", "#B5CEA8", "#9CDCFE"),
             "OrangeBurnout" => ("#FF8C00", "#8B4513", "#FFD700", "#F4A460", "#FFA07A"),
             "PurpleGrief" => ("#BE9FE1", "#6F4E7C", "#E1BEE7", "#9575CD", "#B39DDB"),
+            // Standard Flint - matches Monaco Editor ritobin theme colors
+            "StandardFlint" => ("#569CD6", "#6A9955", "#CE9178", "#B5CEA8", "#DCDCAA"),
+            // Default fallback (also used for "Default" theme)
             _ => ("#569CD6", "#6A9955", "#CE9178", "#B5CEA8", "#569CD6")
         };
     }
@@ -578,7 +590,6 @@ public partial class ThemesWindow : Window
                 SaveGeneralPreference("Custom_TabBg", CustomTabBgHex.Text);
                 SaveGeneralPreference("Custom_SelectedTab", CustomSelectedTabHex.Text);
                 
-                // ALSO SAVE BRACKET THEME even in custom mode
                 if (BracketThemesListBox.SelectedItem is BracketThemeItem selectedBracketTheme)
                 {
                     bool overrideBrackets = OverrideBracketsCheckBox.IsChecked == true;
@@ -591,14 +602,12 @@ public partial class ThemesWindow : Window
                     SaveGeneralPreference("UseCustomTheme", "True");
                 }
                 
-                var mainWindow = Application.Current.MainWindow as MainWindow;
-                if (mainWindow != null)
-                {
-                    mainWindow.ApplyTheme("Custom");
-                    mainWindow.LoadTheme();
-                }
+                // Apply theme to resources
+                ThemeManager.ApplyTheme("Custom");
                 
-                ApplyCustomWindowTheme();
+                // Update open editors in MainWindow
+                ApplyTheme("Custom");
+                
                 UpdatePalettePreview(null!);
                 UpdateCurrentThemeText();
                 
@@ -609,20 +618,18 @@ public partial class ThemesWindow : Window
             {
                 bool overrideBrackets = OverrideBracketsCheckBox.IsChecked == true;
                 SavePreferences(selectedTheme.Id, selectedBracketTheme.Id, overrideBrackets);
+                
+                // Apply theme to resources
+                ThemeManager.ApplyTheme(selectedTheme.Id);
+                
+                // Update open editors in MainWindow
                 ApplyTheme(selectedTheme.Id);
                 
-                // Refresh this window's theme immediately
-                ApplyWindowTheme(selectedTheme.Id);
                 UpdatePalettePreview(selectedTheme);
                 UpdateCurrentThemeText();
                 
-                var mainWindow = Application.Current.MainWindow as MainWindow;
-                if (mainWindow != null)
-                {
-                    mainWindow.LoadTheme();
-                    Logger.Info($"Applied preferences: Theme={selectedTheme.Id}, BracketTheme={selectedBracketTheme.Id}, Override={overrideBrackets}");
-                    MessageBox.Show("Settings applied successfully!", "Applied", MessageBoxButton.OK, MessageBoxImage.Information);
-                }
+                Logger.Info($"Applied preferences: Theme={selectedTheme.Id}, BracketTheme={selectedBracketTheme.Id}, Override={overrideBrackets}");
+                MessageBox.Show("Settings applied successfully!", "Applied", MessageBoxButton.OK, MessageBoxImage.Information);
             }
         }
         catch (Exception ex)
@@ -682,80 +689,7 @@ public partial class ThemesWindow : Window
         Close();
     }
     
-    private void ApplyWindowTheme(string theme)
-    {
-        if (theme == "Custom")
-        {
-            ApplyCustomWindowTheme();
-            return;
-        }
-        try
-        {
-            var themeItem = Themes.FirstOrDefault(t => t.Id == theme) ?? Themes.FirstOrDefault(t => t.Id == "Default");
-            if (themeItem == null) return;
 
-            var bgColor = themeItem.EditorBackground; // Using EditorBackground as per user request (was darker than intended)
-            var titleBarBg = themeItem.TitleBarBackground;
-            var textColor = themeItem.Foreground;
-            
-            this.Background = bgColor;
-            
-            // Update title bar
-            var titleBar = this.FindName("TitleBar") as System.Windows.Controls.Border;
-            if (titleBar != null)
-            {
-                titleBar.Background = titleBarBg;
-            }
-
-            // Update boxes to follow theme with boxed aesthetic (consistent with SettingsWindow)
-            var boxes = new[] { "UIThemeBox", "BracketThemeBox", "PreviewPanelBorder" };
-            var subtleBorder = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromArgb(40, 255, 255, 255));
-            
-            foreach (var boxName in boxes)
-            {
-                if (this.FindName(boxName) is System.Windows.Controls.Border box)
-                {
-                    box.Background = titleBarBg;
-                    box.BorderBrush = subtleBorder;
-                }
-            }
-
-            // Ensure ListBoxes remain transparent
-            if (this.FindName("ThemesListBox") is System.Windows.Controls.ListBox tlb) tlb.Background = System.Windows.Media.Brushes.Transparent;
-            if (this.FindName("BracketThemesListBox") is System.Windows.Controls.ListBox blb) blb.Background = System.Windows.Media.Brushes.Transparent;
-            
-            // Update all TextBlocks
-            UpdateTextBlockColors(this, textColor);
-
-            // Set local resources for TextBoxes to follow theme
-            SetThemeResources(bgColor, textColor, subtleBorder);
-        }
-        catch (Exception ex)
-        {
-            Logger.Error("Failed to apply window theme", ex);
-        }
-    }
-    
-    private void SetThemeResources(System.Windows.Media.SolidColorBrush bg, System.Windows.Media.SolidColorBrush fg, System.Windows.Media.SolidColorBrush border)
-    {
-        this.Resources["TextBoxBackground"] = bg;
-        this.Resources["TextBoxForeground"] = fg;
-        this.Resources["TextBoxBorder"] = border;
-    }
-
-    private void UpdateTextBlockColors(System.Windows.DependencyObject parent, System.Windows.Media.SolidColorBrush color)
-    {
-        int childCount = System.Windows.Media.VisualTreeHelper.GetChildrenCount(parent);
-        for (int i = 0; i < childCount; i++)
-        {
-            var child = System.Windows.Media.VisualTreeHelper.GetChild(parent, i);
-            if (child is System.Windows.Controls.TextBlock textBlock && textBlock.Name != "TitleText")
-            {
-                textBlock.Foreground = color;
-            }
-            UpdateTextBlockColors(child, color);
-        }
-    }
 
     private void OnCustomThemeToggle(object sender, RoutedEventArgs e)
     {
@@ -874,40 +808,7 @@ public partial class ThemesWindow : Window
         return false;
     }
 
-    private void ApplyCustomWindowTheme()
-    {
-        try
-        {
-            var bg = GetBrushFromHex(CustomBgHex.Text);
-            var editorBg = GetBrushFromHex(CustomEditorBgHex.Text);
-            var titleBar = GetBrushFromHex(CustomTitleBarHex.Text);
-            var text = GetBrushFromHex(CustomTextHex.Text);
 
-            this.Background = editorBg;
-            if (TitleBar != null) TitleBar.Background = titleBar;
-            
-            var boxes = new[] { "UIThemeBox", "BracketThemeBox", "PreviewPanelBorder" };
-            var subtleBorder = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromArgb(40, 255, 255, 255));
-            
-            foreach (var boxName in boxes)
-            {
-                if (this.FindName(boxName) is System.Windows.Controls.Border box)
-                {
-                    box.Background = bg;
-                    box.BorderBrush = subtleBorder;
-                }
-            }
-
-            UpdateTextBlockColors(this, text);
-        
-            // Set local resources for TextBoxes to follow theme
-            SetThemeResources(bg, text, subtleBorder);
-        }
-        catch (Exception ex)
-        {
-            Logger.Error("Failed to apply custom window theme", ex);
-        }
-    }
 
     private void LoadCustomThemeSettings()
     {
@@ -946,15 +847,7 @@ public partial class ThemesWindow : Window
         return defaultValue;
     }
 
-    private System.Windows.Media.SolidColorBrush GetBrighterBrush(System.Windows.Media.SolidColorBrush brush, double factor)
-    {
-        var color = brush.Color;
-        return new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(
-            (byte)Math.Min(255, color.R * factor),
-            (byte)Math.Min(255, color.G * factor),
-            (byte)Math.Min(255, color.B * factor)
-        ));
-    }
+
 }
 
 public class InverseBooleanConverter : System.Windows.Data.IValueConverter

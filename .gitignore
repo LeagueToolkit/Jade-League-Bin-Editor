@@ -6,3 +6,8 @@
 *.userprefs
 Thumbs.db
 ehthumbs.db
+*.md
+*.ts
+*.ps1
+*.bat
+*.txt

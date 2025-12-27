@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:avalonedit="http://icsharpcode.net/sharpdevelop/avalonedit"
         Title="Compare Files" Height="700" Width="1200"
-        Background="#1E1E1E"
+        Background="Transparent"
         WindowStartupLocation="CenterScreen"
         WindowStyle="None"
         AllowsTransparency="True"
@@ -21,15 +21,15 @@
     
     <Window.Resources>
         <!-- Scrollbar Color Resources -->
-        <SolidColorBrush x:Key="ScrollBarTrackBrush" Color="#3E3E42"/>
-        <SolidColorBrush x:Key="ScrollBarThumbBrush" Color="#686868"/>
-        <SolidColorBrush x:Key="ScrollBarThumbHoverBrush" Color="#9E9E9E"/>
+        <DynamicResource x:Key="ScrollBarTrackBrush" ResourceKey="CardBackgroundBrush"/>
+        <DynamicResource x:Key="ScrollBarThumbBrush" ResourceKey="SubtleBorderBrush"/>
+        <DynamicResource x:Key="ScrollBarThumbHoverBrush" ResourceKey="TabBackgroundBrush"/>
         
         <!-- ComboBox Color Resources -->
-        <SolidColorBrush x:Key="ComboBoxBackground" Color="#2D2D30"/>
-        <SolidColorBrush x:Key="ComboBoxForeground" Color="#CCCCCC"/>
-        <SolidColorBrush x:Key="ComboBoxBorder" Color="#3E3E42"/>
-        <SolidColorBrush x:Key="ComboBoxHoverBackground" Color="#3E3E42"/>
+        <DynamicResource x:Key="ComboBoxBackground" ResourceKey="TextBoxBackground"/>
+        <DynamicResource x:Key="ComboBoxForeground" ResourceKey="PrimaryTextBrush"/>
+        <DynamicResource x:Key="ComboBoxBorder" ResourceKey="SubtleBorderBrush"/>
+        <DynamicResource x:Key="ComboBoxHoverBackground" ResourceKey="TabBackgroundBrush"/>
         
         <!-- Scrollbar Styles -->
         <Style x:Key="ScrollBarThumb" TargetType="{x:Type Thumb}">
@@ -194,7 +194,7 @@
         </Style>
     </Window.Resources>
     
-    <Border BorderThickness="1" BorderBrush="#3E3E42" CornerRadius="{DynamicResource GlobalCornerRadius}">
+    <Border BorderThickness="1" BorderBrush="{DynamicResource SubtleBorderBrush}" Background="{DynamicResource WindowBackgroundBrush}" CornerRadius="{DynamicResource GlobalCornerRadius}">
         <Grid x:Name="RootGrid">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
@@ -205,20 +205,20 @@
             </Grid.RowDefinitions>
             
             <!-- Custom Title Bar -->
-            <Border x:Name="TitleBar" Grid.Row="0" Background="#252526" Height="30" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown" CornerRadius="{DynamicResource GlobalCornerRadius}">
+            <Border x:Name="TitleBar" Grid.Row="0" Background="{DynamicResource TitleBarBackgroundBrush}" Height="30" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown" CornerRadius="{DynamicResource GlobalCornerRadius}">
                 <Grid>
                     <TextBlock Text="Compare Files" Foreground="#CCCCCC" FontSize="12" VerticalAlignment="Center" Margin="10,0"/>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                         <Button Style="{StaticResource WindowControlButtonStyle}" Content="—" Width="46" Height="30" Click="MinimizeWindow" 
-                                Background="Transparent" Foreground="#CCCCCC" BorderThickness="0"
+                                Background="Transparent" Foreground="{DynamicResource PrimaryTextBrush}" BorderThickness="0"
                                 FontSize="14" VerticalContentAlignment="Center"
                                 WindowChrome.IsHitTestVisibleInChrome="True"/>
                         <Button Style="{StaticResource WindowControlButtonStyle}" Content="□" Width="46" Height="30" Click="MaximizeWindow" 
-                                Background="Transparent" Foreground="#CCCCCC" BorderThickness="0"
+                                Background="Transparent" Foreground="{DynamicResource PrimaryTextBrush}" BorderThickness="0"
                                 FontSize="14" VerticalContentAlignment="Center"
                                 WindowChrome.IsHitTestVisibleInChrome="True"/>
                         <Button Style="{StaticResource WindowControlButtonStyle}" Content="✕" Width="46" Height="30" Click="CloseWindow" 
-                                Background="Transparent" Foreground="#CCCCCC" BorderThickness="0"
+                                Background="Transparent" Foreground="{DynamicResource PrimaryTextBrush}" BorderThickness="0"
                                 FontSize="14" VerticalContentAlignment="Center"
                                 WindowChrome.IsHitTestVisibleInChrome="True"/>
                     </StackPanel>
@@ -237,20 +237,20 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 
-                <TextBlock Grid.Column="0" Text="Left:" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="10,0,8,0"/>
+                <TextBlock Grid.Column="0" Text="Left:" Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center" Margin="10,0,8,0"/>
                 <ComboBox Grid.Column="1" x:Name="LeftFileComboBox" MinWidth="200" Margin="0,8" SelectionChanged="OnFileSelectionChanged"/>
                 
-                <Border Grid.Column="2" Width="1" Background="#3E3E42" Margin="10,5"/>
+                <Border Grid.Column="2" Width="1" Background="{DynamicResource SubtleBorderBrush}" Margin="10,5"/>
                 
                 <Button Grid.Column="3" Style="{StaticResource ModernButtonStyle}" Content="◀ Previous" Click="OnPreviousDifference" Margin="10,8,5,8" Padding="10,5" FontSize="12"/>
                 <Button Grid.Column="4" Style="{StaticResource ModernButtonStyle}" Content="Next ▶" Click="OnNextDifference" Margin="5,8,10,8" Padding="10,5" FontSize="12"/>
                 
                 <ComboBox Grid.Column="5" x:Name="RightFileComboBox" MinWidth="200" Margin="0,8" SelectionChanged="OnFileSelectionChanged"/>
-                <TextBlock Grid.Column="6" Text="Right:" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="8,0,10,0"/>
+                <TextBlock Grid.Column="6" Text="Right:" Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center" Margin="8,0,10,0"/>
             </Grid>
             
             <!-- Merge and Save Toolbar -->
-            <Grid Grid.Row="2" Background="#2D2D30">
+            <Grid Grid.Row="2" Background="{DynamicResource CardBackgroundBrush}">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
@@ -265,7 +265,7 @@
                 </StackPanel>
                 
                 <!-- Center label -->
-                <TextBlock Grid.Column="1" Text="Merge" Foreground="#888888" VerticalAlignment="Center" Margin="15,0" FontSize="11"/>
+                <TextBlock Grid.Column="1" Text="Merge" Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center" Margin="15,0" FontSize="11"/>
                 
                 <!-- Right side buttons -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,4">
@@ -284,37 +284,37 @@
                 </Grid.ColumnDefinitions>
                 
                 <!-- Left Editor -->
-                <Border x:Name="LeftEditorBorder" Grid.Column="0" Background="#1E1E1E" BorderThickness="0">
+                <Border x:Name="LeftEditorBorder" Grid.Column="0" Background="{DynamicResource CardBackgroundBrush}" BorderThickness="0">
                     <avalonedit:TextEditor x:Name="LeftEditor"
                                           FontFamily="Consolas"
                                           FontSize="14"
                                           ShowLineNumbers="True"
                                           IsReadOnly="False"
                                           Background="Transparent"
-                                          Foreground="#CCCCCC"
+                                          Foreground="{DynamicResource PrimaryTextBrush}"
                                           Padding="10"
                                           BorderThickness="0"/>
                 </Border>
                 
                 <!-- Separator -->
-                <Border Grid.Column="1" Width="2" Background="#3E3E42"/>
+                <Border Grid.Column="1" Width="2" Background="{DynamicResource SubtleBorderBrush}"/>
                 
                 <!-- Right Editor -->
-                <Border x:Name="RightEditorBorder" Grid.Column="2" Background="#1E1E1E" BorderThickness="0">
+                <Border x:Name="RightEditorBorder" Grid.Column="2" Background="{DynamicResource CardBackgroundBrush}" BorderThickness="0">
                     <avalonedit:TextEditor x:Name="RightEditor"
                                           FontFamily="Consolas"
                                           FontSize="14"
                                           ShowLineNumbers="True"
                                           IsReadOnly="False"
                                           Background="Transparent"
-                                          Foreground="#CCCCCC"
+                                          Foreground="{DynamicResource PrimaryTextBrush}"
                                           Padding="10"
                                           BorderThickness="0"/>
                 </Border>
             </Grid>
             
             <!-- Status Bar -->
-            <Border x:Name="StatusBarBorder" Grid.Row="4" Height="24" Background="#007ACC">
+            <Border x:Name="StatusBarBorder" Grid.Row="4" Height="24" Background="{DynamicResource StatusBarBackgroundBrush}">
                 <TextBlock x:Name="StatusText" 
                            Text="Select files to compare" 
                            Foreground="White" 

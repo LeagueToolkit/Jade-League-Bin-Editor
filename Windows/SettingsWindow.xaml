@@ -11,12 +11,12 @@
     <Window.Resources>
         
         <Style TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#CCCCCC"/>
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}"/>
             <Setter Property="FontSize" Value="14"/>
         </Style>
     </Window.Resources>
     
-    <Border BorderThickness="1" BorderBrush="#3E3E42" CornerRadius="{DynamicResource GlobalCornerRadius}">
+    <Border BorderThickness="1" BorderBrush="{DynamicResource SubtleBorderBrush}" Background="{DynamicResource WindowBackgroundBrush}" CornerRadius="{DynamicResource GlobalCornerRadius}">
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
@@ -24,10 +24,10 @@
             </Grid.RowDefinitions>
             
             <!-- Custom Title Bar -->
-            <Border x:Name="TitleBar" Grid.Row="0" Background="#252526" Height="30" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown" CornerRadius="{DynamicResource GlobalCornerRadius}">
+            <Border x:Name="TitleBar" Grid.Row="0" Background="{DynamicResource TitleBarBackgroundBrush}" Height="30" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown" CornerRadius="{DynamicResource GlobalCornerRadius}">
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0">
                     <Image Source="/jade.ico" Width="16" Height="16" Margin="0,0,8,0"/>
-                    <TextBlock Text="Jade Settings" Foreground="#CCCCCC" FontSize="12" VerticalAlignment="Center"/>
+                    <TextBlock Text="Jade Settings" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="12" VerticalAlignment="Center"/>
                 </StackPanel>
             </Border>
             
@@ -42,8 +42,8 @@
                 
                 <!-- Title -->
                 <StackPanel Grid.Row="0">
-                    <TextBlock Text="Settings" FontSize="32" FontWeight="Bold" Foreground="White" Margin="0,0,0,5"/>
-                    <TextBlock Text="Configure application behavior and preferences" FontSize="16" Foreground="#888888"/>
+                    <TextBlock Text="Settings" FontSize="32" FontWeight="Bold" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,5"/>
+                    <TextBlock Text="Configure application behavior and preferences" FontSize="16" Foreground="{DynamicResource MutedTextBrush}"/>
                 </StackPanel>
 
                 <!-- 3-Column Settings Layout -->
@@ -57,17 +57,17 @@
                     </Grid.ColumnDefinitions>
 
                     <!-- Column 1: Hashes -->
-                    <Border x:Name="HashFilesBox" Grid.Column="0" Background="#252526" BorderBrush="#3E3E42" BorderThickness="1" CornerRadius="{DynamicResource GlobalCornerRadius}" Padding="20">
+                    <Border x:Name="HashFilesBox" Grid.Column="0" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource SubtleBorderBrush}" BorderThickness="1" CornerRadius="{DynamicResource GlobalCornerRadius}" Padding="20">
                         <StackPanel>
-                            <TextBlock Text="Hash Files" FontSize="18" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,15"/>
+                            <TextBlock Text="Hash Files" FontSize="18" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,15"/>
                             <TextBlock TextWrapping="Wrap" Margin="0,0,0,15" FontSize="13">
                                 Hash files are used to convert hex values into readable names.
                             </TextBlock>
                             
                             <Button Content="Download Hashes" Click="OnDownloadHashes" HorizontalAlignment="Stretch" Margin="0,0,0,8"/>
-                            <Button Content="Open Hashes Folder" Click="OnOpenHashesFolder" HorizontalAlignment="Stretch" Margin="0,0,0,8" Background="#3E3E42"/>
+                            <Button Content="Open Hashes Folder" Click="OnOpenHashesFolder" HorizontalAlignment="Stretch" Margin="0,0,0,8" Background="{DynamicResource SubtleBorderBrush}"/>
                             
-                            <Separator Background="#3E3E42" Margin="0,10"/>
+                            <Separator Background="{DynamicResource SubtleBorderBrush}" Margin="0,10"/>
                             
                             <Button x:Name="AutoDownloadToggleButton" 
                                     Content="Auto-download: Disabled" 
@@ -91,23 +91,23 @@
                                     Background="#7A2D2D"
                                     ToolTip="When enabled: Converts hashes to binary for faster loading."/>
 
-                            <TextBlock x:Name="HashStatusText" Margin="0,15,0,5" FontSize="11" Foreground="#858585" TextWrapping="Wrap"/>
-                            <TextBlock x:Name="HashFolderPath" FontSize="11" Foreground="#858585" TextWrapping="Wrap"/>
+                            <TextBlock x:Name="HashStatusText" Margin="0,15,0,5" FontSize="11" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap"/>
+                            <TextBlock x:Name="HashFolderPath" FontSize="11" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap"/>
                         </StackPanel>
                     </Border>
 
                     <!-- Column 2: Temporary Files -->
-                    <Border x:Name="TempFilesBox" Grid.Column="2" Background="#252526" BorderBrush="#3E3E42" BorderThickness="1" CornerRadius="{DynamicResource GlobalCornerRadius}" Padding="20">
+                    <Border x:Name="TempFilesBox" Grid.Column="2" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource SubtleBorderBrush}" BorderThickness="1" CornerRadius="{DynamicResource GlobalCornerRadius}" Padding="20">
                         <StackPanel>
-                            <TextBlock Text="Temporary Files" FontSize="18" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,15"/>
+                            <TextBlock Text="Temporary Files" FontSize="18" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,15"/>
                             <TextBlock TextWrapping="Wrap" Margin="0,0,0,15" FontSize="13">
                                 Temporary files are created when converting BIN files for editing.
                             </TextBlock>
                             
                             <Button Content="Clear Temp Folder" Click="OnClearTempFolder" HorizontalAlignment="Stretch" Margin="0,0,0,8"/>
-                            <Button Content="Open Temp Folder" Click="OnOpenTempFolder" HorizontalAlignment="Stretch" Margin="0,0,0,8" Background="#3E3E42"/>
+                            <Button Content="Open Temp Folder" Click="OnOpenTempFolder" HorizontalAlignment="Stretch" Margin="0,0,0,8" Background="{DynamicResource SubtleBorderBrush}"/>
                             
-                            <Separator Background="#3E3E42" Margin="0,10"/>
+                            <Separator Background="{DynamicResource SubtleBorderBrush}" Margin="0,10"/>
 
                             <Button x:Name="AutoClearToggleButton" 
                                     Content="Auto-clear: Enabled" 
@@ -115,14 +115,14 @@
                                     HorizontalAlignment="Stretch"
                                     Background="#2D7A2D"/>
 
-                            <TextBlock x:Name="TempFolderPath" Margin="0,15,0,0" FontSize="11" Foreground="#858585" TextWrapping="Wrap"/>
+                            <TextBlock x:Name="TempFolderPath" Margin="0,15,0,0" FontSize="11" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap"/>
                         </StackPanel>
                     </Border>
 
                     <!-- Column 3: App Behavior & Associations -->
-                    <Border x:Name="AppBehaviorBox" Grid.Column="4" Background="#252526" BorderBrush="#3E3E42" BorderThickness="1" CornerRadius="{DynamicResource GlobalCornerRadius}" Padding="20">
+                    <Border x:Name="AppBehaviorBox" Grid.Column="4" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource SubtleBorderBrush}" BorderThickness="1" CornerRadius="{DynamicResource GlobalCornerRadius}" Padding="20">
                         <StackPanel>
-                            <TextBlock Text="App Behavior" FontSize="18" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,15"/>
+                            <TextBlock Text="App Behavior" FontSize="18" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,15"/>
                             
                             <Button x:Name="MinimizeToTrayToggleButton" 
                                     Content="Minimize to Tray: Disabled" 
@@ -137,9 +137,9 @@
                                     HorizontalAlignment="Stretch"
                                     Background="#7A2D2D"/>
 
-                            <Separator Background="#3E3E42" Margin="0,15"/>
+                            <Separator Background="{DynamicResource SubtleBorderBrush}" Margin="0,15"/>
 
-                            <TextBlock Text="File Association" FontSize="16" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,15"/>
+                            <TextBlock Text="File Association" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,15"/>
                             <TextBlock TextWrapping="Wrap" Margin="0,0,0,15" FontSize="13">
                                 Register Jade as a handler for .bin files.
                             </TextBlock>
@@ -155,7 +155,7 @@
                                     HorizontalAlignment="Stretch"
                                     Background="#7A2D2D"/>
 
-                            <TextBlock x:Name="FileAssociationStatus" Margin="0,15,0,0" FontSize="11" Foreground="#858585" TextWrapping="Wrap"/>
+                            <TextBlock x:Name="FileAssociationStatus" Margin="0,15,0,0" FontSize="11" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap"/>
                         </StackPanel>
                     </Border>
                 </Grid>
@@ -163,7 +163,7 @@
                 <!-- Action Buttons -->
                 <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
                     <Button Content="Restart App" Click="OnRestart" Margin="0,0,15,0" Background="#2D7A2D"/>
-                    <Button Content="Close" Click="OnClose" Background="#3E3E42"/>
+                    <Button Content="Close" Click="OnClose" Background="{DynamicResource SubtleBorderBrush}"/>
                 </StackPanel>
             </Grid>
         </Grid>

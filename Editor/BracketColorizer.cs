@@ -16,76 +16,15 @@ public class BracketColorizer : DocumentColorizingTransformer
     private readonly Dictionary<int, int> _depthCache = new();
     private int _cachedDocumentVersion = -1;
     
-    public BracketColorizer(string theme)
+    public BracketColorizer(Color[] bracketColors)
     {
-        _bracketColors = GetBracketColorsForTheme(theme);
+        _bracketColors = bracketColors;
         // Pre-cache and freeze brushes to avoid allocations during rendering
         _frozenBrushes = _bracketColors.Select(c => {
             var brush = new SolidColorBrush(c);
             brush.Freeze();
             return brush;
         }).ToArray();
-    }
-    
-    private Color[] GetBracketColorsForTheme(string bracketTheme)
-    {
-        return bracketTheme switch
-        {
-            "DarkBlue" => new[]
-            {
-                Color.FromRgb(255, 215, 0),   // Gold
-                Color.FromRgb(218, 112, 214), // Orchid
-                Color.FromRgb(0, 191, 255)    // Deep Sky Blue
-            },
-            "DarkRed" => new[]
-            {
-                Color.FromRgb(255, 215, 0),   // Gold
-                Color.FromRgb(255, 105, 180), // Hot Pink
-                Color.FromRgb(255, 140, 0)    // Dark Orange
-            },
-            "LightPink" => new[]
-            {
-                Color.FromRgb(75, 0, 130),    // Indigo
-                Color.FromRgb(138, 43, 226),  // Blue Violet
-                Color.FromRgb(148, 0, 211)    // Dark Violet
-            },
-            "PastelBlue" => new[]
-            {
-                Color.FromRgb(184, 134, 11),  // Dark Goldenrod
-                Color.FromRgb(139, 0, 139),   // Dark Magenta
-                Color.FromRgb(0, 100, 0)      // Dark Green
-            },
-            "ForestGreen" => new[]
-            {
-                Color.FromRgb(255, 215, 0),   // Gold
-                Color.FromRgb(64, 224, 208),  // Turquoise
-                Color.FromRgb(173, 255, 47)   // Green Yellow
-            },
-            "AMOLED" => new[]
-            {
-                Color.FromRgb(255, 215, 0),   // Gold
-                Color.FromRgb(0, 255, 255),   // Cyan
-                Color.FromRgb(255, 0, 255)    // Magenta
-            },
-            "Void" => new[]
-            {
-                Color.FromRgb(255, 215, 0),   // Gold
-                Color.FromRgb(186, 85, 211),  // Medium Orchid
-                Color.FromRgb(138, 43, 226)   // Blue Violet
-            },
-            "VioletSorrow" => new[]
-            {
-                Color.FromRgb(147, 112, 219), // Medium Purple
-                Color.FromRgb(138, 43, 226),  // Blue Violet
-                Color.FromRgb(186, 85, 211)   // Medium Orchid
-            },
-            _ => new[] // Default / Classic
-            {
-                Color.FromRgb(255, 215, 0),   // Gold
-                Color.FromRgb(218, 112, 214), // Orchid
-                Color.FromRgb(135, 206, 250)  // Light Sky Blue
-            }
-        };
     }
     
     protected override void ColorizeLine(DocumentLine line)

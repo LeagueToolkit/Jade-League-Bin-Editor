@@ -62,6 +62,9 @@ public partial class App : Application
 
         // Load rounded edges preference
         LoadRoundedEdgesPreference();
+        
+        // *** LOAD THEME ON STARTUP ***
+        ThemeManager.LoadSavedTheme();
 
         // Check if we should start hidden
         bool startMinimized = e.Args.Contains("--minimized");

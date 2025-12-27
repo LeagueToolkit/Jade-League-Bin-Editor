@@ -16,8 +16,8 @@
 
 
         <Style TargetType="ListBox">
-            <Setter Property="Background" Value="#252526"/>
-            <Setter Property="BorderBrush" Value="#3E3E42"/>
+            <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource SubtleBorderBrush}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Padding" Value="2"/>
             <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/>
@@ -56,12 +56,12 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="ItemBorder" Property="Background" Value="#37373D"/>
-                                <Setter TargetName="ItemBorder" Property="BorderBrush" Value="#007ACC"/>
+                                <Setter TargetName="ItemBorder" Property="Background" Value="{DynamicResource SelectedTabBackgroundBrush}"/>
+                                <Setter TargetName="ItemBorder" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
                                 <Setter TargetName="ItemBorder" Property="BorderThickness" Value="1"/>
                             </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="ItemBorder" Property="Background" Value="#2A2D2E"/>
+                                <Setter TargetName="ItemBorder" Property="Background" Value="{DynamicResource TabBackgroundBrush}"/>
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter Property="Opacity" Value="0.5"/>
@@ -73,12 +73,12 @@
         </Style>
 
         <Style TargetType="TextBlock" x:Key="NormalText">
-            <Setter Property="Foreground" Value="#CCCCCC"/>
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}"/>
             <Setter Property="FontSize" Value="15"/>
         </Style>
     </Window.Resources>
     
-    <Border BorderThickness="1" BorderBrush="#3E3E42" CornerRadius="{DynamicResource GlobalCornerRadius}">
+    <Border BorderThickness="1" BorderBrush="{DynamicResource SubtleBorderBrush}" Background="{DynamicResource WindowBackgroundBrush}" CornerRadius="{DynamicResource GlobalCornerRadius}">
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
@@ -86,10 +86,10 @@
             </Grid.RowDefinitions>
             
             <!-- Custom Title Bar -->
-            <Border x:Name="TitleBar" Grid.Row="0" Background="#252526" Height="30" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown" CornerRadius="{DynamicResource GlobalCornerRadius}">
+            <Border x:Name="TitleBar" Grid.Row="0" Background="{DynamicResource TitleBarBackgroundBrush}" Height="30" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown" CornerRadius="{DynamicResource GlobalCornerRadius}">
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0">
                     <Image Source="/jade.ico" Width="16" Height="16" Margin="0,0,8,0"/>
-                    <TextBlock Text="Jade Themes" Foreground="#CCCCCC" FontSize="13" VerticalAlignment="Center"/>
+                    <TextBlock Text="Jade Themes" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13" VerticalAlignment="Center"/>
                 </StackPanel>
             </Border>
             
@@ -111,12 +111,12 @@
                 
                 <!-- Header -->
                 <StackPanel Grid.Row="0" Grid.ColumnSpan="3">
-                    <TextBlock Text="Themes" FontSize="32" FontWeight="Bold" Foreground="White" Margin="0,0,0,5"/>
-                    <TextBlock x:Name="CurrentThemeText" Text="Current Theme: Dark Emptiness" FontSize="16" Foreground="#888888" Margin="0,0,0,15"/>
+                    <TextBlock Text="Themes" FontSize="32" FontWeight="Bold" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,5"/>
+                    <TextBlock x:Name="CurrentThemeText" Text="Current Theme: Dark Emptiness" FontSize="16" Foreground="{DynamicResource MutedTextBrush}" Margin="0,0,0,15"/>
                 </StackPanel>
 
                 <CheckBox x:Name="RoundedCornersCheckBox" Grid.Row="0" Grid.Column="4" Content="Rounded Corners" 
-                          Foreground="#AAAAAA" VerticalAlignment="Top" HorizontalAlignment="Right"
+                          Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Top" HorizontalAlignment="Right"
                           Checked="OnRoundedCornersToggle" Unchecked="OnRoundedCornersToggle"
                           Margin="0,5,0,0"/>
 
@@ -153,12 +153,12 @@
                         </Style>
                     </Grid.Resources>
 
-                    <TextBlock Grid.Row="0" Text="UI Theme" Foreground="#888888" FontSize="14" Margin="0,0,0,8"/>
+                    <TextBlock Grid.Row="0" Text="UI Theme" Foreground="{DynamicResource MutedTextBrush}" FontSize="14" Margin="0,0,0,8"/>
                     <CheckBox x:Name="UseCustomThemeCheckBox" Grid.Row="1" Content="Use Custom Theme" 
-                              Foreground="#AAAAAA" Margin="0,0,0,10"
+                              Foreground="{DynamicResource MutedTextBrush}" Margin="0,0,0,10"
                               Checked="OnCustomThemeToggle" Unchecked="OnCustomThemeToggle"/>
 
-            <Border x:Name="UIThemeBox" Grid.Row="2" Background="#252526" BorderBrush="#3E3E42" BorderThickness="1" CornerRadius="{DynamicResource GlobalCornerRadius}" Padding="0">
+            <Border x:Name="UIThemeBox" Grid.Row="2" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource SubtleBorderBrush}" BorderThickness="1" CornerRadius="{DynamicResource GlobalCornerRadius}" Padding="0">
                 <Grid>
                     <ListBox x:Name="ThemesListBox" Background="Transparent" BorderThickness="0" ItemsSource="{Binding Themes}" 
                              IsEnabled="{Binding ElementName=UseCustomThemeCheckBox, Path=IsChecked, Converter={StaticResource InverseBooleanConverter}}"
@@ -171,10 +171,10 @@
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Text="{Binding DisplayName}" VerticalAlignment="Center" Foreground="#CCCCCC" FontSize="13"/>
+                                    <TextBlock Text="{Binding DisplayName}" VerticalAlignment="Center" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13"/>
                                     <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="8,0,0,0">
-                                        <Border Width="10" Height="10" Background="{Binding Background}" CornerRadius="{DynamicResource GlobalCornerRadius}" Margin="1,0" BorderBrush="#3E3E42" BorderThickness="1"/>
-                                        <Border Width="10" Height="10" Background="{Binding StatusBarBackground}" CornerRadius="{DynamicResource GlobalCornerRadius}" Margin="1,0" BorderBrush="#3E3E42" BorderThickness="1"/>
+                                        <Border Width="10" Height="10" Background="{Binding Background}" CornerRadius="{DynamicResource GlobalCornerRadius}" Margin="1,0" BorderBrush="{DynamicResource SubtleBorderBrush}" BorderThickness="1"/>
+                                        <Border Width="10" Height="10" Background="{Binding StatusBarBackground}" CornerRadius="{DynamicResource GlobalCornerRadius}" Margin="1,0" BorderBrush="{DynamicResource SubtleBorderBrush}" BorderThickness="1"/>
                                     </StackPanel>
                                 </Grid>
                             </DataTemplate>
@@ -184,14 +184,14 @@
                     <!-- Custom Theme Editor -->
                     <Border x:Name="CustomThemePanel" Visibility="Collapsed" Padding="15,10">
                         <StackPanel>
-                            <TextBlock Text="Designer" FontWeight="SemiBold" Foreground="White" FontSize="15" Margin="0,0,0,10"/>
+                            <TextBlock Text="Designer" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="15" Margin="0,0,0,10"/>
                         
                             <StackPanel Margin="0,0,0,6">
-                                <TextBlock Text="Window Background" Foreground="#AAAAAA" FontSize="11" Margin="0,0,0,3"/>
+                                <TextBlock Text="Window Background" Foreground="{DynamicResource MutedTextBrush}" FontSize="11" Margin="0,0,0,3"/>
                                 <Grid>
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="35"/></Grid.ColumnDefinitions>
                                     <TextBox x:Name="CustomBgHex" Style="{StaticResource DesignerTextBoxStyle}" Text="#0F1928" HorizontalAlignment="Stretch" TextChanged="OnCustomColorChanged"/>
-                                    <Border Grid.Column="1" Width="25" Height="20" Margin="5,0,0,0" Background="{Binding ElementName=CustomBgHex, Path=Text}" CornerRadius="{DynamicResource GlobalCornerRadius}" BorderBrush="#3E3E42" BorderThickness="1" VerticalAlignment="Center" Cursor="Hand" ToolTip="Click to pick color" MouseLeftButtonDown="OnColorPreviewClick" Tag="CustomBgHex"/>
+                                    <Border Grid.Column="1" Width="25" Height="20" Margin="5,0,0,0" Background="{Binding ElementName=CustomBgHex, Path=Text}" CornerRadius="{DynamicResource GlobalCornerRadius}" BorderBrush="{DynamicResource SubtleBorderBrush}" BorderThickness="1" VerticalAlignment="Center" Cursor="Hand" ToolTip="Click to pick color" MouseLeftButtonDown="OnColorPreviewClick" Tag="CustomBgHex"/>
                                 </Grid>
                             </StackPanel>
 
@@ -262,12 +262,12 @@
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
-                    <TextBlock Grid.Row="0" Text="Syntax Coloring" Foreground="#888888" FontSize="14" Margin="0,0,0,8"/>
+                    <TextBlock Grid.Row="0" Text="Syntax Coloring" Foreground="{DynamicResource MutedTextBrush}" FontSize="14" Margin="0,0,0,8"/>
                     <CheckBox x:Name="OverrideBracketsCheckBox" Grid.Row="1" Content="Override Theme Highlighting" 
-                              Foreground="#AAAAAA" Margin="0,0,0,10"
+                              Foreground="{DynamicResource MutedTextBrush}" Margin="0,0,0,10"
                               Checked="OnOverrideChecked" Unchecked="OnOverrideChecked"/>
                     
-                    <Border x:Name="BracketThemeBox" Grid.Row="2" Background="#252526" BorderBrush="#3E3E42" BorderThickness="1" CornerRadius="{DynamicResource GlobalCornerRadius}" Padding="0">
+                    <Border x:Name="BracketThemeBox" Grid.Row="2" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource SubtleBorderBrush}" BorderThickness="1" CornerRadius="{DynamicResource GlobalCornerRadius}" Padding="0">
                         <ListBox x:Name="BracketThemesListBox" Background="Transparent" BorderThickness="0" ItemsSource="{Binding BracketThemes}" 
                                  IsEnabled="{Binding ElementName=OverrideBracketsCheckBox, Path=IsChecked}"
                                  SelectionChanged="OnBracketThemeSelectionChanged">
@@ -278,10 +278,10 @@
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="Auto"/>
                                         </Grid.ColumnDefinitions>
-                                        <TextBlock Text="{Binding DisplayName}" VerticalAlignment="Center" Foreground="#CCCCCC" FontSize="13"/>
+                                        <TextBlock Text="{Binding DisplayName}" VerticalAlignment="Center" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13"/>
                                         <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="8,0,0,0">
-                                            <Border Width="10" Height="10" Background="{Binding PreviewColor1}" CornerRadius="{DynamicResource GlobalCornerRadius}" Margin="1,0" BorderBrush="#3E3E42" BorderThickness="1"/>
-                                            <Border Width="10" Height="10" Background="{Binding PreviewColor2}" CornerRadius="{DynamicResource GlobalCornerRadius}" Margin="1,0" BorderBrush="#3E3E42" BorderThickness="1"/>
+                                            <Border Width="10" Height="10" Background="{Binding PreviewColor1}" CornerRadius="{DynamicResource GlobalCornerRadius}" Margin="1,0" BorderBrush="{DynamicResource SubtleBorderBrush}" BorderThickness="1"/>
+                                            <Border Width="10" Height="10" Background="{Binding PreviewColor2}" CornerRadius="{DynamicResource GlobalCornerRadius}" Margin="1,0" BorderBrush="{DynamicResource SubtleBorderBrush}" BorderThickness="1"/>
                                         </StackPanel>
                                     </Grid>
                                 </DataTemplate>
@@ -291,11 +291,11 @@
                 </Grid>
 
                 <!-- Preview Panel -->
-                <Border x:Name="PreviewPanelBorder" Grid.Row="2" Grid.Column="4" Background="#252526" BorderBrush="#3E3E42" BorderThickness="1" CornerRadius="{DynamicResource GlobalCornerRadius}">
+                <Border x:Name="PreviewPanelBorder" Grid.Row="2" Grid.Column="4" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource SubtleBorderBrush}" BorderThickness="1" CornerRadius="{DynamicResource GlobalCornerRadius}">
                     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                         <Border Padding="20">
                             <StackPanel x:Name="PreviewPanel">
-                            <TextBlock Text="Live Preview" FontWeight="SemiBold" Foreground="White" FontSize="18" Margin="0,0,0,20"/>
+                            <TextBlock Text="Live Preview" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="18" Margin="0,0,0,20"/>
                             
                             <ItemsControl x:Name="ColorPaletteList">
                                 <ItemsControl.ItemsPanel>
@@ -311,16 +311,16 @@
                                                 <ColumnDefinition Width="10"/>
                                                 <ColumnDefinition Width="Auto"/>
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Text="{Binding Label}" Foreground="#AAAAAA" FontSize="13" VerticalAlignment="Center"/>
-                                            <Border Grid.Column="2" Width="30" Height="15" Background="{Binding Color}" CornerRadius="{DynamicResource GlobalCornerRadius}" BorderBrush="#3E3E42" BorderThickness="1"/>
+                                            <TextBlock Text="{Binding Label}" Foreground="{DynamicResource MutedTextBrush}" FontSize="13" VerticalAlignment="Center"/>
+                                            <Border Grid.Column="2" Width="30" Height="15" Background="{Binding Color}" CornerRadius="{DynamicResource GlobalCornerRadius}" BorderBrush="{DynamicResource SubtleBorderBrush}" BorderThickness="1"/>
                                         </Grid>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
     
-                            <Separator Background="#3E3E42" Margin="0,15"/>
+                            <Separator Background="{DynamicResource SubtleBorderBrush}" Margin="0,15"/>
                             
-                            <TextBlock Text="Syntax Preview" Foreground="#AAAAAA" FontSize="14" Margin="0,5,0,10"/>
+                            <TextBlock Text="Syntax Preview" Foreground="{DynamicResource MutedTextBrush}" FontSize="14" Margin="0,5,0,10"/>
                             <Border x:Name="SampleTextBorder" Padding="15" Background="{Binding ElementName=ThemesListBox, Path=SelectedItem.EditorBackground}" CornerRadius="{DynamicResource GlobalCornerRadius}">
                                 <StackPanel>
                                     <TextBlock Text="Bracket hierarchy preview:" 
@@ -329,7 +329,54 @@
                                                TextWrapping="Wrap"
                                                Margin="0,0,0,10"/>
                                     <TextBlock FontSize="15" TextWrapping="Wrap" FontFamily="Consolas">
-                                        <Run Text="{}{" Foreground="{Binding ElementName=BracketThemesListBox, Path=SelectedItem.PreviewColor1}"/><Run Text="&#x0a;  " /><Run Text="# This is a comment" Foreground="{Binding ElementName=BracketThemesListBox, Path=SelectedItem.CommentColor}" /><Run Text="&#x0a;  " /><Run Text="skinScale: f32" Foreground="{Binding ElementName=BracketThemesListBox, Path=SelectedItem.PropertyColor}" /><Run Text=": " Foreground="{Binding ElementName=ThemesListBox, Path=SelectedItem.Foreground}" /><Run Text="= " Foreground="{Binding ElementName=ThemesListBox, Path=SelectedItem.Foreground}" /><Run Text="1.0" Foreground="{Binding ElementName=BracketThemesListBox, Path=SelectedItem.NumberColor}" /><Run Text="&#x0a;  [" Foreground="{Binding ElementName=BracketThemesListBox, Path=SelectedItem.PreviewColor2}"/><Run Text="&#x0a;    i32 " Foreground="{Binding ElementName=BracketThemesListBox, Path=SelectedItem.KeywordColor}" /><Run Text="(" Foreground="{Binding ElementName=BracketThemesListBox, Path=SelectedItem.PreviewColor3}"/><Run Text="&quot;value&quot;" Foreground="{Binding ElementName=BracketThemesListBox, Path=SelectedItem.StringColor}"/><Run Text=")" Foreground="{Binding ElementName=BracketThemesListBox, Path=SelectedItem.PreviewColor3}"/><Run Text="&#x0a;  ]" Foreground="{Binding ElementName=BracketThemesListBox, Path=SelectedItem.PreviewColor2}"/><Run Text="&#x0a;}" Foreground="{Binding ElementName=BracketThemesListBox, Path=SelectedItem.PreviewColor1}"/>
+                                        <!-- Line 1: Opening brace (bracket color 1) -->
+                                        <Run Text="{}{" Foreground="{Binding ElementName=BracketThemesListBox, Path=SelectedItem.PreviewColor1}"/>
+                                        <Run Text="&#x0a;"/>
+                                        
+                                        <!-- Line 2: Comment -->
+                                        <Run Text="  "/>
+                                        <Run Text="# This is a comment" Foreground="{Binding ElementName=BracketThemesListBox, Path=SelectedItem.CommentColor}"/>
+                                        <Run Text="&#x0a;"/>
+                                        
+                                        <!-- Line 3: Property with type and value -->
+                                        <Run Text="  "/>
+                                        <Run Text="skinScale" Foreground="{Binding ElementName=BracketThemesListBox, Path=SelectedItem.PropertyColor}"/>
+                                        <Run Text=": " Foreground="{Binding ElementName=ThemesListBox, Path=SelectedItem.Foreground}"/>
+                                        <Run Text="f32" Foreground="{Binding ElementName=BracketThemesListBox, Path=SelectedItem.KeywordColor}"/>
+                                        <Run Text=" = " Foreground="{Binding ElementName=ThemesListBox, Path=SelectedItem.Foreground}"/>
+                                        <Run Text="1.0" Foreground="{Binding ElementName=BracketThemesListBox, Path=SelectedItem.NumberColor}"/>
+                                        <Run Text="&#x0a;"/>
+                                        
+                                        <!-- Line 4: String property -->
+                                        <Run Text="  "/>
+                                        <Run Text="name" Foreground="{Binding ElementName=BracketThemesListBox, Path=SelectedItem.PropertyColor}"/>
+                                        <Run Text=": " Foreground="{Binding ElementName=ThemesListBox, Path=SelectedItem.Foreground}"/>
+                                        <Run Text="string" Foreground="{Binding ElementName=BracketThemesListBox, Path=SelectedItem.KeywordColor}"/>
+                                        <Run Text=" = " Foreground="{Binding ElementName=ThemesListBox, Path=SelectedItem.Foreground}"/>
+                                        <Run Text="&quot;Example&quot;" Foreground="{Binding ElementName=BracketThemesListBox, Path=SelectedItem.StringColor}"/>
+                                        <Run Text="&#x0a;"/>
+                                        
+                                        <!-- Line 5: Opening square bracket (bracket color 2) -->
+                                        <Run Text="  "/>
+                                        <Run Text="[" Foreground="{Binding ElementName=BracketThemesListBox, Path=SelectedItem.PreviewColor2}"/>
+                                        <Run Text="&#x0a;"/>
+                                        
+                                        <!-- Line 6: List item with parentheses (bracket color 3) -->
+                                        <Run Text="    "/>
+                                        <Run Text="i32" Foreground="{Binding ElementName=BracketThemesListBox, Path=SelectedItem.KeywordColor}"/>
+                                        <Run Text=" "/>
+                                        <Run Text="(" Foreground="{Binding ElementName=BracketThemesListBox, Path=SelectedItem.PreviewColor3}"/>
+                                        <Run Text="&quot;value&quot;" Foreground="{Binding ElementName=BracketThemesListBox, Path=SelectedItem.StringColor}"/>
+                                        <Run Text=")" Foreground="{Binding ElementName=BracketThemesListBox, Path=SelectedItem.PreviewColor3}"/>
+                                        <Run Text="&#x0a;"/>
+                                        
+                                        <!-- Line 7: Closing square bracket (bracket color 2) -->
+                                        <Run Text="  "/>
+                                        <Run Text="]" Foreground="{Binding ElementName=BracketThemesListBox, Path=SelectedItem.PreviewColor2}"/>
+                                        <Run Text="&#x0a;"/>
+                                        
+                                        <!-- Line 8: Closing brace (bracket color 1) -->
+                                        <Run Text="}" Foreground="{Binding ElementName=BracketThemesListBox, Path=SelectedItem.PreviewColor1}"/>
                                     </TextBlock>
                                 </StackPanel>
                             </Border>
@@ -341,7 +388,7 @@
                 <!-- Action Buttons -->
                 <StackPanel Grid.Row="3" Grid.ColumnSpan="5" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,25,0,0">
                     <Button Content="Reload UI" Click="OnApplyTheme" Margin="0,0,15,0" Background="#2D7A2D"/>
-                    <Button Content="Close" Click="OnClose" Background="#3E3E42"/>
+                    <Button Content="Close" Click="OnClose" Background="{DynamicResource SubtleBorderBrush}"/>
                 </StackPanel>
             </Grid>
         </Grid>

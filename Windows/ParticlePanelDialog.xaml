@@ -2,14 +2,14 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Particle Panel" Height="450" Width="400"
-        Background="#1E1E1E"
+        Background="{DynamicResource WindowBackgroundBrush}"
         WindowStartupLocation="Manual"
         WindowStyle="None"
         AllowsTransparency="True"
         ResizeMode="NoResize"
         ShowInTaskbar="False">
     
-    <Border BorderThickness="1" BorderBrush="#3E3E42" CornerRadius="{DynamicResource GlobalCornerRadius}">
+    <Border BorderThickness="1" BorderBrush="{DynamicResource SubtleBorderBrush}" CornerRadius="{DynamicResource GlobalCornerRadius}">
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
@@ -17,15 +17,15 @@
             </Grid.RowDefinitions>
             
             <!-- Custom Title Bar -->
-            <Border x:Name="TitleBar" Grid.Row="0" Background="#252526" Height="30" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown" CornerRadius="{DynamicResource GlobalCornerRadius}">
-                <TextBlock Text="Particle Editing" Foreground="#CCCCCC" FontSize="12" VerticalAlignment="Center" Margin="10,0"/>
+            <Border x:Name="TitleBar" Grid.Row="0" Background="{DynamicResource TitleBarBackgroundBrush}" Height="30" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown" CornerRadius="{DynamicResource GlobalCornerRadius}">
+                <TextBlock Text="Particle Editing" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="12" VerticalAlignment="Center" Margin="10,0"/>
             </Border>
             
             <!-- Content -->
             <Grid Grid.Row="1" Margin="15">
                 <TextBlock Text="Particle Editing Placeholder" 
                            FontSize="14" 
-                           Foreground="#808080" 
+                           Foreground="{DynamicResource MutedTextBrush}" 
                            HorizontalAlignment="Center" 
                            VerticalAlignment="Center"/>
             </Grid>

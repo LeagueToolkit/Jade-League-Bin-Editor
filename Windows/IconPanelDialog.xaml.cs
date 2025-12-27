@@ -20,8 +20,6 @@ public partial class IconPanelDialog : Window
         _iconButton = iconButton;
         _mainWindow = mainWindow;
         
-        LoadAndApplyTheme();
-        
         Loaded += (s, e) =>
         {
             PositionUnderButton();
@@ -183,11 +181,6 @@ public partial class IconPanelDialog : Window
                 StatusTextBlock.Text = "skinScale not found";
                 Logger.Info("Could not find skinScale property to update");
             }
-            else
-            {
-                StatusTextBlock.Text = "skinScale not found";
-                Logger.Info("Could not find skinScale property to update");
-            }
         }
         catch (Exception ex)
         {
@@ -306,144 +299,6 @@ public partial class IconPanelDialog : Window
         else
         {
             DragMove();
-        }
-    }
-    
-
-    private void LoadAndApplyTheme()
-    {
-        try
-        {
-            var theme = GetCurrentTheme();
-            ApplyTheme(theme);
-        }
-        catch (Exception ex)
-        {
-            Logger.Error("Failed to load theme for IconPanelDialog", ex);
-        }
-    }
-    
-    private string GetCurrentTheme()
-    {
-        return ThemeHelper.ReadPreference("Theme", "Default");
-    }
-    
-    private void ApplyTheme(string theme)
-    {
-        SolidColorBrush bgColor, titleBarBg, textColor;
-        
-        if (theme == "DarkBlue")
-        {
-            bgColor = new SolidColorBrush(Color.FromRgb(20, 30, 45));
-            titleBarBg = new SolidColorBrush(Color.FromRgb(25, 35, 50));
-            textColor = new SolidColorBrush(Color.FromRgb(220, 230, 240));
-        }
-        else if (theme == "DarkRed")
-        {
-            bgColor = new SolidColorBrush(Color.FromRgb(45, 20, 25));
-            titleBarBg = new SolidColorBrush(Color.FromRgb(50, 25, 30));
-            textColor = new SolidColorBrush(Color.FromRgb(240, 220, 225));
-        }
-        else if (theme == "LightPink")
-        {
-            bgColor = new SolidColorBrush(Color.FromRgb(210, 165, 190));
-            titleBarBg = new SolidColorBrush(Color.FromRgb(180, 130, 160));
-            textColor = Brushes.Black;
-        }
-        else if (theme == "PastelBlue")
-        {
-            bgColor = new SolidColorBrush(Color.FromRgb(210, 240, 255));
-            titleBarBg = new SolidColorBrush(Color.FromRgb(255, 240, 250));
-            textColor = Brushes.Black;
-        }
-        else if (theme == "ForestGreen")
-        {
-            bgColor = new SolidColorBrush(Color.FromRgb(25, 45, 30));
-            titleBarBg = new SolidColorBrush(Color.FromRgb(30, 50, 35));
-            textColor = new SolidColorBrush(Color.FromRgb(200, 230, 210));
-        }
-        else if (theme == "AMOLED")
-        {
-            bgColor = new SolidColorBrush(Color.FromRgb(0, 0, 0));
-            titleBarBg = new SolidColorBrush(Color.FromRgb(10, 10, 10));
-            textColor = new SolidColorBrush(Color.FromRgb(180, 180, 180));
-        }
-        else if (theme == "Void")
-        {
-            bgColor = new SolidColorBrush(Color.FromRgb(15, 10, 30));
-            titleBarBg = new SolidColorBrush(Color.FromRgb(20, 15, 40));
-            textColor = new SolidColorBrush(Color.FromRgb(180, 170, 220));
-        }
-        else if (theme == "VioletSorrow")
-        {
-            bgColor = new SolidColorBrush(Color.FromRgb(22, 12, 42));
-            titleBarBg = new SolidColorBrush(Color.FromRgb(32, 20, 58));
-            textColor = new SolidColorBrush(Color.FromRgb(185, 170, 215));
-        }
-        else if (theme == "OrangeBurnout")
-        {
-            bgColor = new SolidColorBrush(Color.FromRgb(35, 15, 5));
-            titleBarBg = new SolidColorBrush(Color.FromRgb(50, 25, 10));
-            textColor = new SolidColorBrush(Color.FromRgb(255, 228, 209));
-        }
-        else if (theme == "PurpleGrief")
-        {
-            bgColor = new SolidColorBrush(Color.FromRgb(25, 15, 30));
-            titleBarBg = new SolidColorBrush(Color.FromRgb(35, 25, 40));
-            textColor = new SolidColorBrush(Color.FromRgb(220, 200, 230));
-        }
-        else if (theme == "Custom")
-        {
-            bgColor = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_Bg", "#0F1928"));
-            titleBarBg = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_TitleBar", "#0F1928"));
-            textColor = ThemeHelper.GetBrushFromHex(ThemeHelper.ReadPreference("Custom_Text", "#D4D4D4"));
-        }
-        else // Default
-        {
-            bgColor = new SolidColorBrush(Color.FromRgb(30, 30, 30));
-            titleBarBg = new SolidColorBrush(Color.FromRgb(37, 37, 38));
-            textColor = new SolidColorBrush(Color.FromRgb(212, 212, 212));
-        }
-        
-        this.Background = bgColor;
-        
-        // Update title bar
-        var titleBar = this.FindName("TitleBar") as System.Windows.Controls.Border;
-        if (titleBar != null)
-        {
-            titleBar.Background = titleBarBg;
-        }
-        
-        // Update TextBox theme
-        if (SkinscaleTextBox != null)
-        {
-            SkinscaleTextBox.Background = bgColor;
-            SkinscaleTextBox.Foreground = textColor;
-            SkinscaleTextBox.BorderBrush = new SolidColorBrush(Color.FromRgb(62, 62, 66));
-        }
-        
-        if (PercentageTextBox != null)
-        {
-            PercentageTextBox.Background = bgColor;
-            PercentageTextBox.Foreground = textColor;
-            PercentageTextBox.BorderBrush = new SolidColorBrush(Color.FromRgb(62, 62, 66));
-        }
-        
-        // Update all TextBlocks
-        UpdateTextBlockColors(this, textColor);
-    }
-    
-    private void UpdateTextBlockColors(DependencyObject parent, SolidColorBrush color)
-    {
-        int childCount = VisualTreeHelper.GetChildrenCount(parent);
-        for (int i = 0; i < childCount; i++)
-        {
-            var child = VisualTreeHelper.GetChild(parent, i);
-            if (child is System.Windows.Controls.TextBlock textBlock)
-            {
-                textBlock.Foreground = color;
-            }
-            UpdateTextBlockColors(child, color);
         }
     }
     

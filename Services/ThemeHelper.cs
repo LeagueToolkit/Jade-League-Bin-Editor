@@ -116,4 +116,18 @@ public static class ThemeHelper
         }
         catch { return color; }
     }
+
+    public static (string keyword, string comment, string stringColor, string number, string propertyColor) GetThemeSyntaxColors(string themeId)
+    {
+        Logger.Info($"Getting syntax colors for theme: {themeId}");
+        var (k, c, s, n, p) = GetHexColorsForTheme(themeId);
+        return (k.Trim(), c.Trim(), s.Trim(), n.Trim(), p.Trim());
+    }
+    
+    public static (string keyword, string comment, string stringColor, string number, string propertyColor) GetHexColorsForTheme(string themeId)
+    {
+        // Delegate to ThemesWindow as the single source of truth for syntax colors
+        // This eliminates duplication and makes it easier to update colors in one place
+        return Jade.Windows.ThemesWindow.GetFullSyntaxColors(themeId);
+    }
 }
