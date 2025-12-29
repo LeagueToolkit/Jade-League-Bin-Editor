@@ -527,42 +527,48 @@ public partial class SettingsWindow : Window
     
 
     
-    public static void ClearTempFolderOnStartup()
+    public static async void ClearTempFolderOnStartup()
     {
         try
         {
-            var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            var jadeDir = Path.Combine(appDataPath, "RitoShark", "Jade");
-            var prefsFile = Path.Combine(jadeDir, "preferences.txt");
-            
-            // Check if auto-clear is enabled (default is true)
-            bool autoClear = true;
-            if (File.Exists(prefsFile))
+            await Task.Run(() => 
             {
-                var content = File.ReadAllText(prefsFile);
-                if (content.Contains("AutoClearTemp="))
+                var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                var jadeDir = Path.Combine(appDataPath, "RitoShark", "Jade");
+                var prefsFile = Path.Combine(jadeDir, "preferences.txt");
+                
+                // Check if auto-clear is enabled (default is true)
+                bool autoClear = true;
+                if (File.Exists(prefsFile))
                 {
-                    autoClear = content.Contains("AutoClearTemp=True");
-                }
-            }
-            
-            if (autoClear)
-            {
-                var tempFolder = Path.Combine(jadeDir, "temp");
-                if (Directory.Exists(tempFolder))
-                {
-                    var files = Directory.GetFiles(tempFolder);
-                    foreach (var file in files)
+                    var content = File.ReadAllText(prefsFile);
+                    if (content.Contains("AutoClearTemp="))
                     {
-                        try
-                        {
-                            File.Delete(file);
-                        }
-                        catch { }
+                        autoClear = content.Contains("AutoClearTemp=True");
                     }
-                    Logger.Info($"Auto-cleared {files.Length} file(s) from temp folder on startup");
                 }
-            }
+                
+                if (autoClear)
+                {
+                    var tempFolder = Path.Combine(jadeDir, "temp");
+                    if (Directory.Exists(tempFolder))
+                    {
+                        var files = Directory.GetFiles(tempFolder);
+                        foreach (var file in files)
+                        {
+                            try
+                            {
+                                File.Delete(file);
+                            }
+                            catch { }
+                        }
+                        if (files.Length > 0)
+                        {
+                            Logger.Info($"Auto-cleared {files.Length} file(s) from temp folder on startup");
+                        }
+                    }
+                }
+            });
         }
         catch (Exception ex)
         {

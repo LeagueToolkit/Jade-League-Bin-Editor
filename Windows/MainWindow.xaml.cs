@@ -109,8 +109,7 @@ public partial class MainWindow : Window
             // Load zoom level
             LoadZoomLevel();
             
-            // Load and apply theme
-            LoadTheme();
+            // NOTE: Theme is now loaded in App.xaml.cs after window creation to avoid redundant loads
         
             CommandBindings.Add(new CommandBinding(ApplicationCommands.Open, (s, e) => OnOpenFile(s, e)));
             CommandBindings.Add(new CommandBinding(ApplicationCommands.Save, (s, e) => OnSaveFile(s, e)));
@@ -2646,17 +2645,35 @@ public partial class MainWindow : Window
         try
         {
             var processName = Process.GetCurrentProcess().ProcessName;
-            // Use "Working Set - Private" to match Task Manager's "Memory" column
-            _ramCounter = new PerformanceCounter("Process", "Working Set - Private", processName);
             
             _perfTimer = new System.Windows.Threading.DispatcherTimer();
             _perfTimer.Interval = TimeSpan.FromSeconds(1);
             _perfTimer.Tick += OnPerfTimerTick;
-            _perfTimer.Start();
+            
+            // Initialize PerformanceCounter in background as it can be very slow
+            Task.Run(() => 
+            {
+                try
+                {
+                    // Use "Working Set - Private" to match Task Manager's "Memory" column
+                    _ramCounter = new PerformanceCounter("Process", "Working Set - Private", processName);
+                    
+                    Dispatcher.Invoke(() => _perfTimer.Start());
+                    Logger.Info("Performance monitoring initialized (background)");
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error("Failed to initialize performance counter in background", ex);
+                    Dispatcher.Invoke(() => 
+                    {
+                        if (RamUsageText != null) RamUsageText.Text = "RAM: N/A";
+                    });
+                }
+            });
         }
         catch (Exception ex)
         {
-            Logger.Error("Failed to initialize performance monitoring", ex);
+            Logger.Error("Failed to setup performance monitoring timer", ex);
             if (RamUsageText != null) RamUsageText.Text = "RAM: N/A";
         }
     }

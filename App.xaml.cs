@@ -167,18 +167,10 @@ public partial class App : Application
     {
         try
         {
-            string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            string prefFolder = Path.Combine(appData, "RitoShark", "Jade");
-            string prefPath = Path.Combine(prefFolder, "preferences.txt");
-            
-            if (File.Exists(prefPath))
+            if (bool.TryParse(ThemeHelper.ReadPreference("RoundedEdges", "True"), out bool rounded))
             {
-                var lines = File.ReadAllLines(prefPath);
-                var roundedLine = lines.FirstOrDefault(l => l.StartsWith("RoundedEdges="));
-                if (roundedLine != null && bool.TryParse(roundedLine.Split('=')[1], out bool rounded))
-                {
-                    Resources["GlobalCornerRadius"] = new CornerRadius(rounded ? 3 : 0);
-                }
+                Resources["GlobalCornerRadius"] = new CornerRadius(rounded ? 3 : 0);
+                Services.Logger.Info($"Loaded rounded edges preference: {rounded}");
             }
         }
         catch (Exception ex)
