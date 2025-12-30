@@ -47,6 +47,7 @@ public partial class ThemesWindow : Window
     public ThemesWindow()
     {
         InitializeComponent();
+        Jade.Services.IconService.ApplyIconToWindow(this);
         
         // Initialize themes
         InitializeThemes();

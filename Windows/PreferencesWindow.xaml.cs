@@ -12,6 +12,7 @@ public partial class PreferencesWindow : Window
     public PreferencesWindow()
     {
         InitializeComponent();
+        Jade.Services.IconService.ApplyIconToWindow(this);
         LoadPreferences();
     }
 

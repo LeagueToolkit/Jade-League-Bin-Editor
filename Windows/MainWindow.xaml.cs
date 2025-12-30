@@ -65,6 +65,9 @@ public partial class MainWindow : Window
             SettingsWindow.ClearTempFolderOnStartup();
             
             InitializeComponent();
+
+            // Apply custom icon
+            Jade.Services.IconService.ApplyIconToWindow(this);
             
             // Auto-download hashes if enabled (after InitializeComponent so StatusText is available)
             SettingsWindow.DownloadHashesOnStartup(status =>

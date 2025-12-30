@@ -26,7 +26,7 @@
             <!-- Custom Title Bar -->
             <Border x:Name="TitleBar" Grid.Row="0" Background="{DynamicResource TitleBarBackgroundBrush}" Height="30" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown" CornerRadius="{DynamicResource GlobalCornerRadius}">
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0">
-                    <Image Source="/jade.ico" Width="16" Height="16" Margin="0,0,8,0"/>
+                    <Image x:Name="TitleBarIcon" Source="/jade.ico" Width="16" Height="16" Margin="0,0,8,0"/>
                     <TextBlock Text="Jade Settings" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="12" VerticalAlignment="Center"/>
                 </StackPanel>
             </Border>

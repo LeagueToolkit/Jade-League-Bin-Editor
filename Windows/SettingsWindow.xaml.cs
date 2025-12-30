@@ -45,6 +45,7 @@ public partial class SettingsWindow : Window
     public SettingsWindow()
     {
         InitializeComponent();
+        Jade.Services.IconService.ApplyIconToWindow(this);
         
         _hashFolderPath = HashDownloader.GetHashDirectory();
         
@@ -867,6 +868,9 @@ public partial class SettingsWindow : Window
             {
                 key?.SetValue("", $"\"{exePath}\" \"%1\"", Microsoft.Win32.RegistryValueKind.String);
             }
+            
+            // Update the file association icon (handles custom icons)
+            IconService.UpdateFileAssociationIcon();
             
             // Add to Applications list for "Open with" menu
             using (var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\Classes\Applications\Jade.exe\shell\open\command"))
