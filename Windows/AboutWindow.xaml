@@ -43,7 +43,38 @@
                     
                     <!-- App Icon and Name -->
                     <StackPanel HorizontalAlignment="Center" Margin="0,0,0,15">
-                        <Image x:Name="AppLogoImage" Source="/jade.ico" Width="56" Height="56" HorizontalAlignment="Center" Cursor="Hand" MouseLeftButtonUp="OnIconClick" ToolTip="Click to change application icon"/>
+                        <Button x:Name="IconChangeButton" Click="OnIconClick" HorizontalAlignment="Center" ToolTip="Click to change application icon" Cursor="Hand">
+                            <Button.Style>
+                                <Style TargetType="Button">
+                                    <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}"/>
+                                    <Setter Property="BorderBrush" Value="{DynamicResource SubtleBorderBrush}"/>
+                                    <Setter Property="BorderThickness" Value="1"/>
+                                    <Setter Property="Padding" Value="12"/>
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="Button">
+                                                <Border x:Name="border" Background="{TemplateBinding Background}" CornerRadius="{DynamicResource GlobalCornerRadius}" Padding="{TemplateBinding Padding}" BorderThickness="{TemplateBinding BorderThickness}" BorderBrush="{TemplateBinding BorderBrush}" SnapsToDevicePixels="True">
+                                                    <Grid>
+                                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                        <Border x:Name="EditBadge" Background="{DynamicResource FocusBorderBrush}" Width="22" Height="22" CornerRadius="11" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-8,-8" Opacity="0.7">
+                                                            <TextBlock Text="✎" Foreground="White" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="1,0,0,1"/>
+                                                        </Border>
+                                                    </Grid>
+                                                </Border>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="border" Property="Background" Value="{DynamicResource TitleBarBackgroundBrush}"/>
+                                                        <Setter TargetName="border" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                                                        <Setter TargetName="EditBadge" Property="Opacity" Value="1.0"/>
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                </Style>
+                            </Button.Style>
+                            <Image x:Name="AppLogoImage" Source="/jade.ico" Width="56" Height="56" HorizontalAlignment="Center"/>
+                        </Button>
                         <TextBlock x:Name="AppNameText" Text="Jade" FontSize="24" FontWeight="Bold" Foreground="{DynamicResource PrimaryTextBrush}" 
                                    HorizontalAlignment="Center" Margin="0,8,0,0"/>
                         <TextBlock x:Name="SubtitleText" Text="BIN Editor for League of Legends" FontSize="12" Foreground="{DynamicResource MutedTextBrush}" 

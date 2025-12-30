@@ -28,7 +28,7 @@ public partial class AboutWindow : Window
         // NO THEME CODE NEEDED! The window automatically uses DynamicResource bindings
     }
 
-    private void OnIconClick(object sender, MouseButtonEventArgs e)
+    private void OnIconClick(object sender, RoutedEventArgs e)
     {
         var dialog = new Microsoft.Win32.OpenFileDialog
         {
