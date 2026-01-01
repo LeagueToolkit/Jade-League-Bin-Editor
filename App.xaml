@@ -74,20 +74,67 @@
             <!-- Global Implicit Style -->
             <Style TargetType="Button" BasedOn="{StaticResource ModernButtonStyle}"/>
             
+            <Style x:Key="ScrollBarThumbStyle" TargetType="Thumb">
+                <Setter Property="IsTabStop" Value="False"/>
+                <Setter Property="Focusable" Value="False"/>
+                <Setter Property="Margin" Value="1,0,1,0"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Thumb">
+                            <Rectangle x:Name="ellipse" Fill="{TemplateBinding Background}" RadiusX="4" RadiusY="4"/>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!-- Modern ScrollBar Style -->
+            <Style TargetType="ScrollBar">
+                <Setter Property="Background" Value="{DynamicResource ScrollBarTrackBrush}"/>
+                <Setter Property="Stylus.IsFlicksEnabled" Value="false"/>
+                <Setter Property="Width" Value="10"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="ScrollBar">
+                            <Grid x:Name="GridRoot" Width="10" Background="{TemplateBinding Background}">
+                                <Track x:Name="PART_Track" IsDirectionReversed="true" Focusable="false">
+                                    <Track.Thumb>
+                                        <Thumb x:Name="Thumb" Background="{DynamicResource ScrollBarThumbBrush}" Style="{DynamicResource ScrollBarThumbStyle}"/>
+                                    </Track.Thumb>
+                                    <Track.IncreaseRepeatButton>
+                                        <RepeatButton x:Name="PageUp" Command="ScrollBar.PageDownCommand" Opacity="0" Focusable="false" Background="Transparent"/>
+                                    </Track.IncreaseRepeatButton>
+                                    <Track.DecreaseRepeatButton>
+                                        <RepeatButton x:Name="PageDown" Command="ScrollBar.PageUpCommand" Opacity="0" Focusable="false" Background="Transparent"/>
+                                    </Track.DecreaseRepeatButton>
+                                </Track>
+                            </Grid>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Thumb" Property="Background" Value="{DynamicResource ScrollBarThumbHoverBrush}"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!-- Text Box Style -->   
             <Style TargetType="TextBox">
-                <Setter Property="Background" Value="#2D2D30"/>
-                <Setter Property="Foreground" Value="#CCCCCC"/>
-                <Setter Property="BorderBrush" Value="#3E3E42"/>
+                <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}"/>
+                <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}"/>
+                <Setter Property="BorderBrush" Value="{DynamicResource SubtleBorderBrush}"/>
+                <Setter Property="CaretBrush" Value="{DynamicResource PrimaryTextBrush}"/>
                 <Setter Property="BorderThickness" Value="1"/>
                 <Setter Property="Padding" Value="8,6"/>
                 <Setter Property="FontSize" Value="14"/>
-                <Setter Property="SelectionBrush" Value="#264F78"/>
-                <Setter Property="SelectionTextBrush" Value="#FFFFFF"/>
+                <Setter Property="SelectionBrush" Value="{DynamicResource AccentBrush}"/>
+                <Setter Property="SelectionTextBrush" Value="White"/>
                 <Setter Property="VerticalContentAlignment" Value="Center"/>
                 <Setter Property="Template">
                     <Setter.Value>
                         <ControlTemplate TargetType="TextBox">
-                            <Border Background="{TemplateBinding Background}" 
+                            <Border x:Name="border"
+                                    Background="{TemplateBinding Background}" 
                                     BorderBrush="{TemplateBinding BorderBrush}" 
                                     BorderThickness="{TemplateBinding BorderThickness}"
                                     CornerRadius="{DynamicResource GlobalCornerRadius}">
@@ -97,10 +144,21 @@
                                               HorizontalScrollBarVisibility="{TemplateBinding HorizontalScrollBarVisibility}"
                                               VerticalScrollBarVisibility="{TemplateBinding VerticalScrollBarVisibility}"/>
                             </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="border" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                                </Trigger>
+                                <Trigger Property="IsKeyboardFocused" Value="True">
+                                    <Setter TargetName="border" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
                         </ControlTemplate>
                     </Setter.Value>
                 </Setter>
             </Style>
+            
+            <Style x:Key="ModernTextBox" TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}"/>
+            
         </ResourceDictionary>
     </Application.Resources>
 </Application>
