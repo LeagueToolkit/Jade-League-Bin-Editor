@@ -51,6 +51,11 @@ public class StickyScrollControl : Grid
         };
         _editor.TextChanged += (s, e) => UpdateStickyLines();
         
+        // Listen for Font Size changes (Zoom)
+        System.ComponentModel.DependencyPropertyDescriptor
+            .FromProperty(TextEditor.FontSizeProperty, typeof(TextEditor))
+            .AddValueChanged(_editor, (s, e) => UpdateStickyLines(true));
+
         UpdateStickyLines();
     }
 
@@ -148,8 +153,8 @@ public class StickyScrollControl : Grid
             var lineNumFg = (Brush)_editor.GetValue(ICSharpCode.AvalonEdit.TextEditor.LineNumbersForegroundProperty);
             
             Brush stickyBg = Brushes.Transparent;
-            // VISIBILITY: Increase the '40' to make the separator lines darker/more visible
-            Brush borderBrush = new SolidColorBrush(Color.FromArgb(80, 128, 128, 128));
+            // VISIBILITY: Increased alpha for better visibility of the separator (from 80 to 120)
+            Brush borderBrush = new SolidColorBrush(Color.FromArgb(120, 128, 128, 128));
             Brush hoverBg = new SolidColorBrush(Color.FromArgb(50, 128, 128, 128));
 
             try
@@ -159,10 +164,29 @@ public class StickyScrollControl : Grid
                     stickyBg = new SolidColorBrush(Color.FromRgb(bgBrush.Color.R, bgBrush.Color.G, bgBrush.Color.B));
                 
                 var themeBorder = _editor.TryFindResource("SubtleBorderBrush") as SolidColorBrush;
-                if (themeBorder != null) borderBrush = themeBorder;
+                if (themeBorder != null)
+                {
+                    // Boost theme border alpha if it's too subtle (e.g. in Default theme it's only 40/255)
+                    if (themeBorder.Color.A < 100)
+                        borderBrush = new SolidColorBrush(Color.FromArgb(100, themeBorder.Color.R, themeBorder.Color.G, themeBorder.Color.B));
+                    else
+                        borderBrush = themeBorder;
+                }
                 
                 var accent = _editor.TryFindResource("ButtonHoverBrush") as SolidColorBrush;
                 if (accent != null) hoverBg = accent;
+            }
+            catch { }
+
+            // NEW: Try to match the horizontal separator to the actual folding vertical line color
+            Brush horizontalSeparatorBrush = borderBrush;
+            try 
+            {
+                var foldingMargin = _editor.TextArea.LeftMargins.OfType<FoldingMargin>().FirstOrDefault();
+                if (foldingMargin != null && foldingMargin.FoldingMarkerBrush != null)
+                {
+                    horizontalSeparatorBrush = foldingMargin.FoldingMarkerBrush;
+                }
             }
             catch { }
 
@@ -301,14 +325,37 @@ public class StickyScrollControl : Grid
                 _mainStack.Children.Add(rowContainer);
             }
             
-            // Add a single border at the bottom of the whole stack
-            var bottomBorder = new Rectangle
+            // Add a more prominent border at the bottom of the whole stack with a subtle shadow
+            var bottomContainer = new StackPanel { Orientation = Orientation.Vertical };
+            
+            // 1. Precise 1px line that matches the theme
+            var bottomLine = new Rectangle
             {
                 Height = 1,
-                Fill = borderBrush,
-                VerticalAlignment = VerticalAlignment.Bottom
+                Fill = horizontalSeparatorBrush,
+                SnapsToDevicePixels = true
             };
-            _mainStack.Children.Add(bottomBorder);
+            bottomContainer.Children.Add(bottomLine);
+            
+            // 2. Minimal shadow gradient for a clean VS Code look
+            var shadowLine = new Rectangle
+            {
+                Height = 2,
+                Opacity = 0.25,
+                Fill = new LinearGradientBrush
+                {
+                    StartPoint = new Point(0, 0),
+                    EndPoint = new Point(0, 1),
+                    GradientStops = new GradientStopCollection
+                    {
+                        new GradientStop(Color.FromArgb(80, 0, 0, 0), 0),
+                        new GradientStop(Colors.Transparent, 1)
+                    }
+                }
+            };
+            bottomContainer.Children.Add(shadowLine);
+            
+            _mainStack.Children.Add(bottomContainer);
 
             UpdateHorizontalOffset();
         }

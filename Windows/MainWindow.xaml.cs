@@ -357,7 +357,7 @@ public partial class MainWindow : Window
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
             BorderThickness = new Thickness(0),
-            Padding = new Thickness(10),
+            Padding = new Thickness(10, 0, 10, 10), // Reduced top padding to 0 for better sticky scroll integration
             WordWrap = false,
             Document = new ICSharpCode.AvalonEdit.Document.TextDocument(content ?? "")
         };
