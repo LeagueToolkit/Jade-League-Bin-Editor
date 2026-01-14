@@ -1,0 +1,752 @@
+import { useState, useEffect, useRef, useCallback } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import Editor, { Monaco } from "@monaco-editor/react";
+import type * as MonacoType from 'monaco-editor';
+import { registerRitobinLanguage, registerRitobinTheme, RITOBIN_LANGUAGE_ID, RITOBIN_THEME_ID } from "./lib/ritobinLanguage";
+import { openBinFile, saveBinFile, saveBinFileAs } from "./lib/binOperations";
+import { loadSavedTheme } from "./lib/themeApplicator";
+import TitleBar from "./components/TitleBar";
+import MenuBar from "./components/MenuBar";
+import TabBar, { EditorTab, createTab, getFileName } from "./components/TabBar";
+import StatusBar from "./components/StatusBar";
+import WelcomeScreen from "./components/WelcomeScreen";
+import AboutDialog from "./components/AboutDialog";
+import ThemesDialog from "./components/ThemesDialog";
+import SettingsDialog from "./components/SettingsDialog";
+import PreferencesDialog from "./components/PreferencesDialog";
+import { findAndOpenLinkedBins, LinkedBinResult } from "./lib/linkedBinParser";
+import "./App.css";
+
+// Store editor view states (scroll position, cursor position) per tab
+interface EditorViewState {
+  viewState: MonacoType.editor.ICodeEditorViewState | null;
+}
+
+function App() {
+  // Tab management - start with NO tabs (empty)
+  const [tabs, setTabs] = useState<EditorTab[]>([]);
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const viewStatesRef = useRef<Map<string, EditorViewState>>(new Map());
+
+  // UI state
+  const [statusMessage, setStatusMessage] = useState("Ready");
+  const [showAboutDialog, setShowAboutDialog] = useState(false);
+  const [showThemesDialog, setShowThemesDialog] = useState(false);
+  const [showPreferencesDialog, setShowPreferencesDialog] = useState(false);
+  const [showSettingsDialog, setShowSettingsDialog] = useState(false);
+  const [appIcon, setAppIcon] = useState<string>("/jade.ico");
+  const [findWidgetOpen, setFindWidgetOpen] = useState(false);
+  const [replaceWidgetOpen, setReplaceWidgetOpen] = useState(false);
+  const [monacoInstance, setMonacoInstance] = useState<Monaco | null>(null);
+  const [isMaximized, setIsMaximized] = useState(false);
+  const [lineCount, setLineCount] = useState(0);
+  const [caretPosition, setCaretPosition] = useState({ line: 1, column: 1 });
+  const [recentFiles, setRecentFiles] = useState<string[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const editorRef = useRef<MonacoType.editor.IStandaloneCodeEditor | null>(null);
+
+  // Get the active tab
+  const activeTab = tabs.find(t => t.id === activeTabId) || null;
+
+  // Load custom icon and window state on mount
+  useEffect(() => {
+    loadCustomIcon();
+    restoreWindowState();
+    // Auto-download hashes first (if enabled), then preload them
+    autoDownloadHashesIfEnabled().then(() => {
+      preloadHashesIfEnabled();
+    });
+    loadRecentFiles(); // Just load the list, don't open files
+    if (!monacoInstance) {
+      loadSavedTheme(invoke);
+    }
+
+    const handleIconChange = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      setAppIcon(customEvent.detail);
+    };
+
+    window.addEventListener('icon-changed', handleIconChange);
+
+    let saveTimeout: number | null = null;
+    const debouncedSave = () => {
+      if (saveTimeout) clearTimeout(saveTimeout);
+      saveTimeout = setTimeout(() => {
+        saveCurrentWindowState();
+      }, 500);
+    };
+
+    const setupWindowListeners = async () => {
+      const window = getCurrentWindow();
+      const unlistenResize = await window.onResized(debouncedSave);
+      const unlistenMove = await window.onMoved(debouncedSave);
+
+      const checkMaximized = setInterval(async () => {
+        const maximized = await window.isMaximized();
+        setIsMaximized(maximized);
+      }, 100);
+
+      return () => {
+        unlistenResize();
+        unlistenMove();
+        clearInterval(checkMaximized);
+        if (saveTimeout) clearTimeout(saveTimeout);
+      };
+    };
+
+    // Listen for file drop events from Tauri
+    const setupFileDropListener = async () => {
+      const unlisten = await listen<{ paths: string[] }>('tauri://drag-drop', async (event) => {
+        console.log('File drop event:', event.payload);
+        setIsDragging(false);
+        
+        for (const filePath of event.payload.paths) {
+          console.log('Dropped file:', filePath);
+          if (filePath.toLowerCase().endsWith('.bin')) {
+            await openFileFromPath(filePath);
+          }
+        }
+      });
+
+      const unlistenDragOver = await listen('tauri://drag', () => {
+        setIsDragging(true);
+      });
+
+      return () => {
+        unlisten();
+        unlistenDragOver();
+      };
+    };
+
+    let cleanup: (() => void) | undefined;
+    let fileDropCleanup: (() => void) | undefined;
+    
+    setupWindowListeners().then(fn => { cleanup = fn; });
+    setupFileDropListener().then(fn => { fileDropCleanup = fn; });
+
+    return () => {
+      window.removeEventListener('icon-changed', handleIconChange);
+      cleanup?.();
+      fileDropCleanup?.();
+      saveCurrentWindowState();
+    };
+  }, [monacoInstance]);
+
+  const saveCurrentWindowState = async () => {
+    try {
+      const window = getCurrentWindow();
+      const size = await window.innerSize();
+      const position = await window.outerPosition();
+      const maximized = await window.isMaximized();
+
+      await invoke('save_window_state', {
+        state: {
+          width: size.width,
+          height: size.height,
+          x: position.x,
+          y: position.y,
+          maximized
+        }
+      });
+    } catch (error) {
+      console.error('Failed to save window state:', error);
+    }
+  };
+
+  const restoreWindowState = async () => {
+    try {
+      const state = await invoke<{ width: number, height: number, x: number, y: number, maximized: boolean } | null>('get_window_state');
+
+      if (state) {
+        const window = getCurrentWindow();
+        const { LogicalSize, PhysicalPosition } = await import('@tauri-apps/api/dpi');
+        await window.setSize(new LogicalSize(state.width, state.height));
+        await window.setPosition(new PhysicalPosition(state.x, state.y));
+
+        if (state.maximized) {
+          await window.maximize();
+        }
+        setIsMaximized(state.maximized);
+      }
+    } catch (error) {
+      console.error('Failed to restore window state:', error);
+    }
+  };
+
+  const loadCustomIcon = async () => {
+    try {
+      const iconData = await invoke<string | null>('get_custom_icon_data');
+      if (iconData) {
+        setAppIcon(iconData);
+      }
+    } catch (error) {
+      console.error('Failed to load custom icon:', error);
+    }
+  };
+
+  // Auto-download hashes on startup if setting is enabled
+  const autoDownloadHashesIfEnabled = async () => {
+    try {
+      const autoDownloadEnabled = await invoke<string>('get_preference', { 
+        key: 'AutoDownloadHashes', 
+        defaultValue: 'False' 
+      });
+      
+      if (autoDownloadEnabled !== 'True') {
+        return;
+      }
+
+      const useBinaryFormat = await invoke<string>('get_preference', { 
+        key: 'UseBinaryHashFormat', 
+        defaultValue: 'False' 
+      }) === 'True';
+
+      // Always download latest hashes when auto-download is enabled
+      setStatusMessage('Auto-downloading latest hash files...');
+      try {
+        await invoke('download_hashes', { useBinary: useBinaryFormat });
+        setStatusMessage('Latest hash files downloaded');
+      } catch (error) {
+        console.error('[App] Failed to auto-download hashes:', error);
+        setStatusMessage('Ready');
+      }
+    } catch (error) {
+      console.error('[App] Failed to auto-download hashes:', error);
+    }
+  };
+
+  // Preload hashes in background if setting is enabled
+  const preloadHashesIfEnabled = async () => {
+    try {
+      const preloadEnabled = await invoke<string>('get_preference', { 
+        key: 'PreloadHashes', 
+        defaultValue: 'False' 
+      });
+      
+      if (preloadEnabled === 'True') {
+        setStatusMessage('Preloading hashes...');
+        
+        // Run preload in background - don't await
+        invoke<{ loaded: boolean; fnv_count: number; xxh_count: number; memory_bytes: number }>('preload_hashes')
+          .then((status) => {
+            if (status.loaded) {
+              const totalHashes = status.fnv_count + status.xxh_count;
+              const memoryMB = Math.round(status.memory_bytes / 1024 / 1024);
+              setStatusMessage(`Ready (${totalHashes} hashes preloaded)`);
+            }
+          })
+          .catch((error) => {
+            console.error('[App] Failed to preload hashes:', error);
+            setStatusMessage('Ready');
+          });
+      }
+    } catch (error) {
+      console.error('[App] Failed to check preload preference:', error);
+    }
+  };
+
+  // Recent files management
+  const loadRecentFiles = async () => {
+    try {
+      const recent = await invoke<string[]>('get_recent_files');
+      setRecentFiles(recent);
+    } catch (e) {
+      console.error("Failed to load recent files:", e);
+      setRecentFiles([]);
+    }
+  };
+
+  const addToRecentFiles = async (filePath: string) => {
+    try {
+      const updated = await invoke<string[]>('add_recent_file', { path: filePath });
+      setRecentFiles(updated);
+    } catch (e) {
+      console.error("Failed to add to recent files:", e);
+    }
+  };
+
+  const openFileFromPath = async (filePath: string) => {
+    try {
+      setStatusMessage(`Opening ${getFileName(filePath)}...`);
+      
+      const existingTab = tabs.find(t => t.path && t.path.toLowerCase() === filePath.toLowerCase());
+      if (existingTab) {
+        setActiveTabId(existingTab.id);
+        setStatusMessage(`Switched to ${getFileName(filePath)}`);
+        return;
+      }
+
+      // Import the readBinDirect function from binOperations
+      const { readBinDirect } = await import('./lib/binOperations');
+      const content = await readBinDirect(filePath);
+      const newTab = createTab(filePath, content);
+      setTabs(prev => [...prev, newTab]);
+      setActiveTabId(newTab.id);
+
+      await addToRecentFiles(filePath);
+      setStatusMessage(`Opened ${getFileName(filePath)}`);
+      
+      await openLinkedBinFiles(filePath, content);
+    } catch (error) {
+      console.error("Failed to open file:", error);
+      setStatusMessage(`Failed to open file: ${error}`);
+    }
+  };
+
+
+  // Save current editor view state before switching tabs
+  const saveCurrentViewState = useCallback(() => {
+    if (editorRef.current && activeTabId) {
+      const viewState = editorRef.current.saveViewState();
+      viewStatesRef.current.set(activeTabId, { viewState });
+    }
+  }, [activeTabId]);
+
+  // Restore editor view state when switching to a tab
+  const restoreViewState = useCallback((tabId: string) => {
+    if (editorRef.current) {
+      const savedState = viewStatesRef.current.get(tabId);
+      if (savedState?.viewState) {
+        editorRef.current.restoreViewState(savedState.viewState);
+      }
+      editorRef.current.focus();
+    }
+  }, []);
+
+  // Tab operations
+  const handleTabSelect = useCallback((tabId: string) => {
+    if (tabId === activeTabId) return;
+    saveCurrentViewState();
+    setActiveTabId(tabId);
+    // View state will be restored in onMount or after model change
+  }, [activeTabId, saveCurrentViewState]);
+
+  const handleTabClose = useCallback((tabId: string) => {
+    const tabToClose = tabs.find(t => t.id === tabId);
+    if (!tabToClose) return;
+
+    // Confirm if modified
+    if (tabToClose.isModified) {
+      if (!confirm(`"${tabToClose.fileName}" has unsaved changes. Close anyway?`)) {
+        return;
+      }
+    }
+
+    // Remove view state
+    viewStatesRef.current.delete(tabId);
+
+    setTabs(prevTabs => {
+      const newTabs = prevTabs.filter(t => t.id !== tabId);
+      
+      // If closing the active tab, switch to another or clear active
+      if (tabId === activeTabId) {
+        if (newTabs.length > 0) {
+          const closedIndex = prevTabs.findIndex(t => t.id === tabId);
+          const newActiveIndex = Math.min(closedIndex, newTabs.length - 1);
+          setActiveTabId(newTabs[newActiveIndex].id);
+        } else {
+          // No more tabs - show welcome screen
+          setActiveTabId(null);
+        }
+      }
+      
+      return newTabs;
+    });
+  }, [tabs, activeTabId]);
+
+  const handleTabCloseAll = useCallback(() => {
+    const hasModified = tabs.some(t => t.isModified);
+    if (hasModified) {
+      if (!confirm('Some tabs have unsaved changes. Close all anyway?')) {
+        return;
+      }
+    }
+
+    viewStatesRef.current.clear();
+    setTabs([]);
+    setActiveTabId(null);
+  }, [tabs]);
+
+  const handleTabPin = useCallback((tabId: string) => {
+    setTabs(prevTabs => 
+      prevTabs.map(t => 
+        t.id === tabId ? { ...t, isPinned: !t.isPinned } : t
+      )
+    );
+  }, []);
+
+  // Update tab content
+  const updateTabContent = useCallback((tabId: string, content: string, isModified: boolean = true) => {
+    setTabs(prevTabs =>
+      prevTabs.map(t =>
+        t.id === tabId ? { ...t, content, isModified } : t
+      )
+    );
+  }, []);
+
+  // Add a new tab
+  const addTab = useCallback((filePath: string | null, content: string): EditorTab => {
+    // Check if file is already open
+    if (filePath) {
+      const existingTab = tabs.find(t => t.filePath === filePath);
+      if (existingTab) {
+        setActiveTabId(existingTab.id);
+        return existingTab;
+      }
+    }
+
+    const newTab = createTab(filePath, content);
+    saveCurrentViewState();
+    setTabs(prevTabs => [...prevTabs, newTab]);
+    setActiveTabId(newTab.id);
+    return newTab;
+  }, [tabs, saveCurrentViewState]);
+
+  // Monaco handlers
+  function handleBeforeMount(monaco: Monaco) {
+    registerRitobinLanguage(monaco);
+    registerRitobinTheme(monaco);
+    setMonacoInstance(monaco);
+    loadSavedTheme(invoke, monaco);
+  }
+
+  const handleThemeApplied = () => {
+    if (monacoInstance) {
+      loadSavedTheme(invoke, monacoInstance);
+    }
+  };
+
+  const handleEditorMount = (editor: MonacoType.editor.IStandaloneCodeEditor) => {
+    editorRef.current = editor;
+
+    // Update caret position on cursor change
+    editor.onDidChangeCursorPosition((e) => {
+      setCaretPosition({ line: e.position.lineNumber, column: e.position.column });
+    });
+
+    // Update line count when model changes
+    const model = editor.getModel();
+    if (model) {
+      setLineCount(model.getLineCount());
+    }
+
+    // Restore view state for active tab
+    if (activeTabId) {
+      setTimeout(() => restoreViewState(activeTabId), 0);
+    }
+
+    // Watch for find widget visibility
+    setTimeout(() => {
+      const editorElement = editor.getDomNode();
+      if (editorElement) {
+        const observer = new MutationObserver(() => {
+          const findWidget = editorElement.querySelector('.find-widget');
+          if (findWidget) {
+            const isHidden = findWidget.classList.contains('hidden') ||
+              findWidget.getAttribute('aria-hidden') === 'true' ||
+              (findWidget as HTMLElement).style.display === 'none';
+
+            const isVisible = !isHidden;
+            const isReplace = findWidget.classList.contains('replaceToggled');
+
+            if (isVisible) {
+              setFindWidgetOpen(!isReplace);
+              setReplaceWidgetOpen(isReplace);
+            } else {
+              setFindWidgetOpen(false);
+              setReplaceWidgetOpen(false);
+            }
+          } else {
+            setFindWidgetOpen(false);
+            setReplaceWidgetOpen(false);
+          }
+        });
+
+        observer.observe(editorElement, {
+          attributes: true,
+          childList: true,
+          subtree: true,
+          attributeFilter: ['class', 'style', 'aria-hidden']
+        });
+      }
+    }, 500);
+  };
+
+  const handleEditorChange = (value: string | undefined) => {
+    if (value !== undefined && activeTabId) {
+      updateTabContent(activeTabId, value, true);
+      const model = editorRef.current?.getModel();
+      if (model) {
+        setLineCount(model.getLineCount());
+      }
+    }
+  };
+
+  // Window Controls
+  const handleMinimize = () => getCurrentWindow().minimize();
+  const handleMaximize = () => getCurrentWindow().toggleMaximize();
+  const handleClose = () => getCurrentWindow().close();
+
+  // File Operations
+  const handleOpen = async () => {
+    try {
+      const result = await openBinFile();
+      if (result) {
+        addTab(result.path, result.content);
+        setStatusMessage(`Opened ${result.path}`);
+        
+        if (result.path) {
+          await addToRecentFiles(result.path);
+        }
+        
+        // Open linked bin files if preference enabled
+        await openLinkedBinFiles(result.path, result.content);
+      }
+    } catch (error) {
+      console.error('Failed to open file:', error);
+      setStatusMessage(`Error: ${error}`);
+    }
+  };
+
+  const openLinkedBinFiles = async (filePath: string, content: string) => {
+    try {
+      const importLinked = await invoke<string>('get_preference', { 
+        key: 'ImportLinkedBins', 
+        defaultValue: 'False' 
+      });
+      
+      if (importLinked !== 'True') return;
+      
+      const extension = filePath.toLowerCase().split('.').pop();
+      if (extension !== 'bin') return;
+      
+      const recursiveEnabled = await invoke<string>('get_preference', { 
+        key: 'RecursiveLinkedBins', 
+        defaultValue: 'False' 
+      }) === 'True';
+      
+      setStatusMessage('Loading linked files...');
+      
+      const linkedResults = await findAndOpenLinkedBins(
+        filePath,
+        content,
+        recursiveEnabled,
+        (result: LinkedBinResult) => {
+          addTab(result.path, result.content);
+        }
+      );
+      
+      if (linkedResults.length > 0) {
+        setStatusMessage(`Loaded ${linkedResults.length} linked file(s)`);
+      }
+    } catch (error) {
+      console.error('Error opening linked bin files:', error);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!activeTab) return;
+    
+    try {
+      if (activeTab.filePath) {
+        await saveBinFile(activeTab.filePath, activeTab.content);
+        setTabs(prevTabs =>
+          prevTabs.map(t =>
+            t.id === activeTabId ? { ...t, isModified: false } : t
+          )
+        );
+        setStatusMessage(`Saved ${activeTab.filePath}`);
+      } else {
+        handleSaveAs();
+      }
+    } catch (error) {
+      console.error('Failed to save file:', error);
+      setStatusMessage(`Error: ${error}`);
+      alert(`Failed to save file: ${error}`);
+    }
+  };
+
+  const handleSaveAs = async () => {
+    if (!activeTab) return;
+    
+    try {
+      const newPath = await saveBinFileAs(activeTab.content);
+      if (newPath) {
+        setTabs(prevTabs =>
+          prevTabs.map(t =>
+            t.id === activeTabId ? { 
+              ...t, 
+              filePath: newPath, 
+              fileName: getFileName(newPath),
+              isModified: false 
+            } : t
+          )
+        );
+        setStatusMessage(`Saved ${newPath}`);
+      }
+    } catch (error) {
+      console.error('Failed to save file:', error);
+      setStatusMessage(`Error: ${error}`);
+      alert(`Failed to save file: ${error}`);
+    }
+  };
+
+  // Edit Operations
+  const handleUndo = () => editorRef.current?.trigger('keyboard', 'undo', null);
+  const handleRedo = () => editorRef.current?.trigger('keyboard', 'redo', null);
+  const handleCut = () => document.execCommand('cut');
+  const handleCopy = () => document.execCommand('copy');
+  const handlePaste = () => document.execCommand('paste');
+
+  const handleFind = () => {
+    if (findWidgetOpen) {
+      editorRef.current?.trigger('keyboard', 'closeFindWidget', null);
+      setFindWidgetOpen(false);
+    } else {
+      editorRef.current?.trigger('keyboard', 'actions.find', null);
+      setFindWidgetOpen(true);
+      setReplaceWidgetOpen(false);
+    }
+  };
+
+  const handleReplace = () => {
+    if (replaceWidgetOpen) {
+      editorRef.current?.trigger('keyboard', 'closeFindWidget', null);
+      setReplaceWidgetOpen(false);
+    } else {
+      editorRef.current?.trigger('keyboard', 'editor.action.startFindReplaceAction', null);
+      setReplaceWidgetOpen(true);
+      setFindWidgetOpen(false);
+    }
+  };
+
+  const handleCompareFiles = () => console.log('Compare Files');
+  const handleSelectAll = () => editorRef.current?.trigger('keyboard', 'editor.action.selectAll', null);
+  const handleOpenLog = () => console.log('Open Log');
+
+  // Tool Operations
+  const handleThemes = () => setShowThemesDialog(true);
+  const handlePreferences = () => setShowPreferencesDialog(true);
+  const handleSettings = () => setShowSettingsDialog(true);
+  const handleAbout = () => setShowAboutDialog(true);
+
+  // Build status message
+  const statusText = `${statusMessage}${activeTab?.isModified ? ' (Modified)' : ''}`;
+
+  return (
+    <div className={`app-container ${isDragging ? 'dragging' : ''}`}>
+      <TitleBar
+        appIcon={appIcon}
+        isMaximized={isMaximized}
+        onThemes={handleThemes}
+        onPreferences={handlePreferences}
+        onSettings={handleSettings}
+        onAbout={handleAbout}
+        onMinimize={handleMinimize}
+        onMaximize={handleMaximize}
+        onClose={handleClose}
+      />
+
+      <MenuBar
+        findActive={findWidgetOpen}
+        replaceActive={replaceWidgetOpen}
+        onOpenFile={handleOpen}
+        onSaveFile={handleSave}
+        onSaveFileAs={handleSaveAs}
+        onOpenLog={handleOpenLog}
+        onExit={handleClose}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        onCut={handleCut}
+        onCopy={handleCopy}
+        onPaste={handlePaste}
+        onFind={handleFind}
+        onReplace={handleReplace}
+        onCompareFiles={handleCompareFiles}
+        onSelectAll={handleSelectAll}
+        onThemes={handleThemes}
+        onSettings={handleSettings}
+        onAbout={handleAbout}
+        recentFiles={recentFiles}
+        onOpenRecentFile={openFileFromPath}
+      />
+
+      {tabs.length > 0 && (
+        <TabBar
+          tabs={tabs}
+          activeTabId={activeTabId}
+          onTabSelect={handleTabSelect}
+          onTabClose={handleTabClose}
+          onTabCloseAll={handleTabCloseAll}
+          onTabPin={handleTabPin}
+        />
+      )}
+
+      {tabs.length === 0 ? (
+        <WelcomeScreen onOpenFile={handleOpen} />
+      ) : (
+        <div className="editor-container">
+          {activeTab && (
+            <Editor
+              key={activeTabId} // Force remount when tab changes for clean state
+              height="100%"
+              defaultLanguage={RITOBIN_LANGUAGE_ID}
+              value={activeTab.content}
+              theme={RITOBIN_THEME_ID}
+              beforeMount={handleBeforeMount}
+              onMount={handleEditorMount}
+              onChange={handleEditorChange}
+              options={{
+                minimap: { enabled: true },
+                fontSize: 14,
+                scrollBeyondLastLine: false,
+                automaticLayout: true,
+                fontFamily: "'JetBrains Mono', 'Fira Code', Consolas, monospace",
+                fixedOverflowWidgets: true, // Render tooltips outside editor container
+                find: {
+                  addExtraSpaceOnTop: false,
+                  autoFindInSelection: 'never',
+                  seedSearchStringFromSelection: 'always',
+                },
+              }}
+            />
+          )}
+        </div>
+      )}
+
+      <StatusBar
+        status={statusText}
+        lineCount={lineCount}
+        caretLine={caretPosition.line}
+        caretColumn={caretPosition.column}
+        ramUsage="0 MB"
+      />
+
+      <AboutDialog
+        isOpen={showAboutDialog}
+        onClose={() => setShowAboutDialog(false)}
+      />
+
+      <ThemesDialog
+        isOpen={showThemesDialog}
+        onClose={() => setShowThemesDialog(false)}
+        onThemeApplied={handleThemeApplied}
+      />
+
+      <SettingsDialog
+        isOpen={showSettingsDialog}
+        onClose={() => setShowSettingsDialog(false)}
+      />
+
+      <PreferencesDialog
+        isOpen={showPreferencesDialog}
+        onClose={() => setShowPreferencesDialog(false)}
+      />
+    </div>
+  );
+}
+
+export default App;

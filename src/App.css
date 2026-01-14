@@ -1,0 +1,92 @@
+:root {
+  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 400;
+
+  color: #0f0f0f;
+  background-color: #1e1e1e;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+
+  /* Theme CSS Variables - Default Theme (Dark Emptiness) */
+  /* These are set dynamically by themeApplicator.ts */
+  --window-bg: #1E1E1E;
+  --editor-bg: #1E1E1E;
+  --title-bar-bg: #252526;
+  --status-bar-bg: #505050;
+  --text-color: #D4D4D4;
+  --tab-bg: #252526;
+  --selected-tab-bg: #3E3E42;
+
+  /* Border radius - default to 0 (square), can be changed via themes */
+  --border-radius: 0px;
+  
+  /* Scrollbar */
+  --scrollbar-thumb: #5a5a5a;
+  --scrollbar-thumb-hover: #7a7a7a;
+  
+  /* General UI */
+  --text-primary: #cccccc;
+  --text-muted: #808080;
+  --border-color: #3c3c3c;
+  --button-bg: #0e639c;
+  --button-hover-bg: #1177bb;
+  --hint-key-bg: #3c3c3c;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+#root {
+  width: 100%;
+  height: 100%;
+}
+
+.app-container {
+  width: 100%;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--window-bg);
+}
+
+.editor-container {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  /* Allow Monaco tooltips/hover to render above the editor area (into the tab bar) */
+  overflow: visible;
+  position: relative;
+  z-index: 2;
+  background: var(--editor-bg);
+}
+
+/* Monaco fixed overflow widgets */
+.monaco-editor .overflowingContentWidgets,
+.monaco-editor-hover,
+.monaco-hover,
+.monaco-editor-hover-content,
+.parameter-hints-widget,
+.suggest-widget {
+  z-index: 5000 !important;
+}
+
+/* Monaco "context view" layer is what many hover tooltips (including find/replace button hovers) use */
+.context-view {
+  z-index: 6000 !important;
+}
+
