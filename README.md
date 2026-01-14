@@ -1,9 +1,10 @@
 # Jade
 
-![Rust](https://img.shields.io/badge/Rust-000000?style=flat&logo=rust&logoColor=white)
-![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat&logo=typescript&logoColor=white)
-![React](https://img.shields.io/badge/React-61DAFB?style=flat&logo=react&logoColor=black)
-![Tauri](https://img.shields.io/badge/Tauri-24C8D8?style=flat&logo=tauri&logoColor=white)
+![Rust](https://img.shields.io/badge/Rust-1.70+-orange?style=flat-square&logo=rust)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue?style=flat-square&logo=typescript)
+![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react)
+![Tauri](https://img.shields.io/badge/Tauri-2.0-24C8D8?style=flat-square&logo=tauri)
+![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 
 A fast, modern bin file editor for League of Legends modding. Built with Rust and Tauri for native performance.
 
