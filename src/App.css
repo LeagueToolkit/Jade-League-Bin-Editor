@@ -37,6 +37,20 @@
   --button-bg: #0e639c;
   --button-hover-bg: #1177bb;
   --hint-key-bg: #3c3c3c;
+
+  /* Monaco widget tokens (used for General Edit Panel styling) */
+  --vscode-widget-shadow: rgba(0, 0, 0, 0.36);
+  --vscode-editorWidget-foreground: var(--text-color);
+  --vscode-editorWidget-background: var(--editor-bg);
+  --vscode-widget-border: var(--border-color);
+  --vscode-focusBorder: #007acc;
+  --vscode-toolbar-hoverBackground: var(--selected-tab-bg);
+  --vscode-disabledForeground: #808080;
+  --vscode-errorForeground: #f48771;
+  --vscode-input-background: var(--tab-bg);
+  --vscode-input-foreground: var(--text-color);
+  --vscode-input-border: var(--border-color);
+  --jade-accent: var(--button-bg);
 }
 
 * {
@@ -88,5 +102,22 @@ body {
 /* Monaco "context view" layer is what many hover tooltips (including find/replace button hovers) use */
 .context-view {
   z-index: 6000 !important;
+}
+
+/* General Edit Panel should match Monaco find widget z-index */
+.general-edit-panel-wrapper {
+  z-index: 10;
+}
+
+/* Accent bar for Monaco find/replace widget - same as our General Edit Panel */
+.monaco-editor .find-widget::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 3px;
+  background-color: var(--jade-accent, var(--button-bg));
+  z-index: 100;
 }
 

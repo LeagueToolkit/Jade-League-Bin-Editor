@@ -45,9 +45,6 @@ export default function TitleBar({
                 {/* Right: Toolbar */}
                 <div className="title-toolbar">
                     {/* Editing Tools */}
-                    <button className="toolbar-btn" title="General Editing Tools">
-                        ✎
-                    </button>
                     <button className="toolbar-btn" title="Particle Editing Tools">
                         ✨
                     </button>

@@ -16,6 +16,7 @@ import AboutDialog from "./components/AboutDialog";
 import ThemesDialog from "./components/ThemesDialog";
 import SettingsDialog from "./components/SettingsDialog";
 import PreferencesDialog from "./components/PreferencesDialog";
+import GeneralEditPanel from "./components/GeneralEditPanel";
 import { findAndOpenLinkedBins, LinkedBinResult } from "./lib/linkedBinParser";
 import "./App.css";
 
@@ -39,6 +40,7 @@ function App() {
   const [appIcon, setAppIcon] = useState<string>("/jade.ico");
   const [findWidgetOpen, setFindWidgetOpen] = useState(false);
   const [replaceWidgetOpen, setReplaceWidgetOpen] = useState(false);
+  const [generalEditPanelOpen, setGeneralEditPanelOpen] = useState(false);
   const [monacoInstance, setMonacoInstance] = useState<Monaco | null>(null);
   const [isMaximized, setIsMaximized] = useState(false);
   const [lineCount, setLineCount] = useState(0);
@@ -70,6 +72,17 @@ function App() {
     };
 
     window.addEventListener('icon-changed', handleIconChange);
+
+    // Keyboard shortcut for General Edit panel (Ctrl+G) and Escape to close
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.key === 'g') {
+        e.preventDefault();
+        setGeneralEditPanelOpen(prev => !prev);
+      } else if (e.key === 'Escape') {
+        setGeneralEditPanelOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
 
     let saveTimeout: number | null = null;
     const debouncedSave = () => {
@@ -129,6 +142,7 @@ function App() {
 
     return () => {
       window.removeEventListener('icon-changed', handleIconChange);
+      window.removeEventListener('keydown', handleKeyDown);
       cleanup?.();
       fileDropCleanup?.();
       saveCurrentWindowState();
@@ -606,6 +620,7 @@ function App() {
       editorRef.current?.trigger('keyboard', 'closeFindWidget', null);
       setFindWidgetOpen(false);
     } else {
+      setGeneralEditPanelOpen(false);
       editorRef.current?.trigger('keyboard', 'actions.find', null);
       setFindWidgetOpen(true);
       setReplaceWidgetOpen(false);
@@ -617,6 +632,7 @@ function App() {
       editorRef.current?.trigger('keyboard', 'closeFindWidget', null);
       setReplaceWidgetOpen(false);
     } else {
+      setGeneralEditPanelOpen(false);
       editorRef.current?.trigger('keyboard', 'editor.action.startFindReplaceAction', null);
       setReplaceWidgetOpen(true);
       setFindWidgetOpen(false);
@@ -625,6 +641,79 @@ function App() {
 
   const handleCompareFiles = () => console.log('Compare Files');
   const handleSelectAll = () => editorRef.current?.trigger('keyboard', 'editor.action.selectAll', null);
+  const handleGeneralEdit = () => {
+    setFindWidgetOpen(false);
+    setReplaceWidgetOpen(false);
+    editorRef.current?.trigger('keyboard', 'closeFindWidget', null);
+    setGeneralEditPanelOpen(!generalEditPanelOpen);
+  };
+  
+  // Handle content change from General Edit Panel (undoable, preserves cursor/scroll)
+  const handleGeneralEditContentChange = (newContent: string) => {
+    if (activeTabId && editorRef.current) {
+      const editor = editorRef.current;
+      const model = editor.getModel();
+      if (model) {
+        const currentContent = model.getValue();
+        
+        // Find the actual changed lines to minimize the edit
+        const oldLines = currentContent.split('\n');
+        const newLines = newContent.split('\n');
+        
+        // Find first different line
+        let startLine = 0;
+        while (startLine < oldLines.length && startLine < newLines.length && 
+               oldLines[startLine] === newLines[startLine]) {
+          startLine++;
+        }
+        
+        // Find last different line (from end)
+        let oldEndLine = oldLines.length - 1;
+        let newEndLine = newLines.length - 1;
+        while (oldEndLine > startLine && newEndLine > startLine && 
+               oldLines[oldEndLine] === newLines[newEndLine]) {
+          oldEndLine--;
+          newEndLine--;
+        }
+        
+        // Calculate the range to replace (1-indexed for Monaco)
+        const startLineNum = startLine + 1;
+        const endLineNum = oldEndLine + 1;
+        const endColumn = (oldLines[oldEndLine]?.length || 0) + 1;
+        
+        // Get the replacement text
+        const replacementLines = newLines.slice(startLine, newEndLine + 1);
+        const replacementText = replacementLines.join('\n');
+        
+        // Get current selections to preserve cursor position on undo
+        const selections = editor.getSelections() || [];
+        
+        // Push a stack element to create a new undo stop (prevents merging with previous edits)
+        model.pushStackElement();
+        
+        // Use pushEditOperations for proper undo stack with cursor restoration
+        model.pushEditOperations(
+          selections,
+          [{
+            range: {
+              startLineNumber: startLineNum,
+              startColumn: 1,
+              endLineNumber: endLineNum,
+              endColumn: endColumn
+            },
+            text: replacementText
+          }],
+          () => selections // Return same selections for undo
+        );
+        
+        // Push another stack element to close this undo group
+        model.pushStackElement();
+        
+        // Update tab content state
+        updateTabContent(activeTabId, newContent, true);
+      }
+    }
+  };
   const handleOpenLog = () => console.log('Open Log');
 
   // Tool Operations
@@ -653,6 +742,7 @@ function App() {
       <MenuBar
         findActive={findWidgetOpen}
         replaceActive={replaceWidgetOpen}
+        generalEditActive={generalEditPanelOpen}
         onOpenFile={handleOpen}
         onSaveFile={handleSave}
         onSaveFileAs={handleSaveAs}
@@ -667,6 +757,7 @@ function App() {
         onReplace={handleReplace}
         onCompareFiles={handleCompareFiles}
         onSelectAll={handleSelectAll}
+        onGeneralEdit={handleGeneralEdit}
         onThemes={handleThemes}
         onSettings={handleSettings}
         onAbout={handleAbout}
@@ -690,29 +781,37 @@ function App() {
       ) : (
         <div className="editor-container">
           {activeTab && (
-            <Editor
-              key={activeTabId} // Force remount when tab changes for clean state
-              height="100%"
-              defaultLanguage={RITOBIN_LANGUAGE_ID}
-              value={activeTab.content}
-              theme={RITOBIN_THEME_ID}
-              beforeMount={handleBeforeMount}
-              onMount={handleEditorMount}
-              onChange={handleEditorChange}
-              options={{
-                minimap: { enabled: true },
-                fontSize: 14,
-                scrollBeyondLastLine: false,
-                automaticLayout: true,
-                fontFamily: "'JetBrains Mono', 'Fira Code', Consolas, monospace",
-                fixedOverflowWidgets: true, // Render tooltips outside editor container
-                find: {
-                  addExtraSpaceOnTop: false,
-                  autoFindInSelection: 'never',
-                  seedSearchStringFromSelection: 'always',
-                },
-              }}
-            />
+            <>
+              <Editor
+                key={activeTabId} // Force remount when tab changes for clean state
+                height="100%"
+                defaultLanguage={RITOBIN_LANGUAGE_ID}
+                value={activeTab.content}
+                theme={RITOBIN_THEME_ID}
+                beforeMount={handleBeforeMount}
+                onMount={handleEditorMount}
+                onChange={handleEditorChange}
+                options={{
+                  minimap: { enabled: true },
+                  fontSize: 14,
+                  scrollBeyondLastLine: false,
+                  automaticLayout: true,
+                  fontFamily: "'JetBrains Mono', 'Fira Code', Consolas, monospace",
+                  fixedOverflowWidgets: true, // Render tooltips outside editor container
+                  find: {
+                    addExtraSpaceOnTop: false,
+                    autoFindInSelection: 'never',
+                    seedSearchStringFromSelection: 'always',
+                  },
+                }}
+              />
+              <GeneralEditPanel
+                isOpen={generalEditPanelOpen}
+                onClose={() => setGeneralEditPanelOpen(false)}
+                editorContent={activeTab.content}
+                onContentChange={handleGeneralEditContentChange}
+              />
+            </>
           )}
         </div>
       )}

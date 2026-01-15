@@ -4,6 +4,7 @@ import './MenuBar.css';
 interface MenuBarProps {
     findActive?: boolean;
     replaceActive?: boolean;
+    generalEditActive?: boolean;
     onOpenFile: () => void;
     onSaveFile: () => void;
     onSaveFileAs: () => void;
@@ -18,6 +19,7 @@ interface MenuBarProps {
     onReplace: () => void;
     onCompareFiles: () => void;
     onSelectAll: () => void;
+    onGeneralEdit: () => void;
     onThemes: () => void;
     onSettings: () => void;
     onAbout: () => void;
@@ -28,6 +30,7 @@ interface MenuBarProps {
 export default function MenuBar({
     findActive = false,
     replaceActive = false,
+    generalEditActive = false,
     onOpenFile,
     onSaveFile,
     onSaveFileAs,
@@ -42,6 +45,7 @@ export default function MenuBar({
     onReplace,
     onCompareFiles,
     onSelectAll,
+    onGeneralEdit,
     onThemes,
     onSettings,
     onAbout,
@@ -188,6 +192,11 @@ export default function MenuBar({
                 </button>
                 {activeMenu === 'tools' && (
                     <div className="menu-dropdown">
+                        <button className="menu-option" onClick={() => handleMenuClick(onGeneralEdit)}>
+                            <span>General Editing...</span>
+                            <span className="shortcut">Ctrl+G</span>
+                        </button>
+                        <div className="menu-separator" />
                         <button className="menu-option" onClick={() => handleMenuClick(onThemes)}>
                             <span>Themes...</span>
                         </button>
@@ -205,7 +214,7 @@ export default function MenuBar({
             {/* Spacer to push buttons to right */}
             <div style={{ flex: 1 }} />
 
-            {/* Quick Find/Replace Buttons */}
+            {/* Quick Find/Replace/Edit Buttons */}
             <button
                 className={`menu-icon-btn ${findActive ? 'active' : ''}`}
                 title="Find (Ctrl+F)"
@@ -219,6 +228,13 @@ export default function MenuBar({
                 onClick={onReplace}
             >
                 🔁
+            </button>
+            <button
+                className={`menu-icon-btn ${generalEditActive ? 'active' : ''}`}
+                title="General Editing (Ctrl+G)"
+                onClick={onGeneralEdit}
+            >
+                ✏️
             </button>
         </div>
     );
