@@ -124,8 +124,8 @@
 
 .pep-nav-btn {
   width: 24px;
-  height: 24px;
-  border-radius: 4px;
+  height: 25px;
+  border-radius: 2px;
   border: 1px solid var(--vscode-widget-border);
   background-color: var(--vscode-input-background);
   color: var(--vscode-editorWidget-foreground);
@@ -230,14 +230,14 @@
 }
 
 .pep-input {
-  height: 22px;
+  height: 25px;
   padding: 2px 6px;
   background-color: var(--vscode-input-background);
   border: 1px solid var(--vscode-input-border);
   border-radius: 2px;
   color: var(--vscode-input-foreground);
-  font-size: 12px;
-  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 13px;
+  font-family: inherit;
   outline: none;
 }
 
@@ -251,6 +251,10 @@
   opacity: 0.5;
 }
 
+.pep-input::selection {
+  background-color: #264f78;
+}
+
 .pep-input-vec3 {
   flex: 1;
   min-width: 0;
@@ -258,7 +262,7 @@
 }
 
 .pep-input-single {
-  width: 70px;
+  width: 60px;
 }
 
 /* Property rows */
@@ -283,7 +287,7 @@
 
 .pep-btn-tiny {
   width: 20px;
-  height: 22px;
+  height: 25px;
   padding: 0;
   border-radius: 2px;
   border: 1px solid var(--vscode-widget-border);
@@ -309,9 +313,9 @@
 
 .pep-btn-small {
   flex: 1;
-  height: 22px;
+  height: 25px;
   padding: 0 8px;
-  border-radius: 3px;
+  border-radius: 2px;
   border: 1px solid var(--vscode-widget-border);
   background-color: var(--vscode-input-background);
   color: var(--jade-accent, #9d8cd9);

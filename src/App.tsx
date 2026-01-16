@@ -69,6 +69,11 @@ function App() {
   const activeTabRef = useRef(activeTab);
   activeTabRef.current = activeTab;
 
+  // Ref to track if we should allow hash preload status updates
+  // This prevents hash preload status from overriding important messages like "Opened file"
+  const statusMessageRef = useRef<string>("Ready");
+  const allowHashStatusUpdateRef = useRef<boolean>(true);
+
   // Load custom icon and window state on mount
   useEffect(() => {
     loadCustomIcon();
@@ -320,17 +325,38 @@ function App() {
       }) === 'True';
 
       // Always download latest hashes when auto-download is enabled
+      allowHashStatusUpdateRef.current = false; // Block hash preload updates during download
       setStatusMessage('Auto-downloading latest hash files...');
+      statusMessageRef.current = 'Auto-downloading latest hash files...';
       try {
         await invoke('download_hashes', { useBinary: useBinaryFormat });
         setStatusMessage('Latest hash files downloaded');
+        statusMessageRef.current = 'Latest hash files downloaded';
+        // Re-enable hash status updates after a short delay
+        setTimeout(() => {
+          allowHashStatusUpdateRef.current = true;
+        }, 500);
       } catch (error) {
         console.error('[App] Failed to auto-download hashes:', error);
         setStatusMessage('Ready');
+        statusMessageRef.current = 'Ready';
+        allowHashStatusUpdateRef.current = true;
       }
     } catch (error) {
       console.error('[App] Failed to auto-download hashes:', error);
+      allowHashStatusUpdateRef.current = true;
     }
+  };
+
+  // Helper to check if current status is safe to override with hash preload status
+  const isStatusSafeToOverride = (currentStatus: string): boolean => {
+    const lowerStatus = currentStatus.toLowerCase();
+    // Don't override if status contains important operations
+    const importantKeywords = [
+      'opening', 'opened', 'switched to', 'saved', 'loading', 'loaded',
+      'failed', 'error', 'updated', 'set bindweight', 'scaled'
+    ];
+    return !importantKeywords.some(keyword => lowerStatus.includes(keyword));
   };
 
   // Preload hashes in background if setting is enabled
@@ -342,21 +368,83 @@ function App() {
       });
       
       if (preloadEnabled === 'True') {
-        setStatusMessage('Preloading hashes...');
+        // Check status first to see if hashes are already loaded
+        const status = await invoke<{ loaded: boolean; loading: boolean; fnv_count: number; xxh_count: number; memory_bytes: number }>('get_preload_status');
         
-        // Run preload in background - don't await
-        invoke<{ loaded: boolean; fnv_count: number; xxh_count: number; memory_bytes: number }>('preload_hashes')
-          .then((status) => {
-            if (status.loaded) {
-              const totalHashes = status.fnv_count + status.xxh_count;
-              const memoryMB = Math.round(status.memory_bytes / 1024 / 1024);
-              setStatusMessage(`Ready (${totalHashes} hashes preloaded)`);
+        if (status.loaded) {
+          // Hashes are already loaded, always update status to show correct info
+          // (even if current status is "Preloading hashes..." - we need to correct it)
+          const totalHashes = status.fnv_count + status.xxh_count;
+          const newStatus = `Ready (${totalHashes} hashes preloaded)`;
+          
+          // Force update the status - always update when hashes are already loaded
+          // This corrects any incorrect "Preloading hashes..." status
+          setStatusMessage(currentStatus => {
+            const lowerCurrent = currentStatus.toLowerCase();
+            // Always update if current status is hash-related or generic (to correct wrong status)
+            const isHashRelated = lowerCurrent.includes('preloading hashes') || 
+                                  lowerCurrent.includes('hashes preloaded') ||
+                                  lowerCurrent.includes('hash');
+            const isGeneric = lowerCurrent === 'ready' ||
+                             lowerCurrent.includes('latest hash files downloaded');
+            
+            if (isHashRelated || isGeneric || isStatusSafeToOverride(currentStatus)) {
+              statusMessageRef.current = newStatus;
+              allowHashStatusUpdateRef.current = true;
+              console.log(`[App] Updating status from "${currentStatus}" to "${newStatus}" (hashes already loaded)`);
+              return newStatus;
             }
-          })
-          .catch((error) => {
-            console.error('[App] Failed to preload hashes:', error);
-            setStatusMessage('Ready');
+            // Only keep current status if it's an important operation
+            console.log(`[App] Keeping current status "${currentStatus}" (important operation)`);
+            allowHashStatusUpdateRef.current = false;
+            return currentStatus;
           });
+        } else if (!status.loading) {
+          // Hashes are not loaded and not currently loading, start preloading
+          // Only set preloading status if current status is safe to override
+          setStatusMessage(currentStatus => {
+            statusMessageRef.current = currentStatus;
+            if (isStatusSafeToOverride(currentStatus)) {
+              allowHashStatusUpdateRef.current = true;
+              return 'Preloading hashes...';
+            }
+            allowHashStatusUpdateRef.current = false;
+            return currentStatus;
+          });
+          
+          // Run preload in background - don't await
+          invoke<{ loaded: boolean; fnv_count: number; xxh_count: number; memory_bytes: number }>('preload_hashes')
+            .then((preloadStatus) => {
+              if (preloadStatus.loaded) {
+                const totalHashes = preloadStatus.fnv_count + preloadStatus.xxh_count;
+                const newStatus = `Ready (${totalHashes} hashes preloaded)`;
+                // Always update if current status is hash-related
+                setStatusMessage(currentStatus => {
+                  statusMessageRef.current = currentStatus;
+                  const lowerCurrent = currentStatus.toLowerCase();
+                  if (lowerCurrent.includes('preloading hashes') || 
+                      (allowHashStatusUpdateRef.current && isStatusSafeToOverride(currentStatus))) {
+                    return newStatus;
+                  }
+                  return currentStatus;
+                });
+              }
+            })
+            .catch((error) => {
+              console.error('[App] Failed to preload hashes:', error);
+              // Only update status if it's safe to do so
+              setStatusMessage(currentStatus => {
+                statusMessageRef.current = currentStatus;
+                const lowerCurrent = currentStatus.toLowerCase();
+                if (lowerCurrent.includes('preloading hashes') || 
+                    (allowHashStatusUpdateRef.current && isStatusSafeToOverride(currentStatus))) {
+                  return 'Ready';
+                }
+                return currentStatus;
+              });
+            });
+        }
+        // If status.loading is true, hashes are currently being loaded, don't do anything
       }
     } catch (error) {
       console.error('[App] Failed to check preload preference:', error);
@@ -385,12 +473,20 @@ function App() {
 
   const openFileFromPath = async (filePath: string) => {
     try {
+      // Block hash status updates while opening file
+      allowHashStatusUpdateRef.current = false;
       setStatusMessage(`Opening ${getFileName(filePath)}...`);
+      statusMessageRef.current = `Opening ${getFileName(filePath)}...`;
       
       const existingTab = tabs.find(t => t.path && t.path.toLowerCase() === filePath.toLowerCase());
       if (existingTab) {
         setActiveTabId(existingTab.id);
         setStatusMessage(`Switched to ${getFileName(filePath)}`);
+        statusMessageRef.current = `Switched to ${getFileName(filePath)}`;
+        // Re-enable hash status updates after a delay
+        setTimeout(() => {
+          allowHashStatusUpdateRef.current = true;
+        }, 2000);
         return;
       }
 
@@ -403,11 +499,22 @@ function App() {
 
       await addToRecentFiles(filePath);
       setStatusMessage(`Opened ${getFileName(filePath)}`);
+      statusMessageRef.current = `Opened ${getFileName(filePath)}`;
       
       await openLinkedBinFiles(filePath, content);
+      
+      // Re-enable hash status updates after file is opened (with delay to show the message)
+      setTimeout(() => {
+        allowHashStatusUpdateRef.current = true;
+      }, 2000);
     } catch (error) {
       console.error("Failed to open file:", error);
       setStatusMessage(`Failed to open file: ${error}`);
+      statusMessageRef.current = `Failed to open file: ${error}`;
+      // Re-enable hash status updates after error
+      setTimeout(() => {
+        allowHashStatusUpdateRef.current = true;
+      }, 2000);
     }
   };
 
@@ -608,10 +715,13 @@ function App() {
   // File Operations
   const handleOpen = async () => {
     try {
+      // Block hash status updates while opening file
+      allowHashStatusUpdateRef.current = false;
       const result = await openBinFile();
       if (result) {
         addTab(result.path, result.content);
         setStatusMessage(`Opened ${result.path}`);
+        statusMessageRef.current = `Opened ${result.path}`;
         
         if (result.path) {
           await addToRecentFiles(result.path);
@@ -619,10 +729,19 @@ function App() {
         
         // Open linked bin files if preference enabled
         await openLinkedBinFiles(result.path, result.content);
+        
+        // Re-enable hash status updates after file is opened
+        setTimeout(() => {
+          allowHashStatusUpdateRef.current = true;
+        }, 2000);
       }
     } catch (error) {
       console.error('Failed to open file:', error);
       setStatusMessage(`Error: ${error}`);
+      statusMessageRef.current = `Error: ${error}`;
+      setTimeout(() => {
+        allowHashStatusUpdateRef.current = true;
+      }, 2000);
     }
   };
 
@@ -643,7 +762,10 @@ function App() {
         defaultValue: 'False' 
       }) === 'True';
       
+      // Block hash status updates while loading linked files
+      allowHashStatusUpdateRef.current = false;
       setStatusMessage('Loading linked files...');
+      statusMessageRef.current = 'Loading linked files...';
       
       const linkedResults = await findAndOpenLinkedBins(
         filePath,
@@ -656,7 +778,13 @@ function App() {
       
       if (linkedResults.length > 0) {
         setStatusMessage(`Loaded ${linkedResults.length} linked file(s)`);
+        statusMessageRef.current = `Loaded ${linkedResults.length} linked file(s)`;
       }
+      
+      // Re-enable hash status updates after loading linked files
+      setTimeout(() => {
+        allowHashStatusUpdateRef.current = true;
+      }, 2000);
     } catch (error) {
       console.error('Error opening linked bin files:', error);
     }
@@ -666,6 +794,8 @@ function App() {
     if (!activeTab) return;
     
     try {
+      // Block hash status updates while saving
+      allowHashStatusUpdateRef.current = false;
       if (activeTab.filePath) {
         await saveBinFile(activeTab.filePath, activeTab.content);
         setTabs(prevTabs =>
@@ -674,13 +804,22 @@ function App() {
           )
         );
         setStatusMessage(`Saved ${activeTab.filePath}`);
+        statusMessageRef.current = `Saved ${activeTab.filePath}`;
+        // Re-enable hash status updates after save
+        setTimeout(() => {
+          allowHashStatusUpdateRef.current = true;
+        }, 2000);
       } else {
         handleSaveAs();
       }
     } catch (error) {
       console.error('Failed to save file:', error);
       setStatusMessage(`Error: ${error}`);
+      statusMessageRef.current = `Error: ${error}`;
       alert(`Failed to save file: ${error}`);
+      setTimeout(() => {
+        allowHashStatusUpdateRef.current = true;
+      }, 2000);
     }
   };
 
@@ -688,6 +827,8 @@ function App() {
     if (!activeTab) return;
     
     try {
+      // Block hash status updates while saving
+      allowHashStatusUpdateRef.current = false;
       const newPath = await saveBinFileAs(activeTab.content);
       if (newPath) {
         setTabs(prevTabs =>
@@ -701,11 +842,20 @@ function App() {
           )
         );
         setStatusMessage(`Saved ${newPath}`);
+        statusMessageRef.current = `Saved ${newPath}`;
+        // Re-enable hash status updates after save
+        setTimeout(() => {
+          allowHashStatusUpdateRef.current = true;
+        }, 2000);
       }
     } catch (error) {
       console.error('Failed to save file:', error);
       setStatusMessage(`Error: ${error}`);
+      statusMessageRef.current = `Error: ${error}`;
       alert(`Failed to save file: ${error}`);
+      setTimeout(() => {
+        allowHashStatusUpdateRef.current = true;
+      }, 2000);
     }
   };
 
@@ -960,6 +1110,7 @@ function App() {
                 editorContent={activeTab.content}
                 onContentChange={handleGeneralEditContentChange}
                 onScrollToLine={handleScrollToLine}
+                onStatusUpdate={setStatusMessage}
               />
             </>
           )}
@@ -1002,6 +1153,7 @@ function App() {
           editorContent={activeTab.content}
           onContentChange={handleGeneralEditContentChange}
           onScrollToLine={handleScrollToLine}
+          onStatusUpdate={setStatusMessage}
         />
       )}
     </div>

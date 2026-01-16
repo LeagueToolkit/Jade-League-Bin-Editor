@@ -231,12 +231,12 @@
   margin-left: 1px;
 }
 
-/* Button styling - matches Monaco's find widget buttons exactly */
+/* Button styling - matches number box size and roundness */
 .gep-btn {
   width: 22px;
-  height: 22px;
+  height: 25px;
   padding: 4px;
-  border-radius: 5px;
+  border-radius: 2px;
   border: 1px solid var(--vscode-widget-border);
   background-color: var(--vscode-input-background);
   cursor: pointer;
@@ -254,7 +254,7 @@
 .gep-btn-apply,
 .gep-btn-add {
   width: 22px;
-  height: 22px;
+  height: 25px;
   padding: 4px;
 }
 
@@ -263,9 +263,10 @@
 .gep-btn-half {
   width: auto;
   padding: 2px 10px;
-  height: 26px;
+  height: 25px;
   font-size: 12px;
-  line-height: 22px;
+  line-height: 21px;
+  border-radius: 2px;
 }
 
 /* Status text */

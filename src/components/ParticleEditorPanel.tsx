@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import './ParticleEditorPanel.css';
 
 // Types for parsed particle data
@@ -46,6 +46,7 @@ interface ParticleEditorPanelProps {
   editorContent: string;
   onContentChange: (newContent: string) => void;
   onScrollToLine?: (line: number) => void;
+  onStatusUpdate?: (status: string) => void;
 }
 
 // Parse helpers
@@ -352,7 +353,8 @@ export default function ParticleEditorPanel({
   onClose,
   editorContent,
   onContentChange,
-  onScrollToLine
+  onScrollToLine,
+  onStatusUpdate
 }: ParticleEditorPanelProps) {
   // Animation state
   const [isVisible, setIsVisible] = useState(false);
@@ -363,6 +365,10 @@ export default function ParticleEditorPanel({
   const [parsedData, setParsedData] = useState<ParsedVfxData | null>(null);
   const [selectedEmitterKey, setSelectedEmitterKey] = useState<string>('');
   const [status, setStatus] = useState('');
+  
+  // Track if status was set by user action (should persist for a few seconds)
+  const statusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const userActionStatusRef = useRef(false);
 
   // Section collapse state
   const [scaleCollapsed, setScaleCollapsed] = useState(false);
@@ -438,6 +444,47 @@ export default function ParticleEditorPanel({
     }
   }, [isOpen, updatePanelPosition]);
 
+  // Helper to set status with timeout (for user actions)
+  const setStatusWithTimeout = useCallback((message: string, persistForMs: number = 3000) => {
+    // Clear any existing timeout
+    if (statusTimeoutRef.current) {
+      clearTimeout(statusTimeoutRef.current);
+      statusTimeoutRef.current = null;
+    }
+    
+    // Set status
+    setStatus(message);
+    userActionStatusRef.current = true;
+    
+    // Update main app status bar
+    if (onStatusUpdate) {
+      onStatusUpdate(message);
+    }
+    
+    // Clear after timeout
+    statusTimeoutRef.current = setTimeout(() => {
+      userActionStatusRef.current = false;
+      statusTimeoutRef.current = null;
+      // Revert to default status
+      if (parsedData) {
+        const totalEmitters = Object.values(parsedData.systems).reduce(
+          (sum, sys) => sum + sys.emitters.length, 0
+        );
+        const systemCount = parsedData.systemOrder.length;
+        setStatus(`${systemCount} systems, ${totalEmitters} emitters`);
+      }
+    }, persistForMs);
+  }, [onStatusUpdate, parsedData]);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (statusTimeoutRef.current) {
+        clearTimeout(statusTimeoutRef.current);
+      }
+    };
+  }, []);
+
   // Parse content when panel opens or content changes
   useEffect(() => {
     if (isOpen && editorContent) {
@@ -455,12 +502,17 @@ export default function ParticleEditorPanel({
           }
         }
         
-        const totalEmitters = Object.values(parsed.systems).reduce(
-          (sum, sys) => sum + sys.emitters.length, 0
-        );
-        setStatus(`${parsed.systemOrder.length} systems, ${totalEmitters} emitters`);
+        // Only update status if it's not a user action status
+        if (!userActionStatusRef.current) {
+          const totalEmitters = Object.values(parsed.systems).reduce(
+            (sum, sys) => sum + sys.emitters.length, 0
+          );
+          setStatus(`${parsed.systemOrder.length} systems, ${totalEmitters} emitters`);
+        }
       } catch (e) {
-        setStatus('Error parsing VFX data');
+        if (!userActionStatusRef.current) {
+          setStatus('Error parsing VFX data');
+        }
         setParsedData(null);
       }
     }
@@ -601,21 +653,21 @@ export default function ParticleEditorPanel({
         newContent = newContent.replace(/\n/g, '\r\n');
       }
       onContentChange(newContent);
-      setStatus(`Updated ${propertyName}`);
+      setStatusWithTimeout(`Updated ${propertyName}`);
     }
-  }, [currentEmitter, editorContent, onContentChange, replaceInRange]);
+  }, [currentEmitter, editorContent, onContentChange, replaceInRange, setStatusWithTimeout]);
 
-  // Quick actions
-  const scaleBy = useCallback((multiplier: number) => {
+  // Quick actions - scale birthScale0
+  const scaleBirthScaleBy = useCallback((multiplier: number) => {
     if (!currentEmitter || !editorContent) {
-      setStatus('No emitter selected');
+      setStatusWithTimeout('No emitter selected');
       return;
     }
     
     const emitter = currentEmitter.emitter;
 
     if (!emitter.birthScale0) {
-      setStatus('No birthScale0 found on this emitter');
+      setStatusWithTimeout('No birthScale0 found on this emitter');
       return;
     }
 
@@ -645,22 +697,68 @@ export default function ParticleEditorPanel({
         newContent = newContent.replace(/\n/g, '\r\n');
       }
       onContentChange(newContent);
-      setStatus(`Scaled by ${multiplier}x`);
+      setStatusWithTimeout(`Scaled birthScale by ${multiplier}x`);
     } else {
-      setStatus('Could not find constantValue in birthScale0');
+      setStatusWithTimeout('Could not find constantValue in birthScale0');
     }
-  }, [currentEmitter, editorContent, onContentChange, replaceInRange]);
+  }, [currentEmitter, editorContent, onContentChange, replaceInRange, setStatusWithTimeout]);
+
+  // Quick actions - scale scale0
+  const scaleScale0By = useCallback((multiplier: number) => {
+    if (!currentEmitter || !editorContent) {
+      setStatusWithTimeout('No emitter selected');
+      return;
+    }
+    
+    const emitter = currentEmitter.emitter;
+
+    if (!emitter.scale0) {
+      setStatusWithTimeout('No scale0 found on this emitter');
+      return;
+    }
+
+    // Normalize line endings for consistent matching
+    const normalizedContent = normalizeLineEndings(editorContent);
+    const hasWindowsLineEndings = editorContent.includes('\r\n');
+    
+    const old = emitter.scale0.constantValue;
+    const updated = {
+      x: (old.x * multiplier).toFixed(4),
+      y: (old.y * multiplier).toFixed(4),
+      z: (old.z * multiplier).toFixed(4)
+    };
+    
+    // Replace within the scale0 property's line range
+    let newContent = replaceInRange(
+      normalizedContent,
+      emitter.scale0.startLine,
+      emitter.scale0.endLine,
+      /constantValue:\s*vec3\s*=\s*\{[^}]+\}/i,
+      `constantValue: vec3 = { ${updated.x}, ${updated.y}, ${updated.z} }`
+    );
+
+    if (newContent) {
+      // Restore original line endings if needed
+      if (hasWindowsLineEndings) {
+        newContent = newContent.replace(/\n/g, '\r\n');
+      }
+      onContentChange(newContent);
+      setStatusWithTimeout(`Scaled scale0 by ${multiplier}x`);
+    } else {
+      setStatusWithTimeout('Could not find constantValue in scale0');
+    }
+  }, [currentEmitter, editorContent, onContentChange, replaceInRange, setStatusWithTimeout]);
 
   const setBindWeight = useCallback((value: number) => {
     if (!currentEmitter || !editorContent) {
-      setStatus('No emitter selected');
+      setStatusWithTimeout('No emitter selected');
       return;
     }
     
     const emitter = currentEmitter.emitter;
 
     if (!emitter.bindWeight) {
-      setStatus('bindWeight not found on this emitter');
+      setStatusWithTimeout('bindWeight not found on this emitter');
       return;
     }
     
@@ -683,11 +781,11 @@ export default function ParticleEditorPanel({
         newContent = newContent.replace(/\n/g, '\r\n');
       }
       onContentChange(newContent);
-      setStatus(`Set bindWeight to ${value}`);
+      setStatusWithTimeout(`Set bindWeight to ${value}`);
     } else {
-      setStatus('Could not find constantValue in bindWeight');
+      setStatusWithTimeout('Could not find constantValue in bindWeight');
     }
-  }, [currentEmitter, editorContent, onContentChange, replaceInRange]);
+  }, [currentEmitter, editorContent, onContentChange, replaceInRange, setStatusWithTimeout]);
 
   if (!isRendered) return null;
 
@@ -799,6 +897,10 @@ export default function ParticleEditorPanel({
                           );
                         })}
                       </div>
+                      <div className="pep-quick-actions">
+                        <button className="pep-btn-small" onClick={() => scaleBirthScaleBy(2)} title="Double birth scale">×2</button>
+                        <button className="pep-btn-small" onClick={() => scaleBirthScaleBy(0.5)} title="Half birth scale">÷2</button>
+                      </div>
                     </div>
                   )}
 
@@ -821,6 +923,10 @@ export default function ParticleEditorPanel({
                             />
                           );
                         })}
+                      </div>
+                      <div className="pep-quick-actions">
+                        <button className="pep-btn-small" onClick={() => scaleScale0By(2)} title="Double scale">×2</button>
+                        <button className="pep-btn-small" onClick={() => scaleScale0By(0.5)} title="Half scale">÷2</button>
                       </div>
                     </div>
                   )}
@@ -847,12 +953,6 @@ export default function ParticleEditorPanel({
                       </div>
                     </div>
                   )}
-
-                  {/* Quick Scale Buttons */}
-                  <div className="pep-quick-actions">
-                    <button className="pep-btn-small" onClick={() => scaleBy(2)} title="Double scale">×2</button>
-                    <button className="pep-btn-small" onClick={() => scaleBy(0.5)} title="Half scale">÷2</button>
-                  </div>
                 </div>
               )}
             </div>

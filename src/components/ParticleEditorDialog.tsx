@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import './ParticleEditorDialog.css';
 
 // Types for parsed particle data
@@ -46,6 +46,7 @@ interface ParticleEditorDialogProps {
   editorContent: string;
   onContentChange: (newContent: string) => void;
   onScrollToLine?: (line: number) => void;
+  onStatusUpdate?: (status: string) => void;
 }
 
 // Parse helpers
@@ -352,7 +353,8 @@ export default function ParticleEditorDialog({
   onClose,
   editorContent,
   onContentChange,
-  onScrollToLine
+  onScrollToLine,
+  onStatusUpdate
 }: ParticleEditorDialogProps) {
   // State
   const [parsedData, setParsedData] = useState<ParsedVfxData | null>(null);
@@ -361,11 +363,56 @@ export default function ParticleEditorDialog({
   const [searchQuery, setSearchQuery] = useState('');
   const [scaleMultiplier, setScaleMultiplier] = useState('2');
   const [status, setStatus] = useState('');
+  
+  // Track if status was set by user action (should persist for a few seconds)
+  const statusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const userActionStatusRef = useRef(false);
 
   // TranslationOverride bulk values
   const [toX, setToX] = useState('0');
   const [toY, setToY] = useState('0');
   const [toZ, setToZ] = useState('0');
+
+  // Helper to set status with timeout (for user actions)
+  const setStatusWithTimeout = useCallback((message: string, persistForMs: number = 3000) => {
+    // Clear any existing timeout
+    if (statusTimeoutRef.current) {
+      clearTimeout(statusTimeoutRef.current);
+      statusTimeoutRef.current = null;
+    }
+    
+    // Set status
+    setStatus(message);
+    userActionStatusRef.current = true;
+    
+    // Update main app status bar
+    if (onStatusUpdate) {
+      onStatusUpdate(message);
+    }
+    
+    // Clear after timeout
+    statusTimeoutRef.current = setTimeout(() => {
+      userActionStatusRef.current = false;
+      statusTimeoutRef.current = null;
+      // Revert to default status
+      if (parsedData) {
+        const totalEmitters = Object.values(parsedData.systems).reduce(
+          (sum, sys) => sum + sys.emitters.length, 0
+        );
+        const systemCount = parsedData.systemOrder.length;
+        setStatus(`Found ${systemCount} systems, ${totalEmitters} emitters`);
+      }
+    }, persistForMs);
+  }, [onStatusUpdate, parsedData]);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (statusTimeoutRef.current) {
+        clearTimeout(statusTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Parse content when dialog opens
   useEffect(() => {
@@ -376,12 +423,17 @@ export default function ParticleEditorDialog({
         setSelectedEmitters(new Set());
         setExpandedSystems(new Set());
         
-        const totalEmitters = Object.values(parsed.systems).reduce(
-          (sum, sys) => sum + sys.emitters.length, 0
-        );
-        setStatus(`Found ${parsed.systemOrder.length} systems, ${totalEmitters} emitters`);
+        // Only update status if it's not a user action status
+        if (!userActionStatusRef.current) {
+          const totalEmitters = Object.values(parsed.systems).reduce(
+            (sum, sys) => sum + sys.emitters.length, 0
+          );
+          setStatus(`Found ${parsed.systemOrder.length} systems, ${totalEmitters} emitters`);
+        }
       } catch (e) {
-        setStatus('Error parsing VFX data');
+        if (!userActionStatusRef.current) {
+          setStatus('Error parsing VFX data');
+        }
         setParsedData(null);
       }
     }
@@ -578,9 +630,9 @@ export default function ParticleEditorDialog({
         newContent = newContent.replace(/\n/g, '\r\n');
       }
       onContentChange(newContent);
-      setStatus(`Updated ${property}`);
+      setStatusWithTimeout(`Updated ${property}`);
     }
-  }, [selectedEmitter, editorContent, onContentChange, replaceInRange]);
+  }, [selectedEmitter, editorContent, onContentChange, replaceInRange, setStatusWithTimeout]);
 
   // Helper for bulk operations - replaces in lines array and returns modified count
   const replaceInLinesArray = (
@@ -605,13 +657,13 @@ export default function ParticleEditorDialog({
   // Bulk operations
   const applyScaleBirthScale = useCallback(() => {
     if (!parsedData || selectedEmitters.size === 0) {
-      setStatus('Select emitters first');
+      setStatusWithTimeout('Select emitters first');
       return;
     }
 
     const mult = parseLocaleFloat(scaleMultiplier);
     if (isNaN(mult) || mult <= 0) {
-      setStatus('Invalid multiplier');
+      setStatusWithTimeout('Invalid multiplier');
       return;
     }
 
@@ -655,21 +707,21 @@ export default function ParticleEditorDialog({
         newContent = newContent.replace(/\n/g, '\r\n');
       }
       onContentChange(newContent);
-      setStatus(`Scaled birthScale for ${modified} emitter(s) by ${mult}x`);
+      setStatusWithTimeout(`Scaled birthScale for ${modified} emitter(s) by ${mult}x`);
     } else {
-      setStatus('No emitters with birthScale in selection');
+      setStatusWithTimeout('No emitters with birthScale in selection');
     }
-  }, [parsedData, selectedEmitters, scaleMultiplier, editorContent, onContentChange]);
+  }, [parsedData, selectedEmitters, scaleMultiplier, editorContent, onContentChange, setStatusWithTimeout]);
 
   const applyScaleScale0 = useCallback(() => {
     if (!parsedData || selectedEmitters.size === 0) {
-      setStatus('Select emitters first');
+      setStatusWithTimeout('Select emitters first');
       return;
     }
 
     const mult = parseLocaleFloat(scaleMultiplier);
     if (isNaN(mult) || mult <= 0) {
-      setStatus('Invalid multiplier');
+      setStatusWithTimeout('Invalid multiplier');
       return;
     }
 
@@ -713,15 +765,15 @@ export default function ParticleEditorDialog({
         newContent = newContent.replace(/\n/g, '\r\n');
       }
       onContentChange(newContent);
-      setStatus(`Scaled scale0 for ${modified} emitter(s) by ${mult}x`);
+      setStatusWithTimeout(`Scaled scale0 for ${modified} emitter(s) by ${mult}x`);
     } else {
-      setStatus('No emitters with scale0 in selection');
+      setStatusWithTimeout('No emitters with scale0 in selection');
     }
-  }, [parsedData, selectedEmitters, scaleMultiplier, editorContent, onContentChange]);
+  }, [parsedData, selectedEmitters, scaleMultiplier, editorContent, onContentChange, setStatusWithTimeout]);
 
   const handleSetBindWeight = useCallback((value: number) => {
     if (!parsedData || selectedEmitters.size === 0) {
-      setStatus('Select emitters first');
+      setStatusWithTimeout('Select emitters first');
       return;
     }
 
@@ -758,15 +810,15 @@ export default function ParticleEditorDialog({
         newContent = newContent.replace(/\n/g, '\r\n');
       }
       onContentChange(newContent);
-      setStatus(`Set bindWeight to ${value} for ${modified} emitter(s)`);
+      setStatusWithTimeout(`Set bindWeight to ${value} for ${modified} emitter(s)`);
     } else {
-      setStatus('No emitters with bindWeight in selection');
+      setStatusWithTimeout('No emitters with bindWeight in selection');
     }
-  }, [parsedData, selectedEmitters, editorContent, onContentChange]);
+  }, [parsedData, selectedEmitters, editorContent, onContentChange, setStatusWithTimeout]);
 
   const handleSetTranslationOverride = useCallback(() => {
     if (!parsedData || selectedEmitters.size === 0) {
-      setStatus('Select emitters first');
+      setStatusWithTimeout('Select emitters first');
       return;
     }
 
@@ -775,7 +827,7 @@ export default function ParticleEditorDialog({
     const z = parseLocaleFloat(toZ);
     
     if (isNaN(x) || isNaN(y) || isNaN(z)) {
-      setStatus('Invalid translation values');
+      setStatusWithTimeout('Invalid translation values');
       return;
     }
 
@@ -812,11 +864,11 @@ export default function ParticleEditorDialog({
         newContent = newContent.replace(/\n/g, '\r\n');
       }
       onContentChange(newContent);
-      setStatus(`Set translationOverride for ${modified} emitter(s)`);
+      setStatusWithTimeout(`Set translationOverride for ${modified} emitter(s)`);
     } else {
-      setStatus('No emitters with translationOverride in selection');
+      setStatusWithTimeout('No emitters with translationOverride in selection');
     }
-  }, [parsedData, selectedEmitters, toX, toY, toZ, editorContent, onContentChange]);
+  }, [parsedData, selectedEmitters, toX, toY, toZ, editorContent, onContentChange, setStatusWithTimeout]);
 
   // Scroll to emitter in editor
   const scrollToEmitter = useCallback((emitter: VfxEmitter) => {
@@ -833,7 +885,6 @@ export default function ParticleEditorDialog({
         {/* Header */}
         <div className="ped-header">
           <div className="ped-header-left">
-            <span className="ped-icon">🔮</span>
             <h2>Particle Editor</h2>
           </div>
           <button className="ped-close-btn" onClick={onClose}>×</button>
