@@ -48,6 +48,14 @@ function App() {
   const [recentFiles, setRecentFiles] = useState<string[]>([]);
   const [isDragging, setIsDragging] = useState(false);
 
+  // Track normal window dimensions (when not maximized/fullscreen)
+  const normalWindowSize = useRef<{ width: number; height: number; x: number; y: number }>({
+    width: 1200,
+    height: 800,
+    x: 100,
+    y: 100
+  });
+
   const editorRef = useRef<MonacoType.editor.IStandaloneCodeEditor | null>(null);
 
   // Get the active tab
@@ -97,9 +105,20 @@ function App() {
       const unlistenResize = await window.onResized(debouncedSave);
       const unlistenMove = await window.onMoved(debouncedSave);
 
+      let lastMaximized = await window.isMaximized();
+      let lastFullscreen = await window.isFullscreen();
+      
       const checkMaximized = setInterval(async () => {
         const maximized = await window.isMaximized();
-        setIsMaximized(maximized);
+        const fullscreen = await window.isFullscreen();
+        setIsMaximized(maximized || fullscreen);
+        
+        // Save state when maximized or fullscreen changes
+        if (maximized !== lastMaximized || fullscreen !== lastFullscreen) {
+          lastMaximized = maximized;
+          lastFullscreen = fullscreen;
+          debouncedSave();
+        }
       }, 100);
 
       return () => {
@@ -152,18 +171,37 @@ function App() {
   const saveCurrentWindowState = async () => {
     try {
       const window = getCurrentWindow();
-      const size = await window.innerSize();
-      const position = await window.outerPosition();
       const maximized = await window.isMaximized();
-
-      await invoke('save_window_state', {
-        state: {
+      const fullscreen = await window.isFullscreen();
+      
+      // Update tracked normal dimensions only when not maximized/fullscreen
+      if (!maximized && !fullscreen) {
+        const size = await window.innerSize();
+        const position = await window.outerPosition();
+        normalWindowSize.current = {
           width: size.width,
           height: size.height,
           x: position.x,
-          y: position.y,
-          maximized
+          y: position.y
+        };
+      }
+
+      // Save the normal dimensions along with maximized/fullscreen state
+      await invoke('save_window_state', {
+        state: {
+          width: normalWindowSize.current.width,
+          height: normalWindowSize.current.height,
+          x: normalWindowSize.current.x,
+          y: normalWindowSize.current.y,
+          maximized,
+          fullscreen
         }
+      });
+      
+      console.log('Saved window state:', {
+        ...normalWindowSize.current,
+        maximized,
+        fullscreen
       });
     } catch (error) {
       console.error('Failed to save window state:', error);
@@ -172,18 +210,34 @@ function App() {
 
   const restoreWindowState = async () => {
     try {
-      const state = await invoke<{ width: number, height: number, x: number, y: number, maximized: boolean } | null>('get_window_state');
+      const state = await invoke<{ width: number, height: number, x: number, y: number, maximized: boolean, fullscreen: boolean } | null>('get_window_state');
+
+      console.log('Loading window state for tracking:', state);
 
       if (state) {
+        // Store the normal dimensions for tracking (Rust already restored the window)
+        normalWindowSize.current = {
+          width: state.width,
+          height: state.height,
+          x: state.x,
+          y: state.y
+        };
+        
         const window = getCurrentWindow();
-        const { LogicalSize, PhysicalPosition } = await import('@tauri-apps/api/dpi');
-        await window.setSize(new LogicalSize(state.width, state.height));
-        await window.setPosition(new PhysicalPosition(state.x, state.y));
-
-        if (state.maximized) {
-          await window.maximize();
-        }
-        setIsMaximized(state.maximized);
+        const maximized = await window.isMaximized();
+        const fullscreen = await window.isFullscreen();
+        setIsMaximized(maximized || fullscreen);
+      } else {
+        // No saved state - capture current window dimensions
+        const window = getCurrentWindow();
+        const size = await window.innerSize();
+        const position = await window.outerPosition();
+        normalWindowSize.current = {
+          width: size.width,
+          height: size.height,
+          x: position.x,
+          y: position.y
+        };
       }
     } catch (error) {
       console.error('Failed to restore window state:', error);

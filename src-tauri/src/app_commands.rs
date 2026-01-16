@@ -1,9 +1,168 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::env;
 use tauri::Manager;
 
 const ICON_PREF_KEY: &str = "custom_icon_path";
+
+/// Get the custom config directory: AppData\Roaming\RitoShark\Jade
+fn get_config_dir() -> Result<PathBuf, String> {
+    let appdata = env::var("APPDATA").map_err(|e| format!("Failed to get APPDATA: {}", e))?;
+    let path = PathBuf::from(appdata).join("RitoShark").join("Jade");
+    
+    if !path.exists() {
+        fs::create_dir_all(&path).map_err(|e| format!("Failed to create config dir: {}", e))?;
+    }
+    Ok(path)
+}
+
+/// Migrate preferences from old txt format to new JSON format
+fn migrate_txt_to_json(txt_path: &Path, json_path: &Path) -> Result<(), String> {
+    println!("[Migrate] Reading old preferences.txt from {:?}", txt_path);
+    
+    let content = fs::read_to_string(txt_path)
+        .map_err(|e| format!("Failed to read preferences.txt: {}", e))?;
+    
+    let mut json_prefs = serde_json::json!({});
+    
+    // Parse the txt file - assuming key=value format, one per line
+    for line in content.lines() {
+        let line = line.trim();
+        
+        // Skip empty lines and comments
+        if line.is_empty() || line.starts_with('#') || line.starts_with("//") {
+            continue;
+        }
+        
+        // Parse key=value
+        if let Some(eq_pos) = line.find('=') {
+            let key = line[..eq_pos].trim();
+            let value = line[eq_pos + 1..].trim();
+            
+            // Store as string in JSON
+            json_prefs[key] = serde_json::Value::String(value.to_string());
+            println!("[Migrate] Migrated: {} = {}", key, value);
+        }
+    }
+    
+    // Write to JSON file
+    let json_content = serde_json::to_string_pretty(&json_prefs)
+        .map_err(|e| format!("Failed to serialize to JSON: {}", e))?;
+    
+    write_file_atomic(json_path, &json_content)
+        .map_err(|e| format!("Failed to write JSON: {}", e))?;
+    
+    println!("[Migrate] Successfully migrated {} preferences to JSON", json_prefs.as_object().map(|o| o.len()).unwrap_or(0));
+    
+    Ok(())
+}
+
+/// Migrate preferences from old locations to new RitoShark\Jade\preferences.json
+pub fn migrate_preferences_if_needed(app: &tauri::AppHandle) -> Result<(), String> {
+    let new_config_dir = get_config_dir()?;
+    let new_pref_json = new_config_dir.join("preferences.json");
+    let old_pref_txt = new_config_dir.join("preferences.txt");
+    
+    // Priority 1: If new JSON already exists, check if we should merge txt into it
+    if new_pref_json.exists() {
+        println!("[Migrate] New preferences.json already exists at {:?}", new_pref_json);
+        
+        // Check if old txt file exists and has content we should merge
+        if old_pref_txt.exists() {
+            println!("[Migrate] Found preferences.txt, checking if merge needed");
+            
+            // Read existing JSON
+            let json_content = fs::read_to_string(&new_pref_json)
+                .map_err(|e| format!("Failed to read existing JSON: {}", e))?;
+            
+            let mut json_prefs: serde_json::Value = serde_json::from_str(&json_content)
+                .unwrap_or_else(|_| serde_json::json!({}));
+            
+            // Read txt file
+            let txt_content = fs::read_to_string(&old_pref_txt)
+                .map_err(|e| format!("Failed to read txt: {}", e))?;
+            
+            let mut merged_count = 0;
+            
+            // Merge txt preferences that don't exist in JSON
+            for line in txt_content.lines() {
+                let line = line.trim();
+                if line.is_empty() || line.starts_with('#') || line.starts_with("//") {
+                    continue;
+                }
+                
+                if let Some(eq_pos) = line.find('=') {
+                    let key = line[..eq_pos].trim();
+                    let value = line[eq_pos + 1..].trim();
+                    
+                    // Only add if key doesn't exist in JSON
+                    if json_prefs.get(key).is_none() {
+                        json_prefs[key] = serde_json::Value::String(value.to_string());
+                        merged_count += 1;
+                        println!("[Migrate] Merged from txt: {} = {}", key, value);
+                    }
+                }
+            }
+            
+            if merged_count > 0 {
+                // Write updated JSON
+                let content = serde_json::to_string_pretty(&json_prefs)
+                    .map_err(|e| format!("Failed to serialize: {}", e))?;
+                write_file_atomic(&new_pref_json, &content)
+                    .map_err(|e| format!("Failed to write merged JSON: {}", e))?;
+                println!("[Migrate] Merged {} preferences from txt to JSON", merged_count);
+            }
+            
+            // Backup and remove old txt file
+            let backup_path = old_pref_txt.with_extension("txt.backup");
+            let _ = fs::rename(&old_pref_txt, &backup_path);
+            println!("[Migrate] Backed up preferences.txt to {:?}", backup_path);
+        }
+        
+        return Ok(());
+    }
+    
+    // Priority 2: Check for old preferences.txt in the same folder
+    if old_pref_txt.exists() {
+        println!("[Migrate] Found preferences.txt, converting to JSON");
+        migrate_txt_to_json(&old_pref_txt, &new_pref_json)?;
+        
+        // Backup and remove old txt file
+        let backup_path = old_pref_txt.with_extension("txt.backup");
+        let _ = fs::rename(&old_pref_txt, &backup_path);
+        println!("[Migrate] Backed up old preferences.txt to {:?}", backup_path);
+        
+        return Ok(());
+    }
+    
+    // Priority 3: Check for old JSON in Tauri default location
+    if let Ok(old_config_dir) = app.path().app_config_dir() {
+        let old_pref_json = old_config_dir.join("preferences.json");
+        
+        if old_pref_json.exists() {
+            println!("[Migrate] Found old JSON preferences at {:?}, migrating to {:?}", old_pref_json, new_pref_json);
+            
+            // Copy the old preferences to new location
+            match fs::copy(&old_pref_json, &new_pref_json) {
+                Ok(_) => {
+                    println!("[Migrate] Successfully migrated JSON preferences");
+                    // Remove old file
+                    let _ = fs::remove_file(&old_pref_json);
+                    println!("[Migrate] Removed old JSON file");
+                }
+                Err(e) => {
+                    eprintln!("[Migrate] Failed to copy preferences: {}", e);
+                }
+            }
+            
+            return Ok(());
+        }
+    }
+    
+    println!("[Migrate] No old preferences found to migrate");
+    Ok(())
+}
 
 /// Write content to file atomically to prevent corruption
 fn write_file_atomic(path: &Path, content: &str) -> std::io::Result<()> {
@@ -38,12 +197,8 @@ pub async fn get_app_version() -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn get_custom_icon_path(app: tauri::AppHandle) -> Result<Option<String>, String> {
-    let config_dir = app
-        .path()
-        .app_config_dir()
-        .map_err(|e| format!("Failed to get config dir: {}", e))?;
-    
+pub async fn get_custom_icon_path(_app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let config_dir = get_config_dir()?;
     let pref_file = config_dir.join("preferences.json");
     
     if !pref_file.exists() {
@@ -106,14 +261,7 @@ fn base64_encode(data: &[u8]) -> String {
 
 #[tauri::command]
 pub async fn set_custom_icon(app: tauri::AppHandle, icon_path: String) -> Result<(), String> {
-    let config_dir = app
-        .path()
-        .app_config_dir()
-        .map_err(|e| format!("Failed to get config dir: {}", e))?;
-    
-    fs::create_dir_all(&config_dir)
-        .map_err(|e| format!("Failed to create config dir: {}", e))?;
-    
+    let config_dir = get_config_dir()?;
     let pref_file = config_dir.join("preferences.json");
     
     // Read existing preferences or create new
@@ -179,6 +327,38 @@ pub async fn open_url(url: String) -> Result<(), String> {
         .map_err(|e| format!("Failed to open URL: {}", e))
 }
 
+#[tauri::command]
+pub async fn get_preferences_path(_app: tauri::AppHandle) -> Result<String, String> {
+    let config_dir = get_config_dir()?;
+    let pref_file = config_dir.join("preferences.json");
+    Ok(pref_file.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub async fn open_preferences_folder(_app: tauri::AppHandle) -> Result<(), String> {
+    let config_dir = get_config_dir()?;
+    opener::open(config_dir)
+        .map_err(|e| format!("Failed to open config folder: {}", e))
+}
+
+#[tauri::command]
+pub async fn get_all_preferences(_app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    let config_dir = get_config_dir()?;
+    let pref_file = config_dir.join("preferences.json");
+    
+    if !pref_file.exists() {
+        return Ok(serde_json::json!({}));
+    }
+    
+    let content = fs::read_to_string(&pref_file)
+        .map_err(|e| format!("Failed to read preferences: {}", e))?;
+    
+    let prefs: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse preferences: {}", e))?;
+    
+    Ok(prefs)
+}
+
 const WINDOW_STATE_KEY: &str = "window_state";
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -188,19 +368,17 @@ pub struct WindowState {
     pub x: i32,
     pub y: i32,
     pub maximized: bool,
+    #[serde(default)]
+    pub fullscreen: bool,
 }
 
 #[tauri::command]
-pub async fn save_window_state(app: tauri::AppHandle, state: WindowState) -> Result<(), String> {
-    let config_dir = app
-        .path()
-        .app_config_dir()
-        .map_err(|e| format!("Failed to get config dir: {}", e))?;
+pub async fn save_window_state(_app: tauri::AppHandle, state: WindowState) -> Result<(), String> {
+    println!("[WindowState] Saving: {:?}", state);
     
-    fs::create_dir_all(&config_dir)
-        .map_err(|e| format!("Failed to create config dir: {}", e))?;
-    
+    let config_dir = get_config_dir()?;
     let pref_file = config_dir.join("preferences.json");
+    println!("[WindowState] Preferences file: {:?}", pref_file);
     
     // Read existing preferences or create new
     let mut prefs: serde_json::Value = if pref_file.exists() {
@@ -232,19 +410,18 @@ pub async fn save_window_state(app: tauri::AppHandle, state: WindowState) -> Res
     write_file_atomic(&pref_file, &content)
         .map_err(|e| format!("Failed to write preferences: {}", e))?;
     
+    println!("[WindowState] Successfully saved window state");
     Ok(())
 }
 
 #[tauri::command]
-pub async fn get_window_state(app: tauri::AppHandle) -> Result<Option<WindowState>, String> {
-    let config_dir = app
-        .path()
-        .app_config_dir()
-        .map_err(|e| format!("Failed to get config dir: {}", e))?;
-    
+pub async fn get_window_state(_app: tauri::AppHandle) -> Result<Option<WindowState>, String> {
+    let config_dir = get_config_dir()?;
     let pref_file = config_dir.join("preferences.json");
+    println!("[WindowState] Reading from: {:?}", pref_file);
     
     if !pref_file.exists() {
+        println!("[WindowState] Preferences file doesn't exist");
         return Ok(None);
     }
     
@@ -259,17 +436,16 @@ pub async fn get_window_state(app: tauri::AppHandle) -> Result<Option<WindowStat
         }
     };
     
-    Ok(prefs.get(WINDOW_STATE_KEY)
-        .and_then(|v| serde_json::from_value(v.clone()).ok()))
+    let state = prefs.get(WINDOW_STATE_KEY)
+        .and_then(|v| serde_json::from_value(v.clone()).ok());
+    
+    println!("[WindowState] Loaded state: {:?}", state);
+    Ok(state)
 }
 
 #[tauri::command]
-pub async fn get_preference(app: tauri::AppHandle, key: String, default_value: String) -> Result<String, String> {
-    let config_dir = app
-        .path()
-        .app_config_dir()
-        .map_err(|e| format!("Failed to get config dir: {}", e))?;
-    
+pub async fn get_preference(_app: tauri::AppHandle, key: String, default_value: String) -> Result<String, String> {
+    let config_dir = get_config_dir()?;
     let pref_file = config_dir.join("preferences.json");
     
     if !pref_file.exists() {
@@ -297,15 +473,8 @@ pub async fn get_preference(app: tauri::AppHandle, key: String, default_value: S
 }
 
 #[tauri::command]
-pub async fn set_preference(app: tauri::AppHandle, key: String, value: String) -> Result<(), String> {
-    let config_dir = app
-        .path()
-        .app_config_dir()
-        .map_err(|e| format!("Failed to get config dir: {}", e))?;
-    
-    fs::create_dir_all(&config_dir)
-        .map_err(|e| format!("Failed to create config dir: {}", e))?;
-    
+pub async fn set_preference(_app: tauri::AppHandle, key: String, value: String) -> Result<(), String> {
+    let config_dir = get_config_dir()?;
     let pref_file = config_dir.join("preferences.json");
     
     // Read existing preferences or create new
@@ -344,12 +513,8 @@ const RECENT_FILES_KEY: &str = "recent_files";
 const MAX_RECENT_FILES: usize = 10;
 
 #[tauri::command]
-pub async fn get_recent_files(app: tauri::AppHandle) -> Result<Vec<String>, String> {
-    let config_dir = app
-        .path()
-        .app_config_dir()
-        .map_err(|e| format!("Failed to get config dir: {}", e))?;
-    
+pub async fn get_recent_files(_app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    let config_dir = get_config_dir()?;
     let pref_file = config_dir.join("preferences.json");
     
     if !pref_file.exists() {
@@ -386,14 +551,7 @@ pub async fn add_recent_file(app: tauri::AppHandle, path: String) -> Result<Vec<
     recent.truncate(MAX_RECENT_FILES);
     
     // Save back
-    let config_dir = app
-        .path()
-        .app_config_dir()
-        .map_err(|e| format!("Failed to get config dir: {}", e))?;
-    
-    fs::create_dir_all(&config_dir)
-        .map_err(|e| format!("Failed to create config dir: {}", e))?;
-    
+    let config_dir = get_config_dir()?;
     let pref_file = config_dir.join("preferences.json");
     
     let mut prefs: serde_json::Value = if pref_file.exists() {

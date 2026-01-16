@@ -16,6 +16,41 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            let app_handle = app.handle().clone();
+            
+            // Migrate preferences from old location if needed
+            if let Err(e) = app_commands::migrate_preferences_if_needed(&app_handle) {
+                eprintln!("[Setup] Failed to migrate preferences: {}", e);
+            }
+            
+            // Restore window state immediately
+            if let Some(window) = app.get_webview_window("main") {
+                tauri::async_runtime::block_on(async {
+                    match app_commands::get_window_state(app_handle.clone()).await {
+                        Ok(Some(state)) => {
+                            println!("[Setup] Restoring window state: {:?}", state);
+                            
+                            // Set size and position
+                            let _ = window.set_size(tauri::LogicalSize::new(state.width, state.height));
+                            let _ = window.set_position(tauri::PhysicalPosition::new(state.x, state.y));
+                            
+                            // Apply maximized or fullscreen
+                            if state.fullscreen {
+                                let _ = window.set_fullscreen(true);
+                            } else if state.maximized {
+                                let _ = window.maximize();
+                            }
+                        }
+                        Ok(None) => {
+                            println!("[Setup] No saved window state found");
+                        }
+                        Err(e) => {
+                            eprintln!("[Setup] Failed to restore window state: {}", e);
+                        }
+                    }
+                });
+            }
+            
             // Load and apply custom icon on startup if one was saved
             let app_handle = app.handle().clone();
             
@@ -65,6 +100,9 @@ pub fn run() {
             app_commands::set_preference,
             app_commands::get_recent_files,
             app_commands::add_recent_file,
+            app_commands::get_preferences_path,
+            app_commands::open_preferences_folder,
+            app_commands::get_all_preferences,
             hash_commands::check_hashes,
             hash_commands::download_hashes,
             hash_commands::open_hashes_folder,
