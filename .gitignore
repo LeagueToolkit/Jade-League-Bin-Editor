@@ -1,15 +1,78 @@
+# AI Steering (hidden)
+.antigravity/
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# All markdown files except README and LICENSE
+*.md
+!README.md
+!LICENSE.md
+
+# Reference files
+toolkitREADME.md
+
+# Config and TODO files
+config/
+TODO.md
+
+# Old C# implementation
+JadeCS/
+
+# VS Code source (not needed)
+vscode-main/
+
+# Monaco source dump (not needed)
+monaco-editor-main/
+
+# Quartz source reference (not needed)
+Quartz-main/
+
+# All PowerShell scripts
+*.ps1
+
+# C# build artifacts from BinCli
+src-tauri/*.dll
+src-tauri/*.pdb
+src-tauri/*.deps.json
+src-tauri/*.runtimeconfig.json
+
+# Tauri build artifacts
+src-tauri/target/
+src-tauri/Cargo.lock
+
+# OS specific
+Thumbs.db
+desktop.ini
+
+# C# build directories (legacy)
 [Bb]in/
 [Oo]bj/
 .vs/
 *.user
-*.suo
 *.userprefs
-Thumbs.db
 ehthumbs.db
-*.md
-*.ts
-*.ps1
 *.bat
 *.txt
-*.sln
-*.log

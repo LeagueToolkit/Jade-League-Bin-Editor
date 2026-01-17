@@ -1,0 +1,225 @@
+.settings-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.7);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 2000;
+    backdrop-filter: blur(4px);
+}
+
+.settings-modal {
+    background-color: var(--window-bg);
+    width: 900px;
+    max-width: 95vw;
+    max-height: 90vh;
+    border-radius: var(--border-radius);
+    border: 1px solid #3E3E42;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    color: var(--text-color);
+    font-family: 'Segoe UI', sans-serif;
+    overflow: hidden;
+}
+
+.settings-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid #3E3E42;
+    background: var(--title-bar-bg);
+}
+
+.settings-header h2 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-color);
+}
+
+.settings-header p {
+    margin: 4px 0 0 0;
+    color: #858585;
+    font-size: 13px;
+}
+
+.settings-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    padding: 20px;
+    overflow-y: auto;
+}
+
+.settings-column {
+    background-color: var(--tab-bg);
+    border-radius: var(--border-radius);
+    padding: 16px;
+    border: 1px solid #3E3E42;
+}
+
+.settings-column h3 {
+    margin-top: 0;
+    margin-bottom: 12px;
+    font-size: 16px;
+    color: var(--text-color);
+    font-weight: 600;
+}
+
+.description {
+    color: #858585;
+    font-size: 13px;
+    margin-bottom: 12px;
+    line-height: 1.4;
+}
+
+.action-button {
+    display: block;
+    width: 100%;
+    padding: 8px 12px;
+    margin-bottom: 8px;
+    border: none;
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: opacity 0.2s, background-color 0.2s;
+    color: white;
+}
+
+.action-button:hover {
+    opacity: 0.9;
+}
+
+.action-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.action-button.blue {
+    background-color: #0e639c;
+}
+
+.action-button.blue:hover {
+    background-color: #1177bb;
+}
+
+.action-button.gray {
+    background-color: #505050;
+}
+
+.action-button.gray:hover {
+    background-color: #606060;
+}
+
+.action-button.red {
+    background-color: #c42b1c;
+}
+
+.action-button.red:hover {
+    background-color: #d13b2c;
+}
+
+.action-button.green {
+    background-color: #2e7d32;
+}
+
+.action-button.green:hover {
+    background-color: #3e8d42;
+}
+
+.preferences-group {
+    margin-top: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.toggle-button {
+    width: 100%;
+    padding: 10px 12px;
+    border: none;
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    font-size: 13px;
+    color: white;
+    text-align: center;
+    transition: background-color 0.2s, opacity 0.2s;
+}
+
+.toggle-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.toggle-button.enabled {
+    background-color: #2e7d32;
+}
+
+.toggle-button.enabled:hover:not(:disabled) {
+    background-color: #3e8d42;
+}
+
+.toggle-button.disabled {
+    background-color: #8b3a3a;
+}
+
+.toggle-button.disabled:hover:not(:disabled) {
+    background-color: #9b4a4a;
+}
+
+.status-text {
+    margin-top: 12px;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.download-status {
+    color: #858585;
+    margin-bottom: 6px;
+}
+
+.success-text {
+    color: #60cd18;
+    font-size: 12px;
+}
+
+.warning-text {
+    color: #ff9800;
+    font-size: 12px;
+}
+
+.location-text {
+    color: #666;
+    font-size: 11px;
+    margin-top: 4px;
+}
+
+.preload-status {
+    color: #60cd18;
+    font-size: 12px;
+    padding: 8px 12px;
+    background: rgba(46, 125, 50, 0.2);
+    border-radius: var(--border-radius);
+    text-align: center;
+    margin-top: 8px;
+}
+
+.settings-footer {
+    padding: 16px 20px;
+    border-top: 1px solid #3E3E42;
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    background-color: var(--title-bar-bg);
+}
+
+.settings-footer .action-button {
+    width: auto;
+    min-width: 100px;
+    margin: 0;
+}
