@@ -127,63 +127,48 @@ fn convert_single_bin(input_path: &str, hash_manager: &HashManager) -> BatchConv
     }
 }
 
-/// Convert bin data to text using a specific HashManager instance
-fn convert_bin_with_manager(bin_data: &[u8], hash_manager: &HashManager) -> Result<String, String> {
-    use crate::ritobin::{BinReader, BinTextWriter, BinJsonReader, BinTextReader};
-    
+/// Convert bin data to text using ltk_meta/ltk_ritobin with cached hashes
+/// Note: HashManager parameter kept for API compatibility but not used (cached hashes are used instead)
+fn convert_bin_with_manager(bin_data: &[u8], _hash_manager: &HashManager) -> Result<String, String> {
     // Check if the data is UTF-8 text
     if let Ok(text) = std::str::from_utf8(bin_data) {
         let trimmed = text.trim_start();
         
-        // Already in text format
+        // Already in ritobin text format
         if trimmed.starts_with("#PROP") || trimmed.starts_with("#PTCH") {
             return Ok(text.to_string());
         }
         
-        // JSON format
+        // JSON format (BinTree serialized)
         if trimmed.starts_with('{') {
-            let json_reader = BinJsonReader::new(text.to_string());
-            let mut bin = json_reader.read()?;
-            hash_manager.unhash_bin(&mut bin);
-            let mut writer = BinTextWriter::new();
-            return Ok(writer.write(&bin));
+            let tree: ritobin::BinTree = serde_json::from_str(text)
+                .map_err(|e| format!("Failed to parse JSON: {}", e))?;
+            return ritobin::tree_to_text_cached(&tree)
+                .map_err(|e| format!("Failed to convert to text: {}", e));
         }
         
-        // Text format without header
-        if let Some(first_line) = text.lines().next() {
-            let first_line = first_line.trim();
-            if first_line.contains(':') && first_line.contains('=') {
-                let mut text_reader = BinTextReader::new(text.to_string());
-                if let Ok(mut bin) = text_reader.read_bin() {
-                    hash_manager.unhash_bin(&mut bin);
-                    let mut writer = BinTextWriter::new();
-                    return Ok(writer.write(&bin));
-                }
+        // Check for ritobin text format without header
+        for line in text.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with("//") {
+                continue;
             }
+            if line.contains(':') && line.contains('=') {
+                let tree = ritobin::text_to_tree(text)
+                    .map_err(|e| format!("Failed to parse text: {}", e))?;
+                return ritobin::tree_to_text_cached(&tree)
+                    .map_err(|e| format!("Failed to convert to text: {}", e));
+            }
+            break;
         }
     }
     
-    // Binary format
-    let mut reader = BinReader::new(bin_data);
-    match reader.read() {
-        Ok(mut bin) => {
-            hash_manager.unhash_bin(&mut bin);
-            let mut writer = BinTextWriter::new();
-            Ok(writer.write(&bin))
-        }
-        Err(e) => {
-            // Try text reader as fallback
-            if let Ok(text) = std::str::from_utf8(bin_data) {
-                let mut text_reader = BinTextReader::new(text.to_string());
-                if let Ok(mut bin) = text_reader.read_bin() {
-                    hash_manager.unhash_bin(&mut bin);
-                    let mut writer = BinTextWriter::new();
-                    return Ok(writer.write(&bin));
-                }
-            }
-            Err(e)
-        }
-    }
+    // Binary format - use ltk_bridge
+    let tree = ritobin::read_bin_ltk(bin_data)
+        .map_err(|e| format!("Failed to parse BIN: {}", e))?;
+    
+    ritobin::tree_to_text_cached(&tree)
+        .map_err(|e| format!("Failed to convert to text: {}", e))
 }
 
 /// Searches for a bin file by name in the DATA folder hierarchy.

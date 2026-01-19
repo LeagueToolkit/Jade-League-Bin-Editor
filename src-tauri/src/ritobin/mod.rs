@@ -6,6 +6,7 @@ pub mod hashes;
 pub mod text_reader;
 pub mod bin_writer;
 pub mod json_reader;
+pub mod ltk_bridge;
 
 pub use types::*;
 pub use reader::BinReader;
@@ -16,88 +17,103 @@ pub use text_reader::BinTextReader;
 pub use bin_writer::BinWriter;
 pub use json_reader::BinJsonReader;
 
+// Re-export ltk_bridge functions and types for external use
+pub use ltk_bridge::{
+    read_bin as read_bin_ltk,
+    write_bin as write_bin_ltk,
+    tree_to_text,
+    tree_to_text_cached,
+    text_to_tree,
+    get_cached_bin_hashes,
+    HashMapProvider,
+    MAX_BIN_SIZE,
+};
+
+// Re-export ltk_meta types
+pub use ltk_meta::{BinTree, BinTreeObject, BinProperty, BinPropertyKind, PropertyValueEnum};
+
 use std::path::PathBuf;
 
-/// Convert binary bin data to text format
-/// If hashes are preloaded, uses those for instant conversion
-/// Otherwise, loads hashes on-demand from hash_dir
-pub fn convert_bin_to_text(bin_data: &[u8], hash_dir: Option<PathBuf>) -> Result<String, String> {
+/// Convert binary bin data to text format using ltk_meta/ltk_ritobin
+/// 
+/// This is the preferred method as it uses cached hash loading for performance.
+/// Supports binary, text, and JSON input formats.
+pub fn convert_bin_to_text(bin_data: &[u8], _hash_dir: Option<PathBuf>) -> Result<String, String> {
     let start = std::time::Instant::now();
     
-    // Check if the data is UTF-8 text
+    // Check if the data is UTF-8 text (already converted or JSON)
     if let Ok(text) = std::str::from_utf8(bin_data) {
         let trimmed = text.trim_start();
         
-        // Check if it's already in text format (starts with #PROP or #PTCH)
+        // Check if it's already in ritobin text format (starts with #PROP or #PTCH)
         if trimmed.starts_with("#PROP") || trimmed.starts_with("#PTCH") {
             println!("[BinConverter] File is already in text format, returning as-is");
             return Ok(text.to_string());
         }
         
-        // Check if it's JSON format (starts with '{')
+        // Check if it's JSON format (BinTree serialized)
         if trimmed.starts_with('{') {
-            println!("[BinConverter] Detected JSON format, converting...");
-            let json_reader = BinJsonReader::new(text.to_string());
-            let mut bin = json_reader.read()?;
-            
-            // Use preloaded hashes if available, otherwise load on-demand
-            let hash_manager = get_hash_manager(hash_dir.clone());
-            hash_manager.unhash_bin(&mut bin);
-            
-            let mut writer = BinTextWriter::new();
-            return Ok(writer.write(&bin));
+            println!("[BinConverter] Detected JSON format, converting via serde...");
+            let tree: ltk_meta::BinTree = serde_json::from_str(text)
+                .map_err(|e| format!("Failed to parse JSON: {}", e))?;
+            let result = ltk_bridge::tree_to_text_cached(&tree)
+                .map_err(|e| format!("Failed to convert to text: {}", e))?;
+            println!("[BinConverter] JSON conversion time: {:?}", start.elapsed());
+            return Ok(result);
         }
         
-        // Check if it's text format without header (first line has ':' and '=')
-        if let Some(first_line) = text.lines().next() {
-            let first_line = first_line.trim();
-            if first_line.contains(':') && first_line.contains('=') {
-                println!("[BinConverter] Detected text format without header, converting...");
-                let mut text_reader = BinTextReader::new(text.to_string());
-                if let Ok(mut bin) = text_reader.read_bin() {
-                    let hash_manager = get_hash_manager(hash_dir.clone());
-                    hash_manager.unhash_bin(&mut bin);
-                    let mut writer = BinTextWriter::new();
-                    return Ok(writer.write(&bin));
-                }
+        // Check if it looks like ritobin text without header (first non-empty line has ':' and '=')
+        for line in text.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with("//") {
+                continue;
             }
+            if line.contains(':') && line.contains('=') {
+                println!("[BinConverter] Detected text format without header, parsing...");
+                let tree = ltk_bridge::text_to_tree(text)
+                    .map_err(|e| format!("Failed to parse text: {}", e))?;
+                let result = ltk_bridge::tree_to_text_cached(&tree)
+                    .map_err(|e| format!("Failed to convert to text: {}", e))?;
+                println!("[BinConverter] Text conversion time: {:?}", start.elapsed());
+                return Ok(result);
+            }
+            break; // Only check first non-empty, non-comment line
         }
     }
     
-    // Try binary format
-    let mut reader = BinReader::new(bin_data);
-    match reader.read() {
-        Ok(mut bin) => {
-            let hash_manager = get_hash_manager(hash_dir.clone());
-            
-            let preload_status = if are_hashes_preloaded() { "preloaded" } else { "on-demand" };
-            println!("[BinConverter] Using {} hashes", preload_status);
-            
-            hash_manager.unhash_bin(&mut bin);
-            let mut writer = BinTextWriter::new();
-            let result = writer.write(&bin);
-            
-            println!("[BinConverter] Total conversion time: {:?}", start.elapsed());
-            Ok(result)
-        }
-        Err(e) => {
-            // If binary reader fails, try text reader as last fallback
-            if let Ok(text) = std::str::from_utf8(bin_data) {
-                println!("[BinConverter] BinReader failed: {}. Trying BinTextReader fallback...", e);
-                let mut text_reader = BinTextReader::new(text.to_string());
-                if let Ok(mut bin) = text_reader.read_bin() {
-                    let hash_manager = get_hash_manager(hash_dir);
-                    hash_manager.unhash_bin(&mut bin);
-                    let mut writer = BinTextWriter::new();
-                    return Ok(writer.write(&bin));
-                }
-            }
-            Err(e)
-        }
-    }
+    // Try binary format using ltk_meta
+    println!("[BinConverter] Parsing as binary BIN file...");
+    let tree = ltk_bridge::read_bin(bin_data)
+        .map_err(|e| format!("Failed to parse BIN: {}", e))?;
+    
+    println!("[BinConverter] Parsed {} objects, converting to text...", tree.objects.len());
+    
+    let result = ltk_bridge::tree_to_text_cached(&tree)
+        .map_err(|e| format!("Failed to convert to text: {}", e))?;
+    
+    println!("[BinConverter] Total conversion time: {:?}", start.elapsed());
+    Ok(result)
 }
 
-/// Get a HashManager instance - uses preloaded if available, otherwise loads on-demand
+/// Convert ritobin text format back to binary using ltk_ritobin
+pub fn convert_text_to_bin(text: String) -> Result<Vec<u8>, String> {
+    println!("[BinConverter] Converting text to binary...");
+    
+    // Parse the ritobin text to BinTree
+    let tree = ltk_bridge::text_to_tree(&text)
+        .map_err(|e| format!("Failed to parse ritobin text: {}", e))?;
+    
+    println!("[BinConverter] Parsed {} objects from text", tree.objects.len());
+    
+    // Write to binary
+    let binary = ltk_bridge::write_bin(&tree)
+        .map_err(|e| format!("Failed to write binary: {}", e))?;
+    
+    println!("[BinConverter] Wrote {} bytes of binary data", binary.len());
+    Ok(binary)
+}
+
+// Legacy function for backward compatibility with existing code
 fn get_hash_manager(hash_dir: Option<PathBuf>) -> HashManager {
     // If hashes are preloaded, use those
     if are_hashes_preloaded() {
@@ -110,12 +126,4 @@ fn get_hash_manager(hash_dir: Option<PathBuf>) -> HashManager {
         let _ = hash_manager.load(dir);
     }
     hash_manager
-}
-
-pub fn convert_text_to_bin(text: String) -> Result<Vec<u8>, String> {
-    let mut reader = BinTextReader::new(text);
-    let bin = reader.read_bin()?;
-    
-    let writer = BinWriter::new();
-    writer.write(&bin)
 }
