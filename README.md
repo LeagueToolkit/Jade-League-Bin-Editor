@@ -59,6 +59,34 @@ npm run tauri build
 │       └── app_commands.rs # App preferences
 ```
 
+## Keyboard Shortcuts
+
+### File
+- **Ctrl+O** - Open file (when on welcome screen) / Toggle General Editing panel (when file is open)
+- **Ctrl+S** - Save file
+- **Ctrl+Shift+S** - Save As...
+
+### Edit
+- **Ctrl+Z** - Undo
+- **Ctrl+Y** - Redo
+- **Ctrl+X** - Cut
+- **Ctrl+C** - Copy
+- **Ctrl+V** - Paste
+- **Ctrl+A** - Select All
+- **Ctrl+F** - Find
+- **Ctrl+H** - Replace
+- **Ctrl+D** - Compare Files
+
+### Tools
+- **Ctrl+P** - Toggle Particle Editing panel (bin files only)
+- **Ctrl+Shift+P** - Toggle Particle Editor dialog (bin files only)
+
+### Navigation
+- **Ctrl+W** - Close current tab
+- **Ctrl+Tab** - Switch to next tab
+- **Ctrl+Shift+Tab** - Switch to previous tab
+- **Escape** - Close all panels/dialogs
+
 ## Configuration
 
 Hash files are stored in `%APPDATA%\RitoShark\Jade\hashes` and can be downloaded automatically through the Settings dialog.

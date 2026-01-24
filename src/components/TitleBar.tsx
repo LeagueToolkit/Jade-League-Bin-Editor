@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import './TitleBar.css';
+import { CrystalBallIcon, PaletteIcon, PencilIcon, SettingsIcon, HelpIcon, MinimizeIcon, MaximizeIcon, RestoreIcon, CloseIcon } from './Icons';
 
 interface TitleBarProps {
     appIcon?: string;
@@ -47,28 +48,28 @@ export default function TitleBar({
                 {/* Right: Toolbar */}
                 <div className="title-toolbar">
                     {/* Editing Tools */}
-                    <button 
-                        className="toolbar-btn" 
+                    <button
+                        className="toolbar-btn"
                         title="Particle Editor (Full Window)"
                         onClick={() => onParticleEditor?.()}
                     >
-                        🔮
+                        <CrystalBallIcon size={16} />
                     </button>
 
                     <div className="toolbar-separator" />
 
                     {/* Settings */}
                     <button className="toolbar-btn" title="Themes" onClick={onThemes}>
-                        🎨
+                        <PaletteIcon size={16} />
                     </button>
                     <button className="toolbar-btn" title="Preferences" onClick={onPreferences}>
-                        📝
+                        <PencilIcon size={16} />
                     </button>
                     <button className="toolbar-btn" title="Settings" onClick={onSettings}>
-                        ⚙
+                        <SettingsIcon size={16} />
                     </button>
                     <button className="toolbar-btn" title="About Jade" onClick={onAbout}>
-                        ❓
+                        <HelpIcon size={16} />
                     </button>
                 </div>
 
@@ -76,13 +77,13 @@ export default function TitleBar({
                 <div className="window-controls">
                     <div className="controls-separator" />
                     <button className="control-btn minimize-btn" onClick={onMinimize}>
-                        ─
+                        <MinimizeIcon size={14} />
                     </button>
                     <button className="control-btn maximize-btn" onClick={onMaximize}>
-                        {isMaximized ? '❐' : '◻'}
+                        {isMaximized ? <RestoreIcon size={14} /> : <MaximizeIcon size={14} />}
                     </button>
                     <button className="control-btn close-btn" onClick={onClose}>
-                        ✕
+                        <CloseIcon size={14} />
                     </button>
                 </div>
             </div>

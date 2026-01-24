@@ -1,5 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 import './TabBar.css';
+import { PinIcon, CloseIcon } from './Icons';
 
 export interface EditorTab {
     id: string;
@@ -47,7 +48,7 @@ export default function TabBar({
         }
     };
 
-    const handleContextMenu = (e: React.MouseEvent, tab: EditorTab) => {
+    const handleContextMenu = (e: React.MouseEvent, _tab: EditorTab) => {
         e.preventDefault();
         // Could add context menu here in the future
     };
@@ -57,7 +58,7 @@ export default function TabBar({
         onTabClose(tabId);
     };
 
-    const handleDoubleClick = (e: React.MouseEvent, tabId: string) => {
+    const handleDoubleClick = (_e: React.MouseEvent, tabId: string) => {
         // Double click to pin/unpin
         onTabPin(tabId);
     };
@@ -75,8 +76,8 @@ export default function TabBar({
 
     return (
         <div className="tab-bar">
-            <div 
-                className="tabs-container" 
+            <div
+                className="tabs-container"
                 ref={tabsContainerRef}
                 onWheel={handleWheel}
             >
@@ -91,7 +92,7 @@ export default function TabBar({
                         onDoubleClick={(e) => handleDoubleClick(e, tab.id)}
                         title={tab.filePath || tab.fileName}
                     >
-                        {tab.isPinned && <span className="tab-pin-icon">📌</span>}
+                        {tab.isPinned && <span className="tab-pin-icon"><PinIcon size={12} /></span>}
                         <span className="tab-label">
                             {tab.isModified && <span className="tab-modified-dot">●</span>}
                             {tab.fileName}
@@ -102,21 +103,21 @@ export default function TabBar({
                                 onClick={(e) => handleCloseClick(e, tab.id)}
                                 title="Close (Middle Click)"
                             >
-                                ✕
+                                <CloseIcon size={12} />
                             </button>
                         )}
                     </div>
                 ))}
             </div>
-            
+
             {tabs.length > 1 && (
                 <div className="tabs-actions">
-                    <button 
-                        className="close-all-btn" 
+                    <button
+                        className="close-all-btn"
                         onClick={onTabCloseAll}
                         title="Close All Tabs"
                     >
-                        ✕ All
+                        <CloseIcon size={12} /> All
                     </button>
                 </div>
             )}

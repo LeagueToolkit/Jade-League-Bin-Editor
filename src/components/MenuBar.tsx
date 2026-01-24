@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import './MenuBar.css';
+import { SearchIcon, ReplaceIcon, EditIcon, SparklesIcon, ChevronRightIcon } from './Icons';
 
 interface MenuBarProps {
     findActive?: boolean;
@@ -85,22 +86,21 @@ export default function MenuBar({
                     <div className="menu-dropdown">
                         <button className="menu-option" onClick={() => handleMenuClick(onOpenFile)}>
                             <span>Open...</span>
-                            <span className="shortcut">Ctrl+O</span>
                         </button>
-                        
+
                         <div className="menu-item-with-submenu">
                             <button className="menu-option">
                                 <span>Recent Files</span>
-                                <span className="submenu-arrow">▶</span>
+                                <span className="submenu-arrow"><ChevronRightIcon size={12} /></span>
                             </button>
                             {recentFiles.length > 0 && (
                                 <div className="menu-submenu">
                                     {recentFiles.slice(0, 10).map((filePath, index) => {
                                         const fileName = filePath.split(/[\\/]/).pop() || filePath;
                                         return (
-                                            <button 
-                                                key={index} 
-                                                className="menu-option recent-file-option" 
+                                            <button
+                                                key={index}
+                                                className="menu-option recent-file-option"
                                                 onClick={() => onOpenRecentFile && handleMenuClick(() => onOpenRecentFile(filePath))}
                                                 title={filePath}
                                             >
@@ -111,7 +111,7 @@ export default function MenuBar({
                                 </div>
                             )}
                         </div>
-                        
+
                         <div className="menu-separator" />
                         <button className="menu-option" onClick={() => handleMenuClick(onSaveFile)}>
                             <span>Save</span>
@@ -228,28 +228,28 @@ export default function MenuBar({
                 title="Find (Ctrl+F)"
                 onClick={onFind}
             >
-                🔍
+                <SearchIcon size={16} />
             </button>
             <button
                 className={`menu-icon-btn ${replaceActive ? 'active' : ''}`}
                 title="Replace (Ctrl+H)"
                 onClick={onReplace}
             >
-                🔁
+                <ReplaceIcon size={16} />
             </button>
             <button
                 className={`menu-icon-btn ${generalEditActive ? 'active' : ''}`}
                 title="General Editing (Ctrl+O)"
                 onClick={onGeneralEdit}
             >
-                ✏️
+                <EditIcon size={16} />
             </button>
             <button
                 className={`menu-icon-btn ${particlePanelActive ? 'active' : ''}`}
                 title="Particle Editing (Ctrl+P)"
                 onClick={onParticlePanel}
             >
-                ✨
+                <SparklesIcon size={16} />
             </button>
         </div>
     );

@@ -102,6 +102,27 @@ function App() {
 
     window.addEventListener('icon-changed', handleIconChange);
 
+    // Event listeners for keyboard shortcuts
+    const handleAppOpen = () => handleOpen();
+    const handleAppSave = () => handleSave();
+    const handleAppSaveAs = () => handleSaveAs();
+    const handleAppFind = () => handleFind();
+    const handleAppReplace = () => handleReplace();
+    const handleAppCompare = () => handleCompareFiles();
+    const handleAppCloseTab = () => {
+      if (activeTabIdRef.current) {
+        handleTabClose(activeTabIdRef.current);
+      }
+    };
+
+    window.addEventListener('app-open', handleAppOpen);
+    window.addEventListener('app-save', handleAppSave);
+    window.addEventListener('app-save-as', handleAppSaveAs);
+    window.addEventListener('app-find', handleAppFind);
+    window.addEventListener('app-replace', handleAppReplace);
+    window.addEventListener('app-compare', handleAppCompare);
+    window.addEventListener('app-close-tab', handleAppCloseTab);
+
     // Keyboard shortcut for General Edit panel (Ctrl+O), Particle panel (Ctrl+Shift+P), Tab switching (Ctrl+Tab/Ctrl+Shift+Tab) and Escape to close
     const handleKeyDown = (e: KeyboardEvent) => {
       // Helper to check if current file is a bin file (using ref for up-to-date value)
@@ -158,6 +179,24 @@ function App() {
         return;
       }
 
+      // Ctrl+X - Cut (let Monaco handle it)
+      if (e.ctrlKey && e.key === 'x' && !e.shiftKey) {
+        // Don't prevent default - let Monaco handle it
+        return;
+      }
+
+      // Ctrl+C - Copy (let Monaco handle it)
+      if (e.ctrlKey && e.key === 'c' && !e.shiftKey) {
+        // Don't prevent default - let Monaco handle it
+        return;
+      }
+
+      // Ctrl+V - Paste (let Monaco handle it)
+      if (e.ctrlKey && e.key === 'v' && !e.shiftKey) {
+        // Don't prevent default - let Monaco handle it
+        return;
+      }
+
       // Ctrl+W - Close current tab
       if (e.ctrlKey && e.key === 'w' && !e.shiftKey) {
         e.preventDefault();
@@ -208,9 +247,21 @@ function App() {
           setActiveTabId(currentTabs[prevIndex].id);
           return currentTabs;
         });
-      } else if (e.ctrlKey && e.key === 'o') {
+      } else if (e.ctrlKey && e.key === 'o' && !e.shiftKey) {
         e.preventDefault();
-        setGeneralEditPanelOpen(prev => !prev);
+        // Context-aware: Open file if no tabs, toggle General Edit if tabs exist
+        const currentTabs = tabs;
+        if (currentTabs.length === 0) {
+          // No tabs open - trigger file open
+          window.dispatchEvent(new CustomEvent('app-open'));
+        } else {
+          // Tabs exist - toggle General Edit panel
+          setGeneralEditPanelOpen(prev => !prev);
+        }
+      } else if (e.ctrlKey && e.key === 'd' && !e.shiftKey) {
+        e.preventDefault();
+        // Compare files - dispatch event
+        window.dispatchEvent(new CustomEvent('app-compare'));
       } else if (e.ctrlKey && e.shiftKey && e.key === 'P') {
         e.preventDefault();
         // Only open particle dialog if bin file is loaded
@@ -305,6 +356,13 @@ function App() {
     return () => {
       window.removeEventListener('icon-changed', handleIconChange);
       window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('app-open', handleAppOpen);
+      window.removeEventListener('app-save', handleAppSave);
+      window.removeEventListener('app-save-as', handleAppSaveAs);
+      window.removeEventListener('app-find', handleAppFind);
+      window.removeEventListener('app-replace', handleAppReplace);
+      window.removeEventListener('app-compare', handleAppCompare);
+      window.removeEventListener('app-close-tab', handleAppCloseTab);
       cleanup?.();
       fileDropCleanup?.();
       saveCurrentWindowState();
@@ -932,13 +990,6 @@ function App() {
   useEffect(() => {
     wasModifiedRef.current = activeTab?.isModified || false;
   }, [activeTabId, activeTab?.isModified]);
-
-  // Create refs for handlers to use in keyboard shortcut event listeners
-  const handleSaveRef = useRef<() => void>(() => { });
-  const handleSaveAsRef = useRef<() => void>(() => { });
-  const handleFindRef = useRef<() => void>(() => { });
-  const handleReplaceRef = useRef<() => void>(() => { });
-  const handleCloseTabRef = useRef<() => void>(() => { });
 
   const handleEditorChange = (value: string | undefined) => {
     if (value !== undefined && activeTabId) {
