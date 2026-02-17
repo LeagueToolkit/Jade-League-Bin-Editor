@@ -170,19 +170,18 @@ pub fn tree_to_text_with_hashes<H: ltk_ritobin::HashProvider>(
 /// Load BIN-specific hash files into a HashMapProvider
 ///
 /// Loads hashes from the RitoShark hash directory:
-/// - hashes.bintypes.txt (type names)
-/// - hashes.binfields.txt (field/property names)
-/// - hashes.binentries.txt (entry/object names)
-/// - hashes.binhashes.txt (generic hashes)
+/// - hashes.bintypes (type names)
+/// - hashes.binfields (field/property names)
+/// - hashes.binentries (entry/object names)
+/// - hashes.binhashes (generic hashes)
 ///
-/// Uses the built-in load_from_directory method which properly maps
-/// each file to its category (entries, fields, hashes, types).
+/// Prefers binary .bin files if available, falls back to .txt files.
 ///
 /// # Returns
 /// A HashMapProvider populated with all loaded hashes
 pub fn load_bin_hashes() -> HashMapProvider {
     let mut hashes = HashMapProvider::new();
-    
+
     // Get the RitoShark hash directory
     let hash_dir = if let Ok(appdata) = std::env::var("APPDATA") {
         std::path::PathBuf::from(appdata)
@@ -193,23 +192,84 @@ pub fn load_bin_hashes() -> HashMapProvider {
         eprintln!("[ltk_bridge] APPDATA not set, cannot load hash files");
         return hashes;
     };
-    
+
     if !hash_dir.exists() {
         eprintln!("[ltk_bridge] Hash directory does not exist: {}", hash_dir.display());
         return hashes;
     }
-    
-    // Use the built-in load_from_directory method
-    // This loads each category from its respective file:
-    // - hashes.binentries.txt -> entries (entry path hashes)
-    // - hashes.binfields.txt  -> fields (property/field name hashes)
-    // - hashes.binhashes.txt  -> hashes (hash value hashes)
-    // - hashes.bintypes.txt   -> types (type/class name hashes)
-    hashes.load_from_directory(&hash_dir);
-    
+
+    // Define hash files with their category mappings
+    let hash_files = [
+        ("hashes.binentries", "entries"),
+        ("hashes.binfields", "fields"),
+        ("hashes.binhashes", "hashes"),
+        ("hashes.bintypes", "types"),
+    ];
+
+    let mut total_loaded = 0;
+    let mut binary_count = 0;
+    let mut text_count = 0;
+
+    for (base_name, category) in &hash_files {
+        let bin_path = hash_dir.join(format!("{}.bin", base_name));
+        let txt_path = hash_dir.join(format!("{}.txt", base_name));
+
+        // Prefer binary format if available
+        if bin_path.exists() {
+            match load_binary_hash_file(&bin_path, &mut hashes, category) {
+                Ok(count) => {
+                    println!("[ltk_bridge] Loaded {} hashes from binary file: {}.bin", count, base_name);
+                    total_loaded += count;
+                    binary_count += 1;
+                }
+                Err(e) => {
+                    eprintln!("[ltk_bridge] Failed to load binary hash file {}.bin: {}", base_name, e);
+                    eprintln!("[ltk_bridge] Falling back to text file if available");
+
+                    // Fall back to text file
+                    if txt_path.exists() {
+                        let result = match *category {
+                            "entries" => hashes.load_entries(&txt_path),
+                            "fields" => hashes.load_fields(&txt_path),
+                            "hashes" => hashes.load_hashes(&txt_path),
+                            "types" => hashes.load_types(&txt_path),
+                            _ => {
+                                eprintln!("[ltk_bridge] Unknown category: {}", category);
+                                continue;
+                            }
+                        };
+                        if result.is_ok() {
+                            text_count += 1;
+                        }
+                    }
+                }
+            }
+        } else if txt_path.exists() {
+            // Load text file
+            let result = match *category {
+                "entries" => hashes.load_entries(&txt_path),
+                "fields" => hashes.load_fields(&txt_path),
+                "hashes" => hashes.load_hashes(&txt_path),
+                "types" => hashes.load_types(&txt_path),
+                _ => {
+                    eprintln!("[ltk_bridge] Unknown category: {}", category);
+                    continue;
+                }
+            };
+            if result.is_ok() {
+                text_count += 1;
+            }
+        } else {
+            eprintln!("[ltk_bridge] Hash file not found: {} (neither .bin nor .txt)", base_name);
+        }
+    }
+
     let total = hashes.total_count();
-    println!("[ltk_bridge] Loaded {} total BIN hashes for name resolution", total);
-    
+    println!(
+        "[ltk_bridge] Loaded {} total BIN hashes ({} from binary, {} from text files)",
+        total, binary_count, text_count
+    );
+
     hashes
 }
 
@@ -299,3 +359,153 @@ pub fn remove_object(tree: &mut BinTree, path_hash: u32) -> Option<BinTreeObject
 
 // Re-export ltk_ritobin types for hash provider support
 pub use ltk_ritobin::HashMapProvider;
+
+/// Read a 7-bit encoded integer (compatible with .NET BinaryWriter)
+fn read_7bit_encoded_int(data: &[u8], offset: &mut usize) -> std::io::Result<usize> {
+    let mut result = 0usize;
+    let mut shift = 0;
+
+    loop {
+        if *offset >= data.len() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "Unexpected end of data while reading 7-bit encoded int"
+            ));
+        }
+
+        let byte = data[*offset];
+        *offset += 1;
+
+        result |= ((byte & 0x7F) as usize) << shift;
+
+        if (byte & 0x80) == 0 {
+            break;
+        }
+
+        shift += 7;
+    }
+
+    Ok(result)
+}
+
+/// Load binary hash file in HHSH format into a HashMapProvider
+///
+/// Binary format:
+/// - Magic: "HHSH" (4 bytes)
+/// - Version: i32 (4 bytes)
+/// - FNV1a count: i32 (4 bytes)
+/// - XXH64 count: i32 (4 bytes)
+/// - FNV1a entries: [u32 hash, 7-bit encoded string length, string bytes]
+/// - XXH64 entries: [u64 hash, 7-bit encoded string length, string bytes]
+fn load_binary_hash_file(
+    path: &std::path::Path,
+    hashes: &mut HashMapProvider,
+    category: &str
+) -> std::io::Result<usize> {
+    use byteorder::{ReadBytesExt, LittleEndian};
+    use std::io::Cursor;
+
+    let data = std::fs::read(path)?;
+    let mut cursor = Cursor::new(&data);
+
+    // Read and validate magic
+    let mut magic = [0u8; 4];
+    std::io::Read::read_exact(&mut cursor, &mut magic)?;
+    if &magic != b"HHSH" {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("Invalid magic bytes: expected HHSH, got {:?}", magic)
+        ));
+    }
+
+    // Read version
+    let version = cursor.read_i32::<LittleEndian>()?;
+    if version != 1 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("Unsupported version: {}", version)
+        ));
+    }
+
+    // Read counts
+    let fnv1a_count = cursor.read_i32::<LittleEndian>()? as usize;
+    let xxh64_count = cursor.read_i32::<LittleEndian>()? as usize;
+
+    let mut offset = cursor.position() as usize;
+    let mut loaded = 0;
+
+    // Read FNV1a entries (32-bit hashes)
+    for _ in 0..fnv1a_count {
+        if offset + 4 > data.len() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "Unexpected end while reading FNV1a hash"
+            ));
+        }
+
+        let hash = u32::from_le_bytes([data[offset], data[offset+1], data[offset+2], data[offset+3]]);
+        offset += 4;
+
+        let str_len = read_7bit_encoded_int(&data, &mut offset)?;
+
+        if offset + str_len > data.len() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "Unexpected end while reading string"
+            ));
+        }
+
+        let value = String::from_utf8_lossy(&data[offset..offset + str_len]).to_string();
+        offset += str_len;
+
+        // Insert into appropriate category
+        match category {
+            "entries" => { hashes.insert_entry(hash, value); },
+            "fields" => { hashes.insert_field(hash, value); },
+            "hashes" => { hashes.insert_hash(hash, value); },
+            "types" => { hashes.insert_type(hash, value); },
+            _ => eprintln!("[ltk_bridge] Unknown category: {}", category),
+        }
+        loaded += 1;
+    }
+
+    // Read XXH64 entries (64-bit hashes)
+    for _ in 0..xxh64_count {
+        if offset + 8 > data.len() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "Unexpected end while reading XXH64 hash"
+            ));
+        }
+
+        let hash_bytes: [u8; 8] = data[offset..offset+8].try_into().unwrap();
+        let hash64 = u64::from_le_bytes(hash_bytes);
+        offset += 8;
+
+        let str_len = read_7bit_encoded_int(&data, &mut offset)?;
+
+        if offset + str_len > data.len() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "Unexpected end while reading string"
+            ));
+        }
+
+        let value = String::from_utf8_lossy(&data[offset..offset + str_len]).to_string();
+        offset += str_len;
+
+        // XXH64 hashes are also 64-bit, but we need to convert to u32 for the category system
+        // Split into two u32 values or use lower 32 bits
+        let hash32 = (hash64 & 0xFFFFFFFF) as u32;
+        match category {
+            "entries" => { hashes.insert_entry(hash32, value); },
+            "fields" => { hashes.insert_field(hash32, value); },
+            "hashes" => { hashes.insert_hash(hash32, value); },
+            "types" => { hashes.insert_type(hash32, value); },
+            _ => eprintln!("[ltk_bridge] Unknown category: {}", category),
+        }
+        loaded += 1;
+    }
+
+    Ok(loaded)
+}

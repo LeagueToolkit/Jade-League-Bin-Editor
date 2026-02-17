@@ -103,7 +103,7 @@ export default function TabBar({
                                 onClick={(e) => handleCloseClick(e, tab.id)}
                                 title="Close (Middle Click)"
                             >
-                                <CloseIcon size={12} />
+                                <CloseIcon size={16} />
                             </button>
                         )}
                     </div>
