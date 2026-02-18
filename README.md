@@ -18,6 +18,11 @@ A fast, modern bin file editor for League of Legends modding. Built with Rust an
 - Linked bin file importing
 - Tab-based editing with multiple files
 - Window state and preferences persistence
+- Auto-updater with signed releases (no manual downloads needed)
+- Launch on Windows startup toggle
+- Minimize to system tray on close
+- `.bin` file association (double-click to open in Jade)
+- Single-instance: re-launching focuses the existing window
 
 ## Requirements
 
@@ -48,15 +53,17 @@ npm run tauri build
 ## Project Structure
 
 ```
+├── .github/workflows/      # CI/CD - release.yml triggers on v* tags
 ├── src/                    # React frontend
-│   ├── components/         # UI components
+│   ├── components/         # UI components (UpdaterDialog, SettingsDialog, …)
 │   └── lib/                # Utilities and parsers
 ├── src-tauri/              # Rust backend
 │   └── src/
-│       ├── ritobin/        # Native bin parser
+│       ├── core/           # Bin parser, hash table
 │       ├── bin_commands.rs # File operations
 │       ├── hash_commands.rs# Hash management
-│       └── app_commands.rs # App preferences
+│       ├── app_commands.rs # App preferences & window state
+│       └── extra_commands.rs # Autostart, .bin association, updater
 ```
 
 ## Keyboard Shortcuts
@@ -89,7 +96,33 @@ npm run tauri build
 
 ## Configuration
 
-Hash files are stored in `%APPDATA%\RitoShark\Jade\hashes` and can be downloaded automatically through the Settings dialog.
+Hash files are stored in `%APPDATA%\RitoShark\Requirements\Hashes` and can be downloaded automatically through the Settings dialog.
+
+## Releasing
+
+The GitHub Actions workflow at `.github/workflows/release.yml` builds and publishes a signed installer whenever you push a version tag:
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+This will:
+1. Build the Tauri app on `windows-latest`
+2. Sign the installer with your private key
+3. Generate `latest.json` for the auto-updater endpoint
+4. Create a GitHub Release with the installer, `.sig`, and `latest.json` attached
+
+### Required GitHub Secrets
+
+Set these once in **Settings → Secrets and variables → Actions**:
+
+| Secret | Description |
+|---|---|
+| `TAURI_SIGNING_PRIVATE_KEY` | Base64-encoded private key from `tauri signer generate` |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Password for the private key (empty string if none) |
+
+The `tauri.conf.json` `updater.pubkey` field must contain the matching **public** key so the app can verify downloaded updates.
 
 ## License
 
