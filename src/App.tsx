@@ -743,44 +743,64 @@ function App() {
       }
     }
 
-    // Remove view state
+    // Remove view state and LRU entry
     viewStatesRef.current.delete(tabId);
-
-    // Dispose the Monaco model for this tab to free RAM
-    const modelToDispose = monacoModelsRef.current.get(tabId);
-    if (modelToDispose && !modelToDispose.isDisposed()) {
-      // If this is the active tab, detach the editor from the model FIRST.
-      // Disposing a model that is still attached to the editor tears down
-      // Monaco's InstantiationService and crashes the whole editor.
-      if (tabId === activeTabId && editorRef.current) {
-        try { editorRef.current.setModel(null); } catch (_) { }
-      }
-      try {
-        modelToDispose.dispose();
-      } catch (error) {
-        console.warn('Error disposing Monaco model:', error);
-      }
-    }
-    monacoModelsRef.current.delete(tabId);
     modelLruRef.current = modelLruRef.current.filter(id => id !== tabId);
 
-    setTabs(prevTabs => {
-      const newTabs = prevTabs.filter(t => t.id !== tabId);
+    const modelToDispose = monacoModelsRef.current.get(tabId);
+    monacoModelsRef.current.delete(tabId);
 
-      // If closing the active tab, switch to another or clear active
-      if (tabId === activeTabId) {
-        if (newTabs.length > 0) {
-          const closedIndex = prevTabs.findIndex(t => t.id === tabId);
-          const newActiveIndex = Math.min(closedIndex, newTabs.length - 1);
-          setActiveTabId(newTabs[newActiveIndex].id);
-        } else {
-          // No more tabs - show welcome screen
-          setActiveTabId(null);
+    // Compute the next active tab now, before state updates
+    const newTabs = tabs.filter(t => t.id !== tabId);
+    let nextActiveId: string | null = null;
+    if (tabId === activeTabId) {
+      if (newTabs.length > 0) {
+        const closedIndex = tabs.findIndex(t => t.id === tabId);
+        nextActiveId = newTabs[Math.min(closedIndex, newTabs.length - 1)].id;
+      }
+    } else {
+      nextActiveId = activeTabId;
+    }
+
+    // If closing the active tab, switch the editor to the NEXT model before
+    // disposing the old one. Calling setModel(null) tears down Monaco's
+    // InstantiationService which crashes the editor on the next setModel call.
+    if (tabId === activeTabId && editorRef.current && nextActiveId) {
+      const editor = editorRef.current;
+      const monaco = monacoRef.current;
+      if (monaco) {
+        let nextModel = monacoModelsRef.current.get(nextActiveId);
+        const nextTab = newTabs.find(t => t.id === nextActiveId);
+        if ((!nextModel || nextModel.isDisposed()) && nextTab) {
+          const uri = nextTab.filePath
+            ? monaco.Uri.file(nextTab.filePath)
+            : monaco.Uri.parse(`inmemory://tab/${nextActiveId}`);
+          const existing = monaco.editor.getModel(uri);
+          nextModel = (existing && !existing.isDisposed())
+            ? existing
+            : monaco.editor.createModel(nextTab.content, RITOBIN_LANGUAGE_ID, uri);
+          monacoModelsRef.current.set(nextActiveId, nextModel!);
+        }
+        if (nextModel) {
+          try { editor.setModel(nextModel); } catch (_) { }
         }
       }
+    }
 
-      return newTabs;
-    });
+    // Dispose the old model after a short delay so Monaco's background
+    // tokenizer (requestIdleCallback) can finish its current pass first.
+    // Disposing immediately while tokenization is in-flight causes
+    // "Cannot read properties of undefined (reading 'domNode')" in the renderer.
+    if (modelToDispose && !modelToDispose.isDisposed()) {
+      setTimeout(() => {
+        try { modelToDispose.dispose(); } catch (_) { }
+      }, 100);
+    }
+
+    setTabs(newTabs);
+    if (tabId === activeTabId) {
+      setActiveTabId(nextActiveId);
+    }
   }, [tabs, activeTabId]);
 
   const handleTabCloseAll = useCallback(() => {
@@ -849,9 +869,8 @@ function App() {
     const monaco = monacoRef.current;
     if (!editor || !monaco || !activeTabId) return;
 
-    // Guard: if the editor was disposed (e.g. React hot-reload or unmount race),
-    // bail out to avoid "InstantiationService has been disposed" crashes.
-    try { editor.getContainerDomNode(); } catch (_) { return; }
+    // Guard: bail out if the editor's DOM container is gone (disposed / unmounted)
+    if (!editor.getContainerDomNode()) return;
 
     const activeTab = tabs.find(t => t.id === activeTabId);
     if (!activeTab) return;
@@ -893,12 +912,16 @@ function App() {
       const evictId = modelLruRef.current.shift()!;
       const evictModel = monacoModelsRef.current.get(evictId);
       if (evictModel && !evictModel.isDisposed()) {
-        // Save the current text back to the tab so it isn't lost
+        // Save the current text back to the tab so it reloads correctly
         const evictTab = tabs.find(t => t.id === evictId);
         if (evictTab) {
           evictTab.content = evictModel.getValue();
         }
-        evictModel.dispose();
+        // Delay disposal so Monaco's background tokenizer can finish its pass
+        const modelRef = evictModel;
+        setTimeout(() => {
+          try { modelRef.dispose(); } catch (_) { }
+        }, 100);
       }
       monacoModelsRef.current.delete(evictId);
       viewStatesRef.current.delete(evictId);
