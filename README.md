@@ -34,7 +34,7 @@ A fast, modern bin file editor for League of Legends modding. Built with Rust an
 
 ```bash
 # Clone the repository
-git clone https://github.com/RitoShark/Jade-League-Bin-Editor.git
+git clone https://github.com/LeagueToolkit/Jade-League-Bin-Editor.git
 cd Jade-League-Bin-Editor
 
 # Switch to the jade-rust branch
@@ -96,7 +96,7 @@ npm run tauri build
 
 ## Configuration
 
-Hash files are stored in `%APPDATA%\RitoShark\Requirements\Hashes` and can be downloaded automatically through the Settings dialog.
+Hash files are stored in `%APPDATA%\LeagueToolkit\Requirements\Hashes` and can be downloaded automatically through the Settings dialog.
 
 ## Releasing
 

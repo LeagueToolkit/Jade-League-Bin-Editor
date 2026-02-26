@@ -6,10 +6,10 @@ use tauri::Manager;
 
 const ICON_PREF_KEY: &str = "custom_icon_path";
 
-/// Get the custom config directory: AppData\Roaming\RitoShark\Jade
+/// Get the custom config directory: AppData\Roaming\LeagueToolkit\Jade
 fn get_config_dir() -> Result<PathBuf, String> {
     let appdata = env::var("APPDATA").map_err(|e| format!("Failed to get APPDATA: {}", e))?;
-    let path = PathBuf::from(appdata).join("RitoShark").join("Jade");
+    let path = PathBuf::from(appdata).join("LeagueToolkit").join("Jade");
     
     if !path.exists() {
         fs::create_dir_all(&path).map_err(|e| format!("Failed to create config dir: {}", e))?;
@@ -58,7 +58,7 @@ fn migrate_txt_to_json(txt_path: &Path, json_path: &Path) -> Result<(), String> 
     Ok(())
 }
 
-/// Migrate preferences from old locations to new RitoShark\Jade\preferences.json
+/// Migrate preferences from old locations to new LeagueToolkit\Jade\preferences.json
 pub fn migrate_preferences_if_needed(app: &tauri::AppHandle) -> Result<(), String> {
     let new_config_dir = get_config_dir()?;
     let new_pref_json = new_config_dir.join("preferences.json");

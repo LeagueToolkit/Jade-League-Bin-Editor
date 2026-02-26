@@ -39,3 +39,34 @@ config/
 TODO.md
 Reference-Code/
 .claude/
+
+# Local testing - C# project files
+App.xaml
+App.xaml.cs
+Jade.csproj
+JadeCS/
+Core/
+Editor/
+Services/
+Themes/
+Windows/
+
+# Local testing - PowerShell scripts
+*.ps1
+
+# Local testing - downloaded source repos
+monaco-editor-main/
+Quartz-main/
+vscode-main/
+Ritobin/
+
+# Local testing - .NET build artifacts
+src-tauri/BinCli.deps.json
+src-tauri/BinCli.dll
+src-tauri/BinCli.pdb
+src-tauri/BinCli.runtimeconfig.json
+src-tauri/JadeCS/
+src-tauri/src/ritobin/
+
+# Misc
+nul

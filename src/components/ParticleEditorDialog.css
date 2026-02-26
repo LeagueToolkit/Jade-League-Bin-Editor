@@ -2,28 +2,25 @@
 
 .ped-overlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.7);
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 10000;
-  backdrop-filter: blur(4px);
+  backdrop-filter: blur(6px);
 }
 
 .ped-dialog {
   background: var(--window-bg);
-  border: 1px solid #3E3E42;
+  border: 1px solid var(--border-color, #3c3c3c);
   border-radius: var(--border-radius);
   width: 90%;
   max-width: 1100px;
   max-height: 85vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
   color: var(--text-color);
 }
 
@@ -33,7 +30,7 @@
   justify-content: space-between;
   align-items: center;
   padding: 12px 16px;
-  border-bottom: 1px solid #3E3E42;
+  border-bottom: 1px solid var(--border-color, #3c3c3c);
   background: var(--title-bar-bg);
   border-radius: var(--border-radius) var(--border-radius) 0 0;
 }
@@ -72,8 +69,8 @@
 }
 
 .ped-close-btn:hover {
-  background: #3E3E42;
-  color: #FFFFFF;
+  background: rgba(232, 17, 35, 0.2);
+  color: #ef4444;
 }
 
 /* Toolbar */
@@ -82,8 +79,8 @@
   align-items: center;
   gap: 8px;
   padding: 10px 16px;
-  background: rgba(0, 0, 0, 0.2);
-  border-bottom: 1px solid #3E3E42;
+  background: var(--tab-bg);
+  border-bottom: 1px solid var(--border-color, #3c3c3c);
   flex-wrap: wrap;
 }
 
@@ -95,14 +92,14 @@
 
 .ped-toolbar-label {
   font-size: 12px;
-  color: #888;
+  color: var(--text-muted, #888);
   margin-right: 4px;
 }
 
 .ped-toolbar-divider {
   width: 1px;
   height: 24px;
-  background: #3E3E42;
+  background: var(--border-color, #3c3c3c);
   margin: 0 4px;
 }
 
@@ -203,7 +200,7 @@
   flex: 1;
   display: flex;
   gap: 1px;
-  background: #3E3E42;
+  background: var(--border-color, #3c3c3c);
   overflow: hidden;
   min-height: 0;
 }
@@ -227,8 +224,8 @@
 
 .ped-panel-header {
   padding: 12px 16px;
-  border-bottom: 1px solid #3E3E42;
-  background: rgba(0, 0, 0, 0.1);
+  border-bottom: 1px solid var(--border-color, #3c3c3c);
+  background: var(--title-bar-bg);
 }
 
 .ped-panel-header h3 {
@@ -250,7 +247,7 @@
   align-items: center;
   justify-content: center;
   height: 200px;
-  color: #888;
+  color: var(--text-muted, #888);
   font-size: 13px;
   text-align: center;
 }
@@ -264,16 +261,16 @@
   display: flex;
   align-items: center;
   height: 36px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid #3E3E42;
+  background: var(--tab-bg);
+  border: 1px solid var(--border-color, #3c3c3c);
   border-radius: var(--border-radius);
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .ped-system-header.has-selection {
-  background: rgba(157, 140, 217, 0.15);
-  border-color: rgba(157, 140, 217, 0.3);
+  background: color-mix(in srgb, var(--jade-accent) 15%, transparent);
+  border-color: color-mix(in srgb, var(--jade-accent) 30%, transparent);
 }
 
 .ped-system-expand {
@@ -283,17 +280,17 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  border-right: 1px solid rgba(255, 255, 255, 0.05);
+  border-right: 1px solid var(--border-color, #3c3c3c);
   flex-shrink: 0;
 }
 
 .ped-system-expand:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--selected-tab-bg);
 }
 
 .ped-expand-icon {
   font-size: 10px;
-  color: #888;
+  color: var(--text-muted, #888);
   transition: transform 0.15s ease;
 }
 
@@ -312,7 +309,7 @@
 }
 
 .ped-system-info:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--selected-tab-bg);
 }
 
 .ped-system-name {
@@ -327,9 +324,9 @@
 
 .ped-system-count {
   font-size: 11px;
-  color: #888;
+  color: var(--text-muted, #888);
   padding: 2px 8px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--tab-bg);
   border-radius: 10px;
   flex-shrink: 0;
 }
@@ -347,7 +344,7 @@
   height: 32px;
   padding: 0 12px;
   margin-bottom: 2px;
-  background: rgba(255, 255, 255, 0.03);
+  background: transparent;
   border: 1px solid transparent;
   border-radius: var(--border-radius);
   cursor: pointer;
@@ -357,13 +354,13 @@
 }
 
 .ped-emitter:hover {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: #3E3E42;
+  background: var(--selected-tab-bg);
+  border-color: var(--border-color, #3c3c3c);
 }
 
 .ped-emitter.selected {
-  background: rgba(236, 185, 106, 0.2);
-  border-color: rgba(236, 185, 106, 0.4);
+  background: color-mix(in srgb, var(--jade-accent) 20%, transparent);
+  border-color: color-mix(in srgb, var(--jade-accent) 40%, transparent);
 }
 
 .ped-emitter-name {
@@ -377,7 +374,7 @@
 }
 
 .ped-emitter.selected .ped-emitter-name {
-  color: #ecb96a;
+  color: var(--jade-accent);
   font-weight: 500;
 }
 
@@ -392,8 +389,8 @@
   font-weight: 600;
   padding: 2px 4px;
   border-radius: 3px;
-  background: rgba(255, 255, 255, 0.1);
-  color: #888;
+  background: var(--tab-bg);
+  color: var(--text-muted, #888);
 }
 
 .ped-prop-bs { color: #6cb6ff; background: rgba(108, 182, 255, 0.15); }
@@ -453,7 +450,7 @@
 
 .ped-axis-label {
   font-size: 10px;
-  color: #888;
+  color: var(--text-muted, #888);
 }
 
 .ped-single-row {
@@ -472,14 +469,14 @@
   justify-content: space-between;
   align-items: center;
   padding: 12px 16px;
-  border-top: 1px solid #3E3E42;
+  border-top: 1px solid var(--border-color, #3c3c3c);
   background: var(--title-bar-bg);
   border-radius: 0 0 var(--border-radius) var(--border-radius);
 }
 
 .ped-status {
   font-size: 12px;
-  color: #888;
+  color: var(--text-muted, #888);
 }
 
 /* Scrollbar styling */

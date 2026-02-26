@@ -1,6 +1,8 @@
 /// Extra commands: file association, autostart, updater
 use serde::{Deserialize, Serialize};
-use std::env;
+use once_cell::sync::Lazy;
+use parking_lot::Mutex;
+use futures::StreamExt;
 
 // ============================================================
 // File Association (Windows Registry)
@@ -155,54 +157,135 @@ pub async fn get_autostart_status(app: tauri::AppHandle) -> bool {
 // Updater
 // ============================================================
 
+const GITHUB_REPO: &str = "LeagueToolkit/Jade";
+const RELEASES_URL: &str = "https://github.com/LeagueToolkit/Jade/releases/latest";
+
+/// Holds the path to the downloaded installer so it can be run separately
+static INSTALLER_PATH: Lazy<Mutex<Option<std::path::PathBuf>>> =
+    Lazy::new(|| Mutex::new(None));
+
+#[derive(Clone, Serialize)]
+struct DownloadProgress {
+    downloaded: u64,
+    total: u64,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UpdateInfo {
     pub available: bool,
     pub version: String,
     pub notes: String,
-    pub download_url: String,
+    pub release_url: String,
 }
 
-/// Check for available updates
-#[tauri::command]
-pub async fn check_for_update(app: tauri::AppHandle) -> Result<UpdateInfo, String> {
-    use tauri_plugin_updater::UpdaterExt;
-
-    let updater = app.updater_builder()
-        .build()
-        .map_err(|e| format!("Failed to build updater: {}", e))?;
-
-    match updater.check().await {
-        Ok(Some(update)) => Ok(UpdateInfo {
-            available: true,
-            version: update.version.clone(),
-            notes: update.body.clone().unwrap_or_default(),
-            download_url: update.download_url.to_string(),
-        }),
-        Ok(None) => Ok(UpdateInfo {
-            available: false,
-            version: env!("CARGO_PKG_VERSION").to_string(),
-            notes: String::new(),
-            download_url: String::new(),
-        }),
-        Err(e) => Err(format!("Failed to check for updates: {}", e)),
-    }
+fn is_newer_version(remote: &str, current: &str) -> bool {
+    let parse = |v: &str| -> Vec<u64> {
+        v.split('.').filter_map(|p| p.parse().ok()).collect()
+    };
+    parse(remote) > parse(current)
 }
 
-/// Download and install the available update
-#[tauri::command]
-pub async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
-    use tauri_plugin_updater::UpdaterExt;
-
-    let updater = app.updater_builder()
+fn make_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .user_agent("jade-app")
         .build()
-        .map_err(|e| format!("Failed to build updater: {}", e))?;
+        .unwrap_or_default()
+}
 
-    if let Some(update) = updater.check().await.map_err(|e| format!("Failed to check: {}", e))? {
-        update.download_and_install(|_chunk, _total| {}, || {})
-            .await
-            .map_err(|e| format!("Failed to install update: {}", e))?;
+async fn fetch_latest_release() -> Result<serde_json::Value, String> {
+    let url = format!("https://api.github.com/repos/{}/releases/latest", GITHUB_REPO);
+    let resp = make_client()
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("GitHub API returned {}", resp.status()));
     }
 
+    resp.json().await.map_err(|e| format!("Failed to parse response: {}", e))
+}
+
+/// Check GitHub releases API for a newer version
+#[tauri::command]
+pub async fn check_for_update() -> Result<UpdateInfo, String> {
+    let current = env!("CARGO_PKG_VERSION");
+    let json = fetch_latest_release().await?;
+
+    let tag = json["tag_name"].as_str().unwrap_or("").trim_start_matches('v').to_string();
+    let notes = json["body"].as_str().unwrap_or("").to_string();
+    let release_url = json["html_url"].as_str().unwrap_or(RELEASES_URL).to_string();
+
+    Ok(UpdateInfo {
+        available: is_newer_version(&tag, current),
+        version: tag,
+        notes,
+        release_url,
+    })
+}
+
+/// Stream-download the installer, emitting progress events, then store the path
+#[tauri::command]
+pub async fn start_update_download(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri::Emitter;
+
+    let json = fetch_latest_release().await?;
+
+    let assets = json["assets"].as_array()
+        .ok_or("No assets found in release")?;
+
+    let installer = assets.iter()
+        .find(|a| a["name"].as_str().unwrap_or("").to_lowercase().ends_with(".exe"))
+        .ok_or("No .exe installer found in the latest release")?;
+
+    let download_url = installer["browser_download_url"].as_str()
+        .ok_or("Installer asset has no download URL")?;
+    let filename = installer["name"].as_str().unwrap_or("jade-setup.exe");
+    let installer_path = std::env::temp_dir().join(filename);
+
+    let resp = make_client()
+        .get(download_url)
+        .send()
+        .await
+        .map_err(|e| format!("Download failed: {}", e))?;
+
+    let total = resp.content_length().unwrap_or(0);
+    let mut downloaded: u64 = 0;
+    let mut bytes: Vec<u8> = if total > 0 { Vec::with_capacity(total as usize) } else { Vec::new() };
+
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("Download error: {}", e))?;
+        downloaded += chunk.len() as u64;
+        bytes.extend_from_slice(&chunk);
+        let _ = app.emit("update-download-progress", DownloadProgress { downloaded, total });
+    }
+
+    std::fs::write(&installer_path, &bytes)
+        .map_err(|e| format!("Failed to save installer: {}", e))?;
+
+    *INSTALLER_PATH.lock() = Some(installer_path);
+    Ok(())
+}
+
+/// Run the previously downloaded installer.
+/// Pass silent=true for NSIS /S (no prompts), then exits the app.
+#[tauri::command]
+pub async fn run_installer(silent: bool, app: tauri::AppHandle) -> Result<(), String> {
+    let path = INSTALLER_PATH.lock().clone()
+        .ok_or("No installer has been downloaded yet")?;
+
+    if !path.exists() {
+        return Err("Installer file no longer exists on disk".to_string());
+    }
+
+    let mut cmd = std::process::Command::new(&path);
+    if silent {
+        cmd.arg("/S");
+    }
+    cmd.spawn().map_err(|e| format!("Failed to launch installer: {}", e))?;
+
+    app.exit(0);
     Ok(())
 }

@@ -39,7 +39,6 @@ pub fn run() {
                 println!("[SingleInstance] Emitting open-file: {}", path);
             }
         }))
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let app_handle = app.handle().clone();
 
@@ -186,7 +185,8 @@ pub fn run() {
             extra_commands::toggle_autostart,
             extra_commands::get_autostart_status,
             extra_commands::check_for_update,
-            extra_commands::install_update,
+            extra_commands::start_update_download,
+            extra_commands::run_installer,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

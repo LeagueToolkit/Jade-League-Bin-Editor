@@ -65,7 +65,7 @@ export default function AboutDialog({ isOpen, onClose }: AboutDialogProps) {
     };
 
     const handleDocumentationClick = () => {
-        invoke('open_url', { url: 'https://github.com/RitoShark/Jade-League-Bin-Editor' });
+        invoke('open_url', { url: 'https://github.com/LeagueToolkit/Jade-League-Bin-Editor' });
     };
 
     if (!isOpen) return null;

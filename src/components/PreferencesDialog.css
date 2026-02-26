@@ -1,34 +1,43 @@
+/* ─────────────────────────────────────────────
+   Preferences Dialog — themed
+   Base uses CSS theme variables so it reacts to
+   theme changes and the rounded-corners setting.
+   [data-ui-mode="modern"] in App.modernui.css
+   adds glass effects on top.
+   ───────────────────────────────────────────── */
+
 .preferences-overlay {
     position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: rgba(0, 0, 0, 0.7);
+    inset: 0;
+    background: rgba(0, 0, 0, 0.65);
     display: flex;
-    justify-content: center;
     align-items: center;
-    z-index: 2000;
-    backdrop-filter: blur(4px);
+    justify-content: center;
+    z-index: 10000;
 }
 
 .preferences-modal {
     background: var(--window-bg);
     border: 1px solid #3E3E42;
     border-radius: var(--border-radius);
-    width: 550px;
+    width: 520px;
     max-width: 90vw;
     max-height: 80vh;
     overflow: hidden;
     display: flex;
     flex-direction: column;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    color: var(--text-color);
 }
 
+/* ── Header ── */
 .preferences-header {
     padding: 16px 20px;
     border-bottom: 1px solid #3E3E42;
     background: var(--title-bar-bg);
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
 }
 
 .preferences-header h2 {
@@ -39,47 +48,56 @@
 }
 
 .preferences-header p {
-    margin: 4px 0 0 0;
-    font-size: 13px;
-    color: #858585;
+    margin: 3px 0 0 0;
+    font-size: 12px;
+    color: var(--text-muted);
 }
 
+/* ── Content ── */
 .preferences-content {
     padding: 20px;
     overflow-y: auto;
     flex: 1;
 }
 
+/* ── Preference group ── */
 .preference-group {
     background: var(--tab-bg);
     border: 1px solid #3E3E42;
     border-radius: var(--border-radius);
     padding: 16px;
-    margin-bottom: 16px;
+    margin-bottom: 12px;
+    transition: border-color 0.15s ease;
 }
 
 .preference-group:last-child {
     margin-bottom: 0;
 }
 
+.preference-group:hover {
+    border-color: #5a5a5a;
+}
+
+/* ── Checkbox row ── */
 .preference-checkbox {
     display: flex;
     align-items: center;
     gap: 10px;
     cursor: pointer;
-    padding: 8px 0;
+    padding: 4px 0;
 }
 
 .preference-checkbox.disabled {
-    opacity: 0.5;
+    opacity: 0.4;
     cursor: not-allowed;
 }
 
 .preference-checkbox input[type="checkbox"] {
     width: 16px;
     height: 16px;
-    accent-color: var(--status-bar-bg);
+    accent-color: #0e639c;
     cursor: pointer;
+    flex-shrink: 0;
 }
 
 .preference-checkbox input[type="checkbox"]:disabled {
@@ -93,10 +111,11 @@
     user-select: none;
 }
 
+/* ── Descriptions ── */
 .preference-description {
-    margin: 4px 0 0 26px;
+    margin: 5px 0 0 26px;
     font-size: 12px;
-    color: #858585;
+    color: var(--text-muted);
     line-height: 1.5;
 }
 
@@ -107,17 +126,18 @@
 
 .preference-checkbox.sub-option .checkbox-label {
     font-size: 13px;
-    color: #b0b0b0;
+    color: var(--text-muted);
 }
 
 .preference-description.sub-description {
     margin-left: 52px;
     font-size: 11px;
-    color: #858585;
+    color: var(--text-muted);
 }
 
+/* ── Footer ── */
 .preferences-footer {
-    padding: 16px 20px;
+    padding: 14px 20px;
     border-top: 1px solid #3E3E42;
     background: var(--title-bar-bg);
     display: flex;
@@ -136,28 +156,30 @@
 }
 
 .preferences-footer .action-button.gray {
-    background: #505050;
-    color: white;
+    background: var(--tab-bg);
+    color: var(--text-color);
+    border: 1px solid #3E3E42;
 }
 
 .preferences-footer .action-button.gray:hover {
-    background: #606060;
+    background: var(--selected-tab-bg);
+    color: var(--text-color);
 }
 
-/* Scrollbar for content */
+/* ── Scrollbar ── */
 .preferences-content::-webkit-scrollbar {
-    width: 10px;
+    width: 5px;
 }
 
 .preferences-content::-webkit-scrollbar-track {
-    background: var(--window-bg);
+    background: transparent;
 }
 
 .preferences-content::-webkit-scrollbar-thumb {
-    background: #505050;
-    border-radius: var(--border-radius);
+    background: var(--scrollbar-thumb);
+    border-radius: 3px;
 }
 
 .preferences-content::-webkit-scrollbar-thumb:hover {
-    background: #606060;
+    background: var(--scrollbar-thumb-hover);
 }

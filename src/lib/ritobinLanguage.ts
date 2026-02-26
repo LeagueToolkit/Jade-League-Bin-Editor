@@ -228,6 +228,15 @@ export function registerRitobinTheme(monaco: Monaco): void {
             'editorBracketMatch.background': '#0e639c44',
             'editorBracketMatch.border': '#0e639c',
 
+            // Bracket pair colorization (depth-based)
+            'editorBracketHighlight.foreground1': '#FFD700',
+            'editorBracketHighlight.foreground2': '#DA70D6',
+            'editorBracketHighlight.foreground3': '#87CEEB',
+            'editorBracketHighlight.foreground4': '#FFD700',
+            'editorBracketHighlight.foreground5': '#DA70D6',
+            'editorBracketHighlight.foreground6': '#87CEEB',
+            'editorBracketHighlight.unexpectedBracket.foreground': '#FF0000',
+
             // Minimap
             'minimap.background': '#191919',
             'minimapSlider.background': '#3a3a3a44',

@@ -1,30 +1,35 @@
+/* ─────────────────────────────────────────────
+   About Dialog — themed
+   Base uses CSS theme variables so it reacts to
+   theme changes and the rounded-corners setting.
+   [data-ui-mode="modern"] in App.modernui.css
+   adds glass effects on top.
+   ───────────────────────────────────────────── */
+
 .about-overlay {
     position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.7);
+    inset: 0;
+    background: rgba(0, 0, 0, 0.65);
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 10000;
-    backdrop-filter: blur(4px);
 }
 
 .about-dialog {
-    width: 800px;
+    width: 780px;
     max-width: 95vw;
     max-height: 90vh;
     background: var(--window-bg);
     border: 1px solid #3E3E42;
     border-radius: var(--border-radius);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
     display: flex;
     flex-direction: column;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
     overflow: hidden;
 }
 
+/* ── Title bar ── */
 .about-title-bar {
     display: flex;
     justify-content: space-between;
@@ -40,11 +45,6 @@
     gap: 8px;
 }
 
-.about-title-icon {
-    width: 16px;
-    height: 16px;
-}
-
 .about-title-text {
     color: var(--text-color);
     font-size: 18px;
@@ -57,25 +57,28 @@
     background: transparent;
     border: none;
     color: var(--text-color);
-    font-size: 20px;
+    font-size: 18px;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
     border-radius: var(--border-radius);
-    transition: all 0.2s;
+    opacity: 0.55;
+    transition: all 0.15s ease;
 }
 
 .about-close-btn:hover {
-    background: #3E3E42;
-    color: #FFFFFF;
+    background: rgba(232, 17, 35, 0.2);
+    color: #ef4444;
+    opacity: 1;
 }
 
+/* ── Content: three glass columns ── */
 .about-content {
     flex: 1;
     display: grid;
     grid-template-columns: 1fr 1fr 1fr;
-    gap: 20px;
+    gap: 16px;
     padding: 20px;
     overflow-y: auto;
 }
@@ -86,24 +89,26 @@
     gap: 12px;
 }
 
+/* ── App info card ── */
 .about-app-info {
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 16px;
+    padding: 20px 16px;
     background: var(--tab-bg);
-    border-radius: var(--border-radius);
     border: 1px solid #3E3E42;
+    border-radius: var(--border-radius);
+    gap: 8px;
 }
 
 .about-icon-button {
     position: relative;
-    background: var(--editor-bg);
+    background: var(--tab-bg);
     border: 1px solid #3E3E42;
     border-radius: var(--border-radius);
     padding: 12px;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all 0.2s ease;
 }
 
 .about-icon-button:hover {
@@ -119,59 +124,67 @@
     width: 56px;
     height: 56px;
     display: block;
+    border-radius: var(--border-radius);
 }
 
 .about-icon-edit-badge {
     position: absolute;
-    bottom: -8px;
-    right: -8px;
+    bottom: -6px;
+    right: -6px;
     width: 22px;
     height: 22px;
-    background: var(--status-bar-bg);
+    background: linear-gradient(135deg, #0e639c, #1177bb);
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
     color: white;
-    font-size: 12px;
-    opacity: 0.7;
-    transition: opacity 0.2s;
+    font-size: 11px;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    box-shadow: 0 2px 8px rgba(14, 99, 156, 0.4);
 }
 
 .about-app-name {
-    font-size: 20px;
-    font-weight: 600;
+    font-size: 22px;
+    font-weight: 700;
     color: var(--text-color);
-    margin: 12px 0 0 0;
+    margin: 4px 0 0 0;
+    letter-spacing: -0.3px;
 }
 
 .about-app-subtitle {
     font-size: 12px;
-    color: #858585;
+    color: var(--text-muted);
     text-align: center;
-    margin: 4px 0 0 0;
+    margin: 0;
+    line-height: 1.4;
 }
 
+/* ── Info cards ── */
 .about-info-card {
     background: var(--tab-bg);
     border: 1px solid #3E3E42;
     border-radius: var(--border-radius);
-    padding: 12px;
+    padding: 12px 14px;
 }
 
 .about-info-label {
-    font-size: 11px;
-    color: #858585;
+    font-size: 10px;
+    color: var(--text-muted);
     margin-bottom: 4px;
     text-transform: uppercase;
-    font-weight: 500;
+    letter-spacing: 0.06em;
+    font-weight: 600;
 }
 
 .about-info-value {
     font-size: 14px;
     color: var(--text-color);
+    font-weight: 500;
 }
 
+/* ── Section cards ── */
 .about-section-card {
     background: var(--tab-bg);
     border: 1px solid #3E3E42;
@@ -181,30 +194,32 @@
 
 .about-section-title {
     font-size: 14px;
-    font-weight: 600;
+    font-weight: 700;
     color: var(--text-color);
-    margin: 0 0 12px 0;
+    margin: 0 0 8px 0;
 }
 
 .about-section-text {
     font-size: 12px;
-    color: #858585;
-    line-height: 1.5;
-    margin: 0 0 16px 0;
+    color: var(--text-muted);
+    line-height: 1.55;
+    margin: 0 0 14px 0;
 }
 
 .about-section-label {
-    font-size: 11px;
-    font-weight: 600;
-    color: #858585;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-muted);
     margin: 0 0 8px 0;
     text-transform: uppercase;
+    letter-spacing: 0.06em;
 }
 
+/* ── Supporters list ── */
 .about-supporters-list {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 5px;
     max-height: 150px;
     overflow-y: auto;
 }
@@ -212,75 +227,59 @@
 .about-supporter {
     font-size: 13px;
     color: var(--text-color);
-    line-height: 1.6;
     padding: 6px 10px;
-    background: var(--editor-bg);
+    background: var(--window-bg);
     border-radius: var(--border-radius);
     user-select: none;
+    border: 1px solid transparent;
 }
 
 .about-supporter.highlighted {
-    background: linear-gradient(135deg, rgba(78, 201, 176, 0.15) 0%, rgba(156, 220, 254, 0.15) 100%);
-    border: 1px solid rgba(78, 201, 176, 0.3);
+    background: rgba(78, 201, 176, 0.1);
+    border: 1px solid rgba(78, 201, 176, 0.25);
     color: #4ec9b0;
-    font-weight: 500;
-    box-shadow: 0 2px 8px rgba(78, 201, 176, 0.1);
+    font-weight: 600;
+    box-shadow: 0 2px 8px rgba(78, 201, 176, 0.08);
 }
 
+/* ── Documentation button ── */
 .about-doc-button {
     width: 100%;
-    padding: 10px 12px;
-    background: #0e639c;
+    padding: 10px 14px;
+    background: linear-gradient(135deg, #0e639c, #1177bb);
     border: none;
     border-radius: var(--border-radius);
     color: white;
     font-size: 13px;
     font-weight: 500;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all 0.2s ease;
+    box-shadow: 0 4px 12px rgba(14, 99, 156, 0.3);
 }
 
 .about-doc-button:hover {
-    background: #1177bb;
+    background: linear-gradient(135deg, #1177bb, #1485cc);
+    box-shadow: 0 6px 16px rgba(14, 99, 156, 0.4);
 }
 
-.about-doc-button:active {
-    background: #0d5a8f;
-}
-
-/* Scrollbar styling for supporters list */
+/* ── Scrollbars ── */
+.about-content::-webkit-scrollbar,
 .about-supporters-list::-webkit-scrollbar {
-    width: 8px;
+    width: 5px;
 }
 
+.about-content::-webkit-scrollbar-track,
 .about-supporters-list::-webkit-scrollbar-track {
-    background: var(--editor-bg);
-    border-radius: var(--border-radius);
+    background: transparent;
 }
 
+.about-content::-webkit-scrollbar-thumb,
 .about-supporters-list::-webkit-scrollbar-thumb {
-    background: #505050;
-    border-radius: var(--border-radius);
+    background: var(--scrollbar-thumb);
+    border-radius: 3px;
 }
 
+.about-content::-webkit-scrollbar-thumb:hover,
 .about-supporters-list::-webkit-scrollbar-thumb:hover {
-    background: #606060;
-}
-
-/* Scrollbar for main content */
-.about-content::-webkit-scrollbar {
-    width: 10px;
-}
-
-.about-content::-webkit-scrollbar-track {
-    background: var(--window-bg);
-}
-
-.about-content::-webkit-scrollbar-thumb {
-    background: #505050;
-    border-radius: var(--border-radius);
-}
-
-.about-content::-webkit-scrollbar-thumb:hover {
-    background: #606060;
+    background: var(--scrollbar-thumb-hover);
 }

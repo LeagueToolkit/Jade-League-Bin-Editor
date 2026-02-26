@@ -36,15 +36,6 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ],
-    "createUpdaterArtifacts": true
-  },
-  "plugins": {
-    "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ2RTNGOTBBMEE3RUE5MUIKUldRYnFYNEtDdm5qUmtDT0IzWkphUEx3SXZpT1pLeEFMWSthMFRybXVIL1A2dFNzenBlS3NnUDcK",
-      "endpoints": [
-        "https://github.com/RitoShark/Jade/releases/latest/download/latest.json"
-      ]
-    }
+    ]
   }
 }

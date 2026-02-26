@@ -1,7 +1,7 @@
 // Theme application utilities
 // Applies themes dynamically to the application
 
-import { getTheme, getSyntaxColors } from './themes';
+import { getTheme, getSyntaxColors, getBracketColors } from './themes';
 import type { Monaco } from '@monaco-editor/react';
 
 interface CustomThemeColors {
@@ -68,6 +68,9 @@ export function applyTheme(themeId: string, customColors?: CustomThemeColors) {
         root.style.setProperty('--scrollbar-thumb', scrollbarColors.thumb);
         root.style.setProperty('--scrollbar-thumb-hover', scrollbarColors.thumbHover);
 
+        // Accent color: drives jade-accent, used everywhere for glows/highlights
+        root.style.setProperty('--jade-accent', customColors.statusBar);
+
         // Update Monaco editor background
         updateMonacoBackground(customColors.editorBg);
     } else {
@@ -87,6 +90,9 @@ export function applyTheme(themeId: string, customColors?: CustomThemeColors) {
             root.style.setProperty('--scrollbar-thumb', scrollbarColors.thumb);
             root.style.setProperty('--scrollbar-thumb-hover', scrollbarColors.thumbHover);
 
+            // Accent color: drives jade-accent, used everywhere for glows/highlights
+            root.style.setProperty('--jade-accent', theme.statusBar);
+
             // Update Monaco editor background
             updateMonacoBackground(theme.editorBg);
         }
@@ -94,19 +100,35 @@ export function applyTheme(themeId: string, customColors?: CustomThemeColors) {
 }
 
 /**
- * Update Monaco editor background color
+ * Update Monaco editor background color.
+ * In modern UI mode we force transparent so the app-container gradient
+ * shows through.  In classic mode we restore the solid color.
+ *
+ * Targets every element Monaco uses to paint its background:
+ *   - .monaco-editor            outermost shell
+ *   - .overflow-guard           clipping container
+ *   - .monaco-editor-background the inner div Monaco fills with the theme bg
+ *   - .margin                   gutter / line numbers
+ *
+ * NOTE: .minimap is intentionally excluded so it keeps its solid themed
+ * background (set via Monaco theme token), ensuring minimap code pixels
+ * render with correct contrast regardless of the app gradient beneath.
  */
 function updateMonacoBackground(bgColor: string) {
-    // Find all Monaco editor elements and update their background
-    const editorElements = document.querySelectorAll('.monaco-editor');
-    editorElements.forEach((element) => {
-        (element as HTMLElement).style.backgroundColor = bgColor;
-    });
+    const isModern = document.documentElement.getAttribute('data-ui-mode') === 'modern';
+    const bg = isModern ? 'transparent' : bgColor;
 
-    // Also update the editor background in the DOM
-    const editorBg = document.querySelectorAll('.monaco-editor .overflow-guard');
-    editorBg.forEach((element) => {
-        (element as HTMLElement).style.backgroundColor = bgColor;
+    const selectors = [
+        '.monaco-editor',
+        '.monaco-editor .overflow-guard',
+        '.monaco-editor .monaco-editor-background',
+        '.monaco-editor .margin',
+    ];
+
+    selectors.forEach((selector) => {
+        document.querySelectorAll<HTMLElement>(selector).forEach((el) => {
+            el.style.backgroundColor = bg;
+        });
     });
 }
 
@@ -119,15 +141,50 @@ export function applyRoundedCorners(enabled: boolean) {
 }
 
 /**
+ * Apply/remove the Modern UI (Quartz-inspired glass morphism) mode.
+ * Sets data-ui-mode="modern" on <html> when enabled, removes it when disabled.
+ * Also refreshes Monaco's background immediately so transparency kicks in
+ * without needing a full theme reload.
+ */
+export function applyModernUI(enabled: boolean) {
+    const root = document.documentElement;
+    if (enabled) {
+        root.setAttribute('data-ui-mode', 'modern');
+    } else {
+        root.removeAttribute('data-ui-mode');
+    }
+
+    // Read the current editor bg from the CSS custom property and re-apply.
+    // updateMonacoBackground checks data-ui-mode itself, so it will use
+    // 'transparent' when modern is on and the solid color when it's off.
+    const editorBg =
+        root.style.getPropertyValue('--editor-bg') ||
+        getComputedStyle(root).getPropertyValue('--editor-bg').trim() ||
+        '#1E1E1E';
+    updateMonacoBackground(editorBg);
+}
+
+/**
  * Create and register a Monaco editor theme from syntax colors
  */
 export function createMonacoTheme(monaco: Monaco, themeId: string, syntaxThemeId: string) {
     const colors = getSyntaxColors(syntaxThemeId);
+    const brackets = getBracketColors(syntaxThemeId);
     const theme = getTheme(themeId);
 
     const editorBg = theme?.editorBg || '#1E1E1E';
     const textColor = theme?.text || '#D4D4D4';
 
+    // Always pass the real editorBg as editor.background — even in modern UI
+    // mode.  Monaco uses this color internally to composite the minimap pixel
+    // map (syntax token colors blended against editor.background).  Passing
+    // #00000000 here causes minimap colors to be computed against
+    // transparent-black, which produces wrong shades for every theme.
+    //
+    // Visual transparency in the main editor is achieved entirely through CSS
+    // `background: transparent !important` rules and the JS inline-style
+    // override in updateMonacoBackground — neither of which requires the
+    // Monaco theme token to be transparent.
     monaco.editor.defineTheme('jade-dynamic', {
         base: 'vs-dark',
         inherit: true,
@@ -138,6 +195,9 @@ export function createMonacoTheme(monaco: Monaco, themeId: string, syntaxThemeId
             { token: 'number', foreground: colors.number.replace('#', '') },
             { token: 'type', foreground: colors.propertyColor.replace('#', '') },
             { token: 'identifier', foreground: colors.propertyColor.replace('#', '') },
+            { token: 'delimiter.bracket', foreground: brackets.color1.replace('#', '') },
+            { token: 'delimiter.square', foreground: brackets.color2.replace('#', '') },
+            { token: 'delimiter.parenthesis', foreground: brackets.color3.replace('#', '') },
         ],
         colors: {
             'editor.background': editorBg,
@@ -161,6 +221,15 @@ export function createMonacoTheme(monaco: Monaco, themeId: string, syntaxThemeId
             'button.foreground': '#FFFFFF',
             'button.hoverBackground': '#1177BB',
 
+            // Bracket pair colorization (depth-based)
+            'editorBracketHighlight.foreground1': brackets.color1,
+            'editorBracketHighlight.foreground2': brackets.color2,
+            'editorBracketHighlight.foreground3': brackets.color3,
+            'editorBracketHighlight.foreground4': brackets.color1,
+            'editorBracketHighlight.foreground5': brackets.color2,
+            'editorBracketHighlight.foreground6': brackets.color3,
+            'editorBracketHighlight.unexpectedBracket.foreground': '#FF0000',
+
             // Validation
             'inputValidation.infoBackground': '#063B49',
             'inputValidation.infoBorder': '#007ACC',
@@ -168,6 +237,19 @@ export function createMonacoTheme(monaco: Monaco, themeId: string, syntaxThemeId
             'inputValidation.warningBorder': '#B89500',
             'inputValidation.errorBackground': '#5A1D1D',
             'inputValidation.errorBorder': '#BE1100',
+
+            // Minimap: always use the solid editor bg so its tiny code pixels
+            // render with correct contrast (we don't make minimap transparent).
+            'minimap.background': editorBg,
+            'minimapSlider.background': adjustColor(editorBg, 20) + '66',
+            'minimapSlider.hoverBackground': adjustColor(editorBg, 30) + '99',
+            'minimapSlider.activeBackground': adjustColor(editorBg, 40) + 'BB',
+
+            // Sticky scroll: explicitly pin to the solid editor bg so lines
+            // remain readable when editor.background is #00000000 (transparent).
+            'editorStickyScroll.background': editorBg,
+            'editorStickyScrollHover.background': adjustColor(editorBg, 12),
+            'editorStickyScrollBorder.background': adjustColor(editorBg, 20),
         }
     });
 
@@ -182,15 +264,18 @@ export function applyMonacoTheme(
     themeId: string,
     syntaxThemeId: string
 ) {
-    // If override is disabled, use the UI theme for syntax (if it has mappings)
-    // or fallback to the specific syntax theme
-    // For now, we'll just use the explicit syntax theme logic
-
-    // Create the dynamic theme
     const themeName = createMonacoTheme(monaco, themeId, syntaxThemeId);
-
-    // Apply it
     monaco.editor.setTheme(themeName);
+
+    // Monaco resets inline background styles during setTheme, so we
+    // re-apply transparency on the next animation frame after Monaco settles.
+    if (document.documentElement.getAttribute('data-ui-mode') === 'modern') {
+        const editorBg =
+            document.documentElement.style.getPropertyValue('--editor-bg') ||
+            getComputedStyle(document.documentElement).getPropertyValue('--editor-bg').trim() ||
+            '#1E1E1E';
+        requestAnimationFrame(() => updateMonacoBackground(editorBg));
+    }
 }
 
 /**
@@ -204,11 +289,15 @@ export async function loadSavedTheme(
         const theme = await invoke('get_preference', { key: 'Theme', defaultValue: 'Default' }) as string;
         const useCustom = await invoke('get_preference', { key: 'UseCustomTheme', defaultValue: 'false' }) as string;
         const roundedCorners = await invoke('get_preference', { key: 'RoundedCorners', defaultValue: 'true' }) as string;
+        const modernUI = await invoke('get_preference', { key: 'ModernUI', defaultValue: 'true' }) as string;
         const syntaxTheme = await invoke('get_preference', { key: 'SyntaxTheme', defaultValue: 'Default' }) as string;
         const overrideSyntax = await invoke('get_preference', { key: 'OverrideSyntax', defaultValue: 'false' }) as string;
 
         // Apply rounded corners (default to true/ON)
         applyRoundedCorners(roundedCorners === 'true');
+
+        // Apply Modern UI mode (default to true/ON)
+        applyModernUI(modernUI !== 'false');
 
         let activeThemeId = theme;
 
@@ -261,11 +350,12 @@ export async function loadSavedTheme(
         // Apply defaults
         applyTheme('Default');
         applyRoundedCorners(true); // Default to ON
+        applyModernUI(true); // Default to ON
 
         if (monaco) {
             applyMonacoTheme(monaco, 'Default', 'Default');
         }
 
-        return { theme: 'Default', useCustom: false, roundedCorners: true };
+        return { theme: 'Default', useCustom: false, roundedCorners: true, modernUI: true };
     }
 }

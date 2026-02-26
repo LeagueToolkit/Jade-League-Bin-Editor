@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use byteorder::{WriteBytesExt, LittleEndian};
 use std::io::Write;
-use crate::core::hash::get_ritoshark_hash_dir;
+use crate::core::hash::get_leaguetoolkit_hash_dir;
 use crate::core::bin::get_cached_bin_hashes;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -33,8 +33,8 @@ const HASH_FILES: &[&str] = &[
 const BASE_URL: &str = "https://raw.githubusercontent.com/CommunityDragon/Data/master/hashes/lol/";
 
 fn get_hash_dir() -> Result<PathBuf, String> {
-    // Use the RitoShark shared hash directory
-    get_ritoshark_hash_dir().map_err(|e| e.to_string())
+    // Use the LeagueToolkit shared hash directory
+    get_leaguetoolkit_hash_dir().map_err(|e| e.to_string())
 }
 
 #[tauri::command]

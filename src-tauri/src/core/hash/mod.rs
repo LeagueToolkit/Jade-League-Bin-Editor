@@ -6,13 +6,13 @@ pub use hashtable::Hashtable;
 use std::path::PathBuf;
 use crate::error::{Error, Result};
 
-/// Get the RitoShark shared hash directory path
-pub fn get_ritoshark_hash_dir() -> Result<PathBuf> {
+/// Get the LeagueToolkit shared hash directory path
+pub fn get_leaguetoolkit_hash_dir() -> Result<PathBuf> {
     let appdata = std::env::var("APPDATA")
         .map_err(|_| Error::Hash("APPDATA environment variable not found".to_string()))?;
     
     let path = PathBuf::from(appdata)
-        .join("RitoShark")
+        .join("LeagueToolkit")
         .join("Requirements")
         .join("Hashes");
     

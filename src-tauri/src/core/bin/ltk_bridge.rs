@@ -169,7 +169,7 @@ pub fn tree_to_text_with_hashes<H: ltk_ritobin::HashProvider>(
 
 /// Load BIN-specific hash files into a HashMapProvider
 ///
-/// Loads hashes from the RitoShark hash directory:
+/// Loads hashes from the LeagueToolkit hash directory:
 /// - hashes.bintypes (type names)
 /// - hashes.binfields (field/property names)
 /// - hashes.binentries (entry/object names)
@@ -182,10 +182,10 @@ pub fn tree_to_text_with_hashes<H: ltk_ritobin::HashProvider>(
 pub fn load_bin_hashes() -> HashMapProvider {
     let mut hashes = HashMapProvider::new();
 
-    // Get the RitoShark hash directory
+    // Get the LeagueToolkit hash directory
     let hash_dir = if let Ok(appdata) = std::env::var("APPDATA") {
         std::path::PathBuf::from(appdata)
-            .join("RitoShark")
+            .join("LeagueToolkit")
             .join("Requirements")
             .join("Hashes")
     } else {

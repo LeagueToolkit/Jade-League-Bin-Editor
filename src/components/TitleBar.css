@@ -4,7 +4,7 @@
   max-height: 30px;
   flex-shrink: 0;
   background: var(--title-bar-bg);
-  border-bottom: 1px solid #1e1e1e;
+  border-bottom: 1px solid var(--window-bg);
   display: flex;
   align-items: center;
   user-select: none;

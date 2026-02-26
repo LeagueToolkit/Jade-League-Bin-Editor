@@ -19,15 +19,16 @@ import PreferencesDialog from "./components/PreferencesDialog";
 import GeneralEditPanel from "./components/GeneralEditPanel";
 import ParticleEditorPanel from "./components/ParticleEditorPanel";
 import ParticleEditorDialog from "./components/ParticleEditorDialog";
-import UpdaterDialog from "./components/UpdaterDialog";
+import UpdateToast from "./components/UpdateToast";
 import { findAndOpenLinkedBins, LinkedBinResult } from "./lib/linkedBinParser";
 import "./App.css";
+import "./App.modernui.css";
 
 interface UpdateInfo {
   available: boolean;
   version: string;
   notes: string;
-  download_url: string;
+  release_url: string;
 }
 
 // Store editor view states (scroll position, cursor position) per tab
@@ -47,8 +48,7 @@ function App() {
   const [showThemesDialog, setShowThemesDialog] = useState(false);
   const [showPreferencesDialog, setShowPreferencesDialog] = useState(false);
   const [showSettingsDialog, setShowSettingsDialog] = useState(false);
-  const [showUpdaterDialog, setShowUpdaterDialog] = useState(false);
-  const [pendingUpdateInfo, setPendingUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [updateToastVersion, setUpdateToastVersion] = useState<string | null>(null);
   const [appIcon, setAppIcon] = useState<string>("/jade.ico");
   const [findWidgetOpen, setFindWidgetOpen] = useState(false);
   const [replaceWidgetOpen, setReplaceWidgetOpen] = useState(false);
@@ -126,18 +126,23 @@ function App() {
       }
     });
 
-    // Auto-check for updates on startup (if preference enabled)
+    // Auto-check for updates on startup
     invoke<string>('get_preference', { key: 'AutoCheckUpdates', defaultValue: 'True' })
-      .then(pref => {
-        if (pref === 'True') {
-          invoke<{ available: boolean; version: string; notes: string; download_url: string }>('check_for_update')
-            .then(info => {
-              if (info.available) {
-                setPendingUpdateInfo(info);
-                setShowUpdaterDialog(true);
-              }
-            })
-            .catch(e => console.warn('[Updater] Auto-check failed:', e));
+      .then(async pref => {
+        if (pref !== 'True') return;
+        try {
+          const info = await invoke<UpdateInfo>('check_for_update');
+          if (!info.available) return;
+          const silent = await invoke<string>('get_preference', { key: 'SilentUpdate', defaultValue: 'False' });
+          if (silent === 'True') {
+            // Download and install with no UI
+            await invoke('start_update_download');
+            await invoke('run_installer', { silent: true });
+          } else {
+            setUpdateToastVersion(info.version);
+          }
+        } catch (e) {
+          console.warn('[Updater] Auto-check failed:', e);
         }
       })
       .catch(() => { });
@@ -1585,14 +1590,13 @@ function App() {
               autoFindInSelection: 'never',
               seedSearchStringFromSelection: 'always',
             },
-            // Memory optimization options
             ...({
-              "bracketPairColorization.enabled": false, // reduces memory
+              "bracketPairColorization.enabled": true,
               "suggest.maxVisibleSuggestions": 5,
             } as any),
           }}
         />
-        {generalEditPanelOpen && activeTab && (
+        {activeTab && (
           <GeneralEditPanel
             isOpen={generalEditPanelOpen}
             onClose={() => setGeneralEditPanelOpen(false)}
@@ -1600,7 +1604,7 @@ function App() {
             onContentChange={handleGeneralEditContentChange}
           />
         )}
-        {particlePanelOpen && activeTab && (
+        {activeTab && (
           <ParticleEditorPanel
             isOpen={particlePanelOpen}
             onClose={() => setParticlePanelOpen(false)}
@@ -1641,11 +1645,13 @@ function App() {
         onClose={() => setShowPreferencesDialog(false)}
       />
 
-      <UpdaterDialog
-        isOpen={showUpdaterDialog}
-        onClose={() => setShowUpdaterDialog(false)}
-        updateInfo={pendingUpdateInfo}
-      />
+      {updateToastVersion && (
+        <UpdateToast
+          version={updateToastVersion}
+          onOpenSettings={() => setShowSettingsDialog(true)}
+          onDismiss={() => setUpdateToastVersion(null)}
+        />
+      )}
 
       {activeTab && particleDialogOpen && (
         <ParticleEditorDialog
