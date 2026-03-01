@@ -16,6 +16,7 @@ interface ImageEditorStatus {
 const PreferencesDialog: React.FC<PreferencesDialogProps> = ({ isOpen, onClose }) => {
     const [importLinkedBins, setImportLinkedBins] = useState(false);
     const [recursiveLinkedBins, setRecursiveLinkedBins] = useState(false);
+    const [useQuartzPyWorkflow, setUseQuartzPyWorkflow] = useState(false);
     const [texEditorApp, setTexEditorApp] = useState<string>('default');
     const [imageEditors, setImageEditors] = useState<ImageEditorStatus>({
         paintnet: false,
@@ -42,6 +43,12 @@ const PreferencesDialog: React.FC<PreferencesDialogProps> = ({ isOpen, onClose }
                 defaultValue: 'False',
             });
             setRecursiveLinkedBins(recursiveLinked === 'True');
+
+            const quartzPyWorkflow = await invoke<string>('get_preference', {
+                key: 'UseQuartzPyWorkflow',
+                defaultValue: 'False',
+            });
+            setUseQuartzPyWorkflow(quartzPyWorkflow === 'True');
 
             const texEditor = await invoke<string>('get_preference', {
                 key: 'TexEditorApp',
@@ -81,6 +88,11 @@ const PreferencesDialog: React.FC<PreferencesDialogProps> = ({ isOpen, onClose }
     const handleTexEditorChange = (value: string) => {
         setTexEditorApp(value);
         savePreference('TexEditorApp', value);
+    };
+
+    const handleQuartzPyWorkflowChange = (checked: boolean) => {
+        setUseQuartzPyWorkflow(checked);
+        savePreference('UseQuartzPyWorkflow', checked ? 'True' : 'False');
     };
 
     if (!isOpen) return null;
@@ -126,6 +138,20 @@ const PreferencesDialog: React.FC<PreferencesDialogProps> = ({ isOpen, onClose }
                         </label>
                         <p className="preference-description sub-description">
                             Recursively opens linked files from within the imported linked files (may open many tabs).
+                        </p>
+                    </div>
+
+                    <div className="preference-group">
+                        <label className="preference-checkbox">
+                            <input
+                                type="checkbox"
+                                checked={useQuartzPyWorkflow}
+                                onChange={(e) => handleQuartzPyWorkflowChange(e.target.checked)}
+                            />
+                            <span className="checkbox-label">Quartz-style .py sidecar workflow</span>
+                        </label>
+                        <p className="preference-description">
+                            Keeps an adjacent .py text copy for each opened .bin and uses it when available, matching Quartz's fake .py flow.
                         </p>
                     </div>
 

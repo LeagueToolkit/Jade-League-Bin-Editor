@@ -5,12 +5,12 @@ import { listen } from "@tauri-apps/api/event";
 import Editor, { Monaco } from "@monaco-editor/react";
 import type * as MonacoType from 'monaco-editor';
 import { registerRitobinLanguage, registerRitobinTheme, RITOBIN_LANGUAGE_ID, RITOBIN_THEME_ID } from "./lib/ritobinLanguage";
-import { openBinFile, saveBinFile, saveBinFileAs } from "./lib/binOperations";
+import { openBinFile, saveBinFile, saveBinFileAs, readBinDirect, writeBinDirect } from "./lib/binOperations";
 import { loadSavedTheme } from "./lib/themeApplicator";
 import { texBufferToDataURL } from "./lib/texFormat";
 import TitleBar from "./components/TitleBar";
 import MenuBar from "./components/MenuBar";
-import TabBar, { EditorTab, createTab, createTexPreviewTab, getFileName } from "./components/TabBar";
+import TabBar, { EditorTab, createQuartzDiffTab, createTab, createTexPreviewTab, getFileName } from "./components/TabBar";
 import StatusBar from "./components/StatusBar";
 import WelcomeScreen from "./components/WelcomeScreen";
 import AboutDialog from "./components/AboutDialog";
@@ -23,6 +23,7 @@ import ParticleEditorDialog from "./components/ParticleEditorDialog";
 import UpdateToast from "./components/UpdateToast";
 import TexHoverPopup from "./components/TexHoverPopup";
 import TexturePreviewTab from "./components/TexturePreviewTab";
+import QuartzDiffTab from "./components/QuartzDiffTab";
 import SmokeOverlay from "./components/SmokeOverlay";
 import { findAndOpenLinkedBins, LinkedBinResult } from "./lib/linkedBinParser";
 import "./App.css";
@@ -38,6 +39,35 @@ interface UpdateInfo {
 // Store editor view states (scroll position, cursor position) per tab
 interface EditorViewState {
   viewState: MonacoType.editor.ICodeEditorViewState | null;
+}
+
+interface InteropHandoff {
+  target_app: string;
+  source_app: string;
+  action: string;
+  mode?: string | null;
+  bin_path: string;
+  created_at_unix: number;
+}
+
+interface QuartzEditSession {
+  filePath: string;
+  mode: 'paint' | 'port';
+  snapshotContent: string;
+  lastSeenMtime: number | null;
+  pendingEntryId: string | null;
+}
+
+interface QuartzHistoryEntry {
+  id: string;
+  tabId: string;
+  filePath: string;
+  fileName: string;
+  mode: 'paint' | 'port';
+  beforeContent: string;
+  afterContent: string;
+  detectedAt: number;
+  status: 'pending' | 'accepted' | 'rejected';
 }
 
 function App() {
@@ -66,6 +96,8 @@ function App() {
   const [recentFiles, setRecentFiles] = useState<string[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [cigaretteMode, setCigaretteMode] = useState(false);
+  const [quartzHistoryEntries, setQuartzHistoryEntries] = useState<QuartzHistoryEntry[]>([]);
+  const quartzSessionsRef = useRef<Map<string, QuartzEditSession>>(new Map());
 
   // Texture hover popup state
   interface TexPopupState {
@@ -115,6 +147,8 @@ function App() {
 
   // Get the active tab
   const activeTab = tabs.find(t => t.id === activeTabId) || null;
+  const isEditorTab = (tab: EditorTab | null | undefined): boolean =>
+    (tab?.tabType ?? 'editor') === 'editor';
 
   // Ref to track active tab for keyboard shortcuts
   const activeTabRef = useRef(activeTab);
@@ -215,6 +249,7 @@ function App() {
       const isBinFile = (): boolean => {
         const tab = activeTabRef.current;
         if (!tab) return false;
+        if (!isEditorTab(tab)) return false;
         return tab.fileName.toLowerCase().endsWith('.bin');
       };
 
@@ -713,6 +748,74 @@ function App() {
     }
   };
 
+  const normalizeQuartzMode = (mode: string | null | undefined): 'paint' | 'port' => {
+    return String(mode || 'paint').toLowerCase() === 'port' ? 'port' : 'paint';
+  };
+
+  const getUseQuartzPyWorkflowPreference = useCallback(async (): Promise<boolean> => {
+    try {
+      const value = await invoke<string>('get_preference', {
+        key: 'UseQuartzPyWorkflow',
+        defaultValue: 'False'
+      });
+      return value === 'True';
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const getPySidecarPath = useCallback((binPath: string): string => {
+    if (binPath.toLowerCase().endsWith('.bin')) {
+      return `${binPath.slice(0, -4)}.py`;
+    }
+    return `${binPath}.py`;
+  }, []);
+
+  const readBinForEditor = useCallback(async (binPath: string, fallbackContent?: string): Promise<string> => {
+    const usePyWorkflow = await getUseQuartzPyWorkflowPreference();
+    if (!usePyWorkflow) {
+      return fallbackContent ?? readBinDirect(binPath);
+    }
+
+    const pySidecarPath = getPySidecarPath(binPath);
+    const pyExists = await invoke<boolean>('file_exists', { path: pySidecarPath }).catch(() => false);
+    if (pyExists) {
+      return invoke<string>('read_text_file', { path: pySidecarPath });
+    }
+
+    const content = fallbackContent ?? await readBinDirect(binPath);
+    await invoke('write_text_file', { path: pySidecarPath, content }).catch(() => { });
+    return content;
+  }, [getPySidecarPath, getUseQuartzPyWorkflowPreference]);
+
+  const persistPySidecarIfNeeded = useCallback(async (binPath: string, content: string): Promise<void> => {
+    const usePyWorkflow = await getUseQuartzPyWorkflowPreference();
+    if (!usePyWorkflow) return;
+
+    const pySidecarPath = getPySidecarPath(binPath);
+    await invoke('write_text_file', { path: pySidecarPath, content });
+  }, [getPySidecarPath, getUseQuartzPyWorkflowPreference]);
+
+  const updateTabContentFromExternal = useCallback((tabId: string, nextContent: string) => {
+    const model = monacoModelsRef.current.get(tabId);
+    if (model && !model.isDisposed()) {
+      model.setValue(nextContent);
+    } else if (activeTabIdRef.current === tabId && editorRef.current) {
+      const activeModel = editorRef.current.getModel();
+      if (activeModel) {
+        activeModel.setValue(nextContent);
+      }
+    }
+
+    setTabs(prevTabs => prevTabs.map(t =>
+      t.id === tabId ? { ...t, content: nextContent, isModified: false } : t
+    ));
+
+    if (activeTabIdRef.current === tabId && editorRef.current?.getModel()) {
+      setLineCount(editorRef.current.getModel()!.getLineCount());
+    }
+  }, []);
+
   const openFileFromPath = async (filePath: string) => {
     // Prevent duplicate concurrent opens (e.g. Tauri drag-drop firing twice,
     // or rapid re-drops of the same file before the first open completes).
@@ -737,9 +840,7 @@ function App() {
         return;
       }
 
-      // Import the readBinDirect function from binOperations
-      const { readBinDirect } = await import('./lib/binOperations');
-      const content = await readBinDirect(filePath);
+      const content = await readBinForEditor(filePath);
       const newTab = createTab(filePath, content);
       setTabs(prev => [...prev, newTab]);
       setActiveTabId(newTab.id);
@@ -802,8 +903,12 @@ function App() {
     // Remove view state and LRU entry
     viewStatesRef.current.delete(tabId);
     modelLruRef.current = modelLruRef.current.filter(id => id !== tabId);
+    if (tabToClose.filePath) {
+      quartzSessionsRef.current.delete(tabToClose.filePath.toLowerCase());
+    }
 
     const modelToDispose = monacoModelsRef.current.get(tabId);
+    let shouldDisposeModel = true;
     monacoModelsRef.current.delete(tabId);
 
     // Compute the next active tab now, before state updates
@@ -843,9 +948,36 @@ function App() {
       }
     }
 
+    // If the model being closed is still attached to the editor while a non-editor
+    // tab is active, move the editor to another editor tab model if possible.
+    if (modelToDispose && editorRef.current?.getModel() === modelToDispose) {
+      const monaco = monacoRef.current;
+      const fallbackEditorTab = newTabs.find(isEditorTab);
+      if (monaco && fallbackEditorTab) {
+        let fallbackModel = monacoModelsRef.current.get(fallbackEditorTab.id);
+        if (!fallbackModel || fallbackModel.isDisposed()) {
+          const uri = fallbackEditorTab.filePath
+            ? monaco.Uri.file(fallbackEditorTab.filePath)
+            : monaco.Uri.parse(`inmemory://tab/${fallbackEditorTab.id}`);
+          const existing = monaco.editor.getModel(uri);
+          fallbackModel = (existing && !existing.isDisposed())
+            ? existing
+            : monaco.editor.createModel(fallbackEditorTab.content, RITOBIN_LANGUAGE_ID, uri);
+        }
+        if (fallbackModel) {
+          monacoModelsRef.current.set(fallbackEditorTab.id, fallbackModel);
+          try { editorRef.current.setModel(fallbackModel); } catch (_) { }
+        } else {
+          shouldDisposeModel = false;
+        }
+      } else {
+        shouldDisposeModel = false;
+      }
+    }
+
     // Dispose the old model after a delay so Monaco's RAF-based render pipeline
     // can finish all queued frames before the model is torn down.
-    if (modelToDispose && !modelToDispose.isDisposed()) {
+    if (shouldDisposeModel && modelToDispose && !modelToDispose.isDisposed()) {
       setTimeout(() => {
         try { modelToDispose.dispose(); } catch (_) { }
       }, 500);
@@ -868,6 +1000,7 @@ function App() {
 
     viewStatesRef.current.clear();
     modelLruRef.current = [];
+    quartzSessionsRef.current.clear();
 
     // Collect models for delayed disposal, then clear the map immediately so
     // no further renders reference them.  The 500ms delay lets Monaco's
@@ -936,7 +1069,7 @@ function App() {
     if (!activeTab) return;
 
     // Texture-preview tabs don't have a Monaco model — skip model switching
-    if (activeTab.tabType === 'texture-preview') return;
+    if (!isEditorTab(activeTab)) return;
 
     // Save view state of current model before switching
     const currentModel = editor.getModel();
@@ -1490,7 +1623,7 @@ function App() {
   }, [activeTabId, activeTab?.isModified]);
 
   const handleEditorChange = (value: string | undefined) => {
-    if (value !== undefined && activeTabId) {
+    if (value !== undefined && activeTabId && isEditorTab(activeTab)) {
       // Only update state if tab wasn't already marked modified (prevents re-render spam)
       if (!wasModifiedRef.current) {
         wasModifiedRef.current = true;
@@ -1520,7 +1653,8 @@ function App() {
       allowHashStatusUpdateRef.current = false;
       const result = await openBinFile();
       if (result) {
-        addTab(result.path, result.content);
+        const resolvedContent = await readBinForEditor(result.path, result.content);
+        addTab(result.path, resolvedContent);
         setStatusMessage(`Opened ${result.path}`);
         statusMessageRef.current = `Opened ${result.path}`;
 
@@ -1529,7 +1663,7 @@ function App() {
         }
 
         // Open linked bin files if preference enabled
-        await openLinkedBinFiles(result.path, result.content);
+        await openLinkedBinFiles(result.path, resolvedContent);
 
         // Re-enable hash status updates after file is opened
         setTimeout(() => {
@@ -1592,7 +1726,7 @@ function App() {
   };
 
   const handleSave = async () => {
-    if (!activeTab) return;
+    if (!activeTab || !isEditorTab(activeTab)) return;
 
     try {
       // Block hash status updates while saving
@@ -1600,10 +1734,11 @@ function App() {
       if (activeTab.filePath) {
         // Read content from editor for active tab, or from state for inactive tabs
         const content = editorRef.current?.getValue() || activeTab.content;
+        await persistPySidecarIfNeeded(activeTab.filePath, content);
         await saveBinFile(content, activeTab.filePath);
         setTabs(prevTabs =>
           prevTabs.map(t =>
-            t.id === activeTabId ? { ...t, isModified: false } : t
+            t.id === activeTabId ? { ...t, content, isModified: false } : t
           )
         );
         setStatusMessage(`Saved ${activeTab.filePath}`);
@@ -1627,7 +1762,7 @@ function App() {
   };
 
   const handleSaveAs = async () => {
-    if (!activeTab) return;
+    if (!activeTab || !isEditorTab(activeTab)) return;
 
     try {
       // Block hash status updates while saving
@@ -1636,12 +1771,14 @@ function App() {
       const content = editorRef.current?.getValue() || activeTab.content;
       const newPath = await saveBinFileAs(content);
       if (newPath) {
+        await persistPySidecarIfNeeded(newPath, content);
         setTabs(prevTabs =>
           prevTabs.map(t =>
             t.id === activeTabId ? {
               ...t,
               filePath: newPath,
               fileName: getFileName(newPath),
+              content,
               isModified: false
             } : t
           )
@@ -1665,13 +1802,29 @@ function App() {
   };
 
   // Edit Operations
-  const handleUndo = () => editorRef.current?.trigger('keyboard', 'undo', null);
-  const handleRedo = () => editorRef.current?.trigger('keyboard', 'redo', null);
-  const handleCut = () => document.execCommand('cut');
-  const handleCopy = () => document.execCommand('copy');
-  const handlePaste = () => document.execCommand('paste');
+  const handleUndo = () => {
+    if (!isEditorTab(activeTabRef.current)) return;
+    editorRef.current?.trigger('keyboard', 'undo', null);
+  };
+  const handleRedo = () => {
+    if (!isEditorTab(activeTabRef.current)) return;
+    editorRef.current?.trigger('keyboard', 'redo', null);
+  };
+  const handleCut = () => {
+    if (!isEditorTab(activeTabRef.current)) return;
+    document.execCommand('cut');
+  };
+  const handleCopy = () => {
+    if (!isEditorTab(activeTabRef.current)) return;
+    document.execCommand('copy');
+  };
+  const handlePaste = () => {
+    if (!isEditorTab(activeTabRef.current)) return;
+    document.execCommand('paste');
+  };
 
   const handleFind = () => {
+    if (!isEditorTab(activeTabRef.current)) return;
     if (findWidgetOpen) {
       editorRef.current?.trigger('keyboard', 'closeFindWidget', null);
       setFindWidgetOpen(false);
@@ -1685,6 +1838,7 @@ function App() {
   };
 
   const handleReplace = () => {
+    if (!isEditorTab(activeTabRef.current)) return;
     if (replaceWidgetOpen) {
       editorRef.current?.trigger('keyboard', 'closeFindWidget', null);
       setReplaceWidgetOpen(false);
@@ -1698,8 +1852,12 @@ function App() {
   };
 
   const handleCompareFiles = () => console.log('Compare Files');
-  const handleSelectAll = () => editorRef.current?.trigger('keyboard', 'editor.action.selectAll', null);
+  const handleSelectAll = () => {
+    if (!isEditorTab(activeTabRef.current)) return;
+    editorRef.current?.trigger('keyboard', 'editor.action.selectAll', null);
+  };
   const handleGeneralEdit = () => {
+    if (!isEditorTab(activeTabRef.current)) return;
     setFindWidgetOpen(false);
     setReplaceWidgetOpen(false);
     setParticlePanelOpen(false);
@@ -1709,7 +1867,7 @@ function App() {
 
   // Handle content change from General Edit Panel (undoable, preserves cursor/scroll)
   const handleGeneralEditContentChange = (newContent: string) => {
-    if (activeTabId && editorRef.current) {
+    if (activeTabId && editorRef.current && isEditorTab(activeTabRef.current)) {
       const editor = editorRef.current;
       const model = editor.getModel();
       if (model) {
@@ -1786,6 +1944,7 @@ function App() {
   // Helper to check if current file is a bin file
   const isBinFileOpen = (): boolean => {
     if (!activeTab) return false;
+    if (!isEditorTab(activeTab)) return false;
     const fileName = activeTab.fileName.toLowerCase();
     return fileName.endsWith('.bin');
   };
@@ -1809,6 +1968,247 @@ function App() {
     setParticlePanelOpen(false);
     setParticleDialogOpen(true);
   };
+
+  const handleSendToQuartz = async (mode: 'paint' | 'port') => {
+    if (!activeTab || !activeTab.filePath || !isBinFileOpen()) {
+      setStatusMessage('Open a .bin tab before sending to Quartz');
+      return;
+    }
+
+    const currentContent = editorRef.current?.getValue() || activeTab.content;
+
+    try {
+      allowHashStatusUpdateRef.current = false;
+      setStatusMessage(`Sending ${activeTab.fileName} to Quartz (${mode})...`);
+
+      if (activeTab.isModified) {
+        await persistPySidecarIfNeeded(activeTab.filePath, currentContent);
+        await saveBinFile(currentContent, activeTab.filePath);
+        setTabs(prevTabs =>
+          prevTabs.map(t =>
+            t.id === activeTab.id ? { ...t, content: currentContent, isModified: false } : t
+          )
+        );
+      }
+
+      const currentMtime = await invoke<number>('get_file_mtime', { path: activeTab.filePath }).catch(() => null);
+      quartzSessionsRef.current.set(activeTab.filePath.toLowerCase(), {
+        filePath: activeTab.filePath,
+        mode,
+        snapshotContent: currentContent,
+        lastSeenMtime: currentMtime,
+        pendingEntryId: null,
+      });
+
+      await invoke('send_bin_to_quartz', {
+        binPath: activeTab.filePath,
+        mode,
+      });
+
+      setStatusMessage(`Sent ${activeTab.fileName} to Quartz (${mode})`);
+    } catch (error) {
+      setStatusMessage(`Failed to send to Quartz: ${error}`);
+    } finally {
+      setTimeout(() => {
+        allowHashStatusUpdateRef.current = true;
+      }, 2000);
+    }
+  };
+
+  const updateQuartzDiffTabStatus = useCallback((entryId: string, status: 'accepted' | 'rejected') => {
+    setTabs(prevTabs => prevTabs.map(tab => (
+      tab.tabType === 'quartz-diff' && tab.diffEntryId === entryId
+        ? { ...tab, diffStatus: status }
+        : tab
+    )));
+  }, []);
+
+  const handleAcceptQuartzHistory = useCallback((entryId: string) => {
+    const entry = quartzHistoryEntries.find(item => item.id === entryId);
+    if (!entry) return;
+
+    updateTabContentFromExternal(entry.tabId, entry.afterContent);
+    setQuartzHistoryEntries(prev => prev.map(item =>
+      item.id === entryId ? { ...item, status: 'accepted' } : item
+    ));
+    const sessionKey = entry.filePath.toLowerCase();
+    const session = quartzSessionsRef.current.get(sessionKey);
+    if (session) {
+      quartzSessionsRef.current.set(sessionKey, {
+        ...session,
+        snapshotContent: entry.afterContent,
+        pendingEntryId: null,
+      });
+      invoke<number>('get_file_mtime', { path: entry.filePath })
+        .then((mtime) => {
+          const latest = quartzSessionsRef.current.get(sessionKey);
+          if (!latest) return;
+          quartzSessionsRef.current.set(sessionKey, {
+            ...latest,
+            lastSeenMtime: mtime,
+          });
+        })
+        .catch(() => { });
+    }
+    updateQuartzDiffTabStatus(entryId, 'accepted');
+    setStatusMessage(`Accepted Quartz edit for ${entry.fileName}`);
+  }, [quartzHistoryEntries, updateQuartzDiffTabStatus, updateTabContentFromExternal]);
+
+  const handleRejectQuartzHistory = useCallback(async (entryId: string) => {
+    const entry = quartzHistoryEntries.find(item => item.id === entryId);
+    if (!entry) return;
+
+    try {
+      await persistPySidecarIfNeeded(entry.filePath, entry.beforeContent);
+      await writeBinDirect(entry.beforeContent, entry.filePath);
+      await invoke('notify_quartz_bin_updated', {
+        binPath: entry.filePath,
+        mode: entry.mode,
+      }).catch(() => null);
+      const mtimeAfterReject = await invoke<number>('get_file_mtime', { path: entry.filePath }).catch(() => null);
+      const sessionKey = entry.filePath.toLowerCase();
+      const session = quartzSessionsRef.current.get(sessionKey);
+      if (session) {
+        quartzSessionsRef.current.set(sessionKey, {
+          ...session,
+          snapshotContent: entry.beforeContent,
+          pendingEntryId: null,
+          lastSeenMtime: mtimeAfterReject ?? session.lastSeenMtime,
+        });
+      }
+      updateTabContentFromExternal(entry.tabId, entry.beforeContent);
+      setQuartzHistoryEntries(prev => prev.map(item =>
+        item.id === entryId ? { ...item, status: 'rejected' } : item
+      ));
+      updateQuartzDiffTabStatus(entryId, 'rejected');
+      setStatusMessage(`Rejected Quartz edit for ${entry.fileName}`);
+    } catch (error) {
+      setStatusMessage(`Failed to reject Quartz edit: ${error}`);
+    }
+  }, [persistPySidecarIfNeeded, quartzHistoryEntries, updateQuartzDiffTabStatus, updateTabContentFromExternal]);
+
+  useEffect(() => {
+    let stopped = false;
+
+    const consumeHandoff = async () => {
+      if (stopped) return;
+      try {
+        const handoff = await invoke<InteropHandoff | null>('consume_interop_handoff');
+        if (!handoff || !handoff.bin_path) return;
+
+        const mode = normalizeQuartzMode(handoff.mode);
+        const snapshot = await readBinForEditor(handoff.bin_path).catch(() => null);
+        await openFileFromPathRef.current?.(handoff.bin_path);
+        const currentMtime = await invoke<number>('get_file_mtime', { path: handoff.bin_path }).catch(() => null);
+        if (snapshot !== null) {
+          quartzSessionsRef.current.set(handoff.bin_path.toLowerCase(), {
+            filePath: handoff.bin_path,
+            mode,
+            snapshotContent: snapshot,
+            lastSeenMtime: currentMtime,
+            pendingEntryId: null,
+          });
+        }
+        setStatusMessage(`Opened ${getFileName(handoff.bin_path)} from Quartz (${mode})`);
+      } catch {
+        // Non-fatal: handoff polling should stay quiet on transient failures.
+      }
+    };
+
+    consumeHandoff();
+    const timer = setInterval(consumeHandoff, 1200);
+
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    let stopped = false;
+    let running = false;
+
+    const checkQuartzSessions = async () => {
+      if (stopped || running) return;
+      running = true;
+
+      try {
+        const sessions = Array.from(quartzSessionsRef.current.entries());
+        for (const [sessionKey, session] of sessions) {
+          if (session.pendingEntryId) {
+            continue;
+          }
+
+          const currentMtime = await invoke<number>('get_file_mtime', { path: session.filePath }).catch(() => null);
+          if (currentMtime === null) continue;
+
+          if (session.lastSeenMtime === null) {
+            session.lastSeenMtime = currentMtime;
+            quartzSessionsRef.current.set(sessionKey, session);
+            continue;
+          }
+
+          if (currentMtime === session.lastSeenMtime) {
+            continue;
+          }
+
+          session.lastSeenMtime = currentMtime;
+          quartzSessionsRef.current.set(sessionKey, session);
+
+          const matchingTab = tabs.find(t => t.filePath?.toLowerCase() === session.filePath.toLowerCase());
+          if (!matchingTab) {
+            continue;
+          }
+
+          const afterContent = await readBinForEditor(session.filePath).catch(() => null);
+          if (!afterContent || afterContent === session.snapshotContent) {
+            continue;
+          }
+
+          const entryId = `quartz-${matchingTab.id}-${Date.now()}`;
+          const newEntry: QuartzHistoryEntry = {
+            id: entryId,
+            tabId: matchingTab.id,
+            filePath: session.filePath,
+            fileName: getFileName(session.filePath),
+            mode: session.mode,
+            beforeContent: session.snapshotContent,
+            afterContent,
+            detectedAt: Date.now(),
+            status: 'pending',
+          };
+
+          updateTabContentFromExternal(matchingTab.id, afterContent);
+          setQuartzHistoryEntries(prev => [newEntry, ...prev]);
+          const diffTab = createQuartzDiffTab({
+            entryId,
+            sourceTabId: matchingTab.id,
+            sourceFilePath: session.filePath,
+            fileName: getFileName(session.filePath),
+            mode: session.mode,
+            originalContent: session.snapshotContent,
+            modifiedContent: afterContent,
+            status: 'pending',
+          });
+          setTabs(prevTabs => [...prevTabs, diffTab]);
+          setActiveTabId(diffTab.id);
+          setStatusMessage(`Quartz updated ${getFileName(session.filePath)} (${session.mode})`);
+          quartzSessionsRef.current.set(sessionKey, {
+            ...session,
+            pendingEntryId: entryId,
+          });
+        }
+      } finally {
+        running = false;
+      }
+    };
+
+    const timer = setInterval(checkQuartzSessions, 1800);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }, [readBinForEditor, tabs, updateTabContentFromExternal]);
 
   // Scroll to line handler for particle editor
   const handleScrollToLine = (line: number) => {
@@ -1835,6 +2235,7 @@ function App() {
         onMaximize={handleMaximize}
         onClose={handleClose}
         onParticleEditor={handleParticleEditor}
+        onQuartzAction={handleSendToQuartz}
       />
 
       <MenuBar
@@ -1896,11 +2297,30 @@ function App() {
           onReload={handleTexReload}
         />
       )}
+      {activeTab?.tabType === 'quartz-diff' && (
+        <QuartzDiffTab
+          fileName={activeTab.diffSourceFilePath ? getFileName(activeTab.diffSourceFilePath) : activeTab.fileName}
+          mode={activeTab.diffMode ?? 'paint'}
+          status={activeTab.diffStatus ?? 'pending'}
+          originalContent={activeTab.diffOriginalContent ?? ''}
+          modifiedContent={activeTab.diffModifiedContent ?? ''}
+          onAccept={() => {
+            if (activeTab.diffEntryId) {
+              handleAcceptQuartzHistory(activeTab.diffEntryId);
+            }
+          }}
+          onReject={() => {
+            if (activeTab.diffEntryId) {
+              handleRejectQuartzHistory(activeTab.diffEntryId);
+            }
+          }}
+        />
+      )}
 
       <div
         className="editor-container"
         style={
-          tabs.length === 0 || activeTab?.tabType === 'texture-preview'
+          tabs.length === 0 || !isEditorTab(activeTab)
             ? { display: 'none' }
             : undefined
         }
@@ -1918,6 +2338,7 @@ function App() {
             scrollBeyondLastLine: false,
             automaticLayout: true,
             fontFamily: "'JetBrains Mono', 'Fira Code', Consolas, monospace",
+            lineNumbersMinChars: 6,
             fixedOverflowWidgets: true,
             find: {
               addExtraSpaceOnTop: false,
@@ -1930,7 +2351,7 @@ function App() {
             } as any),
           }}
         />
-        {activeTab && activeTab.tabType !== 'texture-preview' && (
+        {activeTab && isEditorTab(activeTab) && (
           <GeneralEditPanel
             isOpen={generalEditPanelOpen}
             onClose={() => setGeneralEditPanelOpen(false)}
@@ -1938,7 +2359,7 @@ function App() {
             onContentChange={handleGeneralEditContentChange}
           />
         )}
-        {activeTab && activeTab.tabType !== 'texture-preview' && (
+        {activeTab && isEditorTab(activeTab) && (
           <ParticleEditorPanel
             isOpen={particlePanelOpen}
             onClose={() => setParticlePanelOpen(false)}
@@ -2015,7 +2436,7 @@ function App() {
         />
       )}
 
-      {activeTab && particleDialogOpen && (
+      {activeTab && isEditorTab(activeTab) && particleDialogOpen && (
         <ParticleEditorDialog
           isOpen={particleDialogOpen}
           onClose={() => setParticleDialogOpen(false)}

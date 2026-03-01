@@ -14,6 +14,12 @@ interface CustomThemeColors {
     selectedTab: string;
 }
 
+interface CustomBackgroundOptions {
+    enabled: boolean;
+    imageDataUrl?: string | null;
+    blur?: number;
+}
+
 /**
  * Lighten or darken a hex color
  */
@@ -203,6 +209,36 @@ export function applyModernUI(enabled: boolean) {
 }
 
 /**
+ * Apply/remove a user-provided background image behind the full app shell.
+ * When enabled, data-custom-background="true" is added to <html> so CSS can
+ * switch chrome to neutral glass styling.
+ */
+export function applyCustomBackground(options: CustomBackgroundOptions) {
+    const root = document.documentElement;
+    const imageDataUrl = options.imageDataUrl ?? '';
+    const hasImage = imageDataUrl.length > 0;
+    const enabled = options.enabled && hasImage;
+
+    if (!enabled) {
+        root.removeAttribute('data-custom-background');
+        root.style.removeProperty('--custom-bg-image');
+        root.style.removeProperty('--custom-bg-blur');
+        root.style.removeProperty('--custom-bg-scale');
+        return;
+    }
+
+    const parsedBlur = Number.isFinite(options.blur) ? Number(options.blur) : 8;
+    const blur = Math.min(40, Math.max(0, parsedBlur));
+    const scale = (1 + (blur / 100)).toFixed(2);
+    const escapedUrl = imageDataUrl.replace(/"/g, '\\"');
+
+    root.setAttribute('data-custom-background', 'true');
+    root.style.setProperty('--custom-bg-image', `url("${escapedUrl}")`);
+    root.style.setProperty('--custom-bg-blur', `${blur}px`);
+    root.style.setProperty('--custom-bg-scale', scale);
+}
+
+/**
  * Create and register a Monaco editor theme from syntax colors
  */
 export function createMonacoTheme(monaco: Monaco, themeId: string, syntaxThemeId: string) {
@@ -334,6 +370,9 @@ export async function loadSavedTheme(
         const modernUI = await invoke('get_preference', { key: 'ModernUI', defaultValue: 'true' }) as string;
         const syntaxTheme = await invoke('get_preference', { key: 'SyntaxTheme', defaultValue: 'Default' }) as string;
         const overrideSyntax = await invoke('get_preference', { key: 'OverrideSyntax', defaultValue: 'false' }) as string;
+        const useCustomBackground = await invoke('get_preference', { key: 'UseCustomBackgroundImage', defaultValue: 'false' }) as string;
+        const customBackgroundImage = await invoke('get_preference', { key: 'CustomBackgroundImage', defaultValue: '' }) as string;
+        const customBackgroundBlurRaw = await invoke('get_preference', { key: 'CustomBackgroundBlur', defaultValue: '8' }) as string;
 
         // Apply rounded corners (default to true/ON)
         applyRoundedCorners(roundedCorners === 'true');
@@ -368,6 +407,17 @@ export async function loadSavedTheme(
             applyTheme(theme);
         }
 
+        // Apply user background image + blur settings.
+        const parsedBlur = Number.parseInt(customBackgroundBlurRaw, 10);
+        const customBackgroundBlur = Number.isFinite(parsedBlur)
+            ? Math.min(40, Math.max(0, parsedBlur))
+            : 8;
+        applyCustomBackground({
+            enabled: useCustomBackground === 'true',
+            imageDataUrl: customBackgroundImage,
+            blur: customBackgroundBlur
+        });
+
         // Apply Monaco theme if instance is available
         if (monaco) {
             // Determine syntax theme: if override is false, we might want to match UI theme
@@ -393,6 +443,7 @@ export async function loadSavedTheme(
         applyTheme('Default');
         applyRoundedCorners(true); // Default to ON
         applyModernUI(true); // Default to ON
+        applyCustomBackground({ enabled: false, imageDataUrl: '', blur: 8 });
 
         if (monaco) {
             applyMonacoTheme(monaco, 'Default', 'Default');

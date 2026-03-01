@@ -52,6 +52,9 @@
   --vscode-input-border: var(--border-color);
   --jade-accent: var(--button-bg);
   --jade-accent-text: var(--button-bg); /* brightened version set per-theme by themeApplicator */
+  --custom-bg-image: none;
+  --custom-bg-blur: 0px;
+  --custom-bg-scale: 1;
 
   /* Syntax highlight color for string literals / file paths — updated by
      themeApplicator when a syntax theme is applied */
@@ -81,6 +84,30 @@ body {
   display: flex;
   flex-direction: column;
   background: var(--window-bg);
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.app-container::before {
+  content: '';
+  position: absolute;
+  inset: -2%;
+  background-image: var(--custom-bg-image);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  filter: blur(var(--custom-bg-blur));
+  transform: scale(var(--custom-bg-scale));
+  transform-origin: center;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  z-index: -1;
+}
+
+[data-custom-background='true'] .app-container::before {
+  opacity: 1;
 }
 
 .editor-container {

@@ -714,24 +714,29 @@
  * Glass blur is only applied to the panel itself, which is small and targeted.
  */
 [data-ui-mode="modern"] .general-edit-panel {
-  background: var(--modern-dialog-bg) !important;
-  backdrop-filter: saturate(170%) blur(18px);
-  -webkit-backdrop-filter: saturate(170%) blur(18px);
-  border: 1px solid rgba(255, 255, 255, 0.10) !important;
-  /* Top edge flush with tab bar — only bottom corners get radius */
+  background: var(--vscode-editorWidget-background) !important;
+  background-color: var(--vscode-editorWidget-background) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border-top: none !important;
+  border-left: 1px solid var(--vscode-widget-border) !important;
+  border-right: 1px solid var(--vscode-widget-border) !important;
+  border-bottom: 1px solid var(--vscode-widget-border) !important;
+  /* Top edge flush with tab bar - only bottom corners get radius */
   border-radius: 0 0 8px 8px !important;
-  box-shadow:
-    0 8px 24px rgba(0, 0, 0, 0.45),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.06) !important;
+  box-shadow: 0 0 8px 2px var(--vscode-widget-shadow) !important;
 }
 
 /* ── Particle Editor Panel (inline side panel): glass ── */
 [data-ui-mode="modern"] .particle-editor-panel {
-  background: var(--modern-dialog-bg) !important;
-  backdrop-filter: saturate(160%) blur(16px);
-  -webkit-backdrop-filter: saturate(160%) blur(16px);
-  border-left: 1px solid rgba(255, 255, 255, 0.09) !important;
-  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.35) !important;
+  background: var(--vscode-editorWidget-background) !important;
+  background-color: var(--vscode-editorWidget-background) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border-left: 1px solid var(--vscode-widget-border) !important;
+  border-right: 1px solid var(--vscode-widget-border) !important;
+  border-bottom: 1px solid var(--vscode-widget-border) !important;
+  box-shadow: 0 0 8px 2px var(--vscode-widget-shadow) !important;
 }
 
 /* ── Update Toast: glass card ── */
@@ -862,3 +867,102 @@
   z-index: 99999;
   box-shadow: inset 0 0 40px var(--modern-accent-10);
 }
+
+/* Custom user background mode: keep top chrome neutral so the image stays visible */
+[data-custom-background="true"] {
+  --custom-chrome-bg: rgba(12, 14, 18, 0.34);
+  --custom-chrome-bg-strong: rgba(12, 14, 18, 0.56);
+  --custom-chrome-border: rgba(255, 255, 255, 0.16);
+  --custom-chrome-hover: rgba(255, 255, 255, 0.12);
+  --custom-chrome-active: rgba(255, 255, 255, 0.20);
+}
+
+[data-custom-background="true"] .app-container {
+  background: transparent !important;
+}
+
+[data-custom-background="true"] .title-bar,
+[data-custom-background="true"] .menu-bar,
+[data-custom-background="true"] .tab-bar,
+[data-custom-background="true"] .tabs-actions,
+[data-custom-background="true"] .status-bar {
+  background: var(--custom-chrome-bg) !important;
+  backdrop-filter: blur(14px) saturate(135%) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(135%) !important;
+  box-shadow: none !important;
+}
+
+[data-custom-background="true"] .title-bar,
+[data-custom-background="true"] .menu-bar,
+[data-custom-background="true"] .tab-bar {
+  border-bottom: 1px solid var(--custom-chrome-border) !important;
+}
+
+[data-custom-background="true"] .status-bar {
+  border-top: 1px solid var(--custom-chrome-border) !important;
+}
+
+[data-custom-background="true"] .toolbar-separator,
+[data-custom-background="true"] .controls-separator,
+[data-custom-background="true"] .status-separator {
+  background: var(--custom-chrome-border) !important;
+}
+
+[data-custom-background="true"] .toolbar-btn,
+[data-custom-background="true"] .menu-icon-btn {
+  border-color: var(--custom-chrome-border) !important;
+}
+
+[data-custom-background="true"] .toolbar-btn:hover,
+[data-custom-background="true"] .menu-item:hover,
+[data-custom-background="true"] .menu-trigger:hover,
+[data-custom-background="true"] .menu-trigger.active,
+[data-custom-background="true"] .menu-option:hover,
+[data-custom-background="true"] .menu-icon-btn:hover,
+[data-custom-background="true"] .close-all-btn:hover {
+  background: var(--custom-chrome-hover) !important;
+  border-color: rgba(255, 255, 255, 0.28) !important;
+  box-shadow: none !important;
+}
+
+[data-custom-background="true"] .toolbar-btn.active,
+[data-custom-background="true"] .menu-icon-btn.active,
+[data-custom-background="true"] .menu-icon-btn.active.panel-active {
+  background: var(--custom-chrome-active) !important;
+  border-color: rgba(255, 255, 255, 0.30) !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
+}
+
+[data-custom-background="true"] .menu-dropdown,
+[data-custom-background="true"] .menu-submenu,
+[data-custom-background="true"] .toolbar-menu-popup {
+  background: var(--custom-chrome-bg-strong) !important;
+  border: 1px solid var(--custom-chrome-border) !important;
+  backdrop-filter: blur(18px) saturate(130%) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(130%) !important;
+}
+
+[data-custom-background="true"] .menu-separator {
+  background: rgba(255, 255, 255, 0.12) !important;
+}
+
+[data-custom-background="true"] .tab {
+  background: transparent !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.10) !important;
+}
+
+[data-custom-background="true"] .tab:hover:not(.active) {
+  background: var(--custom-chrome-hover) !important;
+}
+
+[data-custom-background="true"] .tab.active {
+  background: var(--custom-chrome-active) !important;
+  box-shadow: none !important;
+}
+
+[data-custom-background="true"] .tab.active::before {
+  background: rgba(255, 255, 255, 0.78) !important;
+  box-shadow: none !important;
+}
+

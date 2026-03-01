@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, type ChangeEvent } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import {
     THEMES,
@@ -8,7 +8,7 @@ import {
     getBracketColors,
     type ThemeColors
 } from '../lib/themes';
-import { applyTheme, applyRoundedCorners, applyModernUI } from '../lib/themeApplicator';
+import { applyTheme, applyRoundedCorners, applyModernUI, applyCustomBackground } from '../lib/themeApplicator';
 import './ThemesDialog.css';
 
 interface ThemesDialogProps {
@@ -27,12 +27,13 @@ interface CustomTheme {
     selectedTab: string;
 }
 
-type NavSection = 'ui' | 'syntax' | 'preview' | 'options';
+type NavSection = 'ui' | 'syntax' | 'preview' | 'background' | 'options';
 
 const NAV_ITEMS: { id: NavSection; label: string; icon: string }[] = [
     { id: 'ui',      label: 'UI Theme',       icon: '🎨' },
     { id: 'syntax',  label: 'Syntax Colors',  icon: '✦'  },
     { id: 'preview', label: 'Live Preview',   icon: '👁'  },
+    { id: 'background', label: 'Background',  icon: 'IMG' },
     { id: 'options', label: 'Options',        icon: '⚙'  },
 ];
 
@@ -45,6 +46,11 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
     const [roundedCorners, setRoundedCorners] = useState(true);
     const [modernUI, setModernUI] = useState(true);
     const [cigaretteMode, setCigaretteMode] = useState(false);
+    const [useCustomBackground, setUseCustomBackground] = useState(false);
+    const [customBackgroundImage, setCustomBackgroundImage] = useState('');
+    const [customBackgroundName, setCustomBackgroundName] = useState('');
+    const [customBackgroundBlur, setCustomBackgroundBlur] = useState(8);
+    const backgroundInputRef = useRef<HTMLInputElement | null>(null);
 
     const [customTheme, setCustomTheme] = useState<CustomTheme>({
         windowBg: '#0F1928',
@@ -60,6 +66,45 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
         if (isOpen) loadPreferences();
     }, [isOpen]);
 
+    const clampBlur = (value: number): number => Math.min(40, Math.max(0, value));
+
+    const handleBackgroundFileSelected = (event: ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        event.target.value = '';
+        if (!file) return;
+
+        if (!file.type.startsWith('image/')) {
+            alert('Please select an image file.');
+            return;
+        }
+        if (file.size > 8 * 1024 * 1024) {
+            alert('Please choose an image smaller than 8 MB.');
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = () => {
+            const result = typeof reader.result === 'string' ? reader.result : '';
+            if (!result.startsWith('data:image/')) {
+                alert('Failed to read image data.');
+                return;
+            }
+            setCustomBackgroundImage(result);
+            setCustomBackgroundName(file.name);
+            setUseCustomBackground(true);
+        };
+        reader.onerror = () => {
+            alert('Failed to load image file.');
+        };
+        reader.readAsDataURL(file);
+    };
+
+    const handleClearBackgroundImage = () => {
+        setCustomBackgroundImage('');
+        setCustomBackgroundName('');
+        setUseCustomBackground(false);
+    };
+
     const loadPreferences = async () => {
         try {
             const theme      = await invoke<string>('get_preference', { key: 'Theme',         defaultValue: 'Default' });
@@ -69,6 +114,10 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
             const rounded    = await invoke<string>('get_preference', { key: 'RoundedCorners',  defaultValue: 'true'  });
             const modern     = await invoke<string>('get_preference', { key: 'ModernUI',        defaultValue: 'true'  });
             const cigarette  = await invoke<string>('get_preference', { key: 'CigaretteMode',   defaultValue: 'false' });
+            const useBackground = await invoke<string>('get_preference', { key: 'UseCustomBackgroundImage', defaultValue: 'false' });
+            const backgroundImage = await invoke<string>('get_preference', { key: 'CustomBackgroundImage', defaultValue: '' });
+            const backgroundName = await invoke<string>('get_preference', { key: 'CustomBackgroundImageName', defaultValue: '' });
+            const backgroundBlurRaw = await invoke<string>('get_preference', { key: 'CustomBackgroundBlur', defaultValue: '8' });
 
             setSelectedTheme(theme);
             setSelectedSyntaxTheme(syntaxTheme);
@@ -77,6 +126,14 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
             setRoundedCorners(rounded === 'true');
             setModernUI(modern !== 'false');
             setCigaretteMode(cigarette === 'true');
+            setCustomBackgroundImage(backgroundImage);
+            setCustomBackgroundName(backgroundName);
+            setUseCustomBackground(useBackground === 'true' && backgroundImage.length > 0);
+            {
+                const parsedBlur = Number.parseInt(backgroundBlurRaw, 10);
+                const blur = Number.isFinite(parsedBlur) ? clampBlur(parsedBlur) : 8;
+                setCustomBackgroundBlur(blur);
+            }
 
             if (useCustom === 'true') {
                 const customBg          = await invoke<string>('get_preference', { key: 'Custom_Bg',          defaultValue: '#0F1928' });
@@ -118,9 +175,18 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
             await invoke('set_preference', { key: 'RoundedCorners', value: roundedCorners.toString()  });
             await invoke('set_preference', { key: 'ModernUI',       value: modernUI.toString()         });
             await invoke('set_preference', { key: 'CigaretteMode',  value: cigaretteMode.toString()    });
+            await invoke('set_preference', { key: 'UseCustomBackgroundImage', value: (useCustomBackground && customBackgroundImage.length > 0).toString() });
+            await invoke('set_preference', { key: 'CustomBackgroundImage', value: customBackgroundImage });
+            await invoke('set_preference', { key: 'CustomBackgroundImageName', value: customBackgroundName });
+            await invoke('set_preference', { key: 'CustomBackgroundBlur', value: String(customBackgroundBlur) });
 
             applyRoundedCorners(roundedCorners);
             applyModernUI(modernUI);
+            applyCustomBackground({
+                enabled: useCustomBackground && customBackgroundImage.length > 0,
+                imageDataUrl: customBackgroundImage,
+                blur: customBackgroundBlur
+            });
             window.dispatchEvent(new CustomEvent('cigarette-mode-changed', { detail: cigaretteMode }));
 
             onThemeApplied?.(useCustomTheme ? 'Custom' : selectedTheme);
@@ -284,6 +350,92 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
         </div>
     );
 
+    const renderBackground = () => (
+        <>
+            <h2 className="themes-section-title">Background Image</h2>
+            <p className="themes-section-subtitle">
+                Use your own image behind the app. When enabled, top ribbons and bars switch to neutral glass.
+            </p>
+
+            <div className="themes-options background-options">
+                <label className="checkbox-label">
+                    <input
+                        type="checkbox"
+                        checked={useCustomBackground}
+                        onChange={e => setUseCustomBackground(e.target.checked)}
+                        disabled={!customBackgroundImage}
+                    />
+                    <span>
+                        <strong>Enable custom image background</strong>
+                        <span style={{ display: 'block', fontSize: 11, opacity: 0.55, fontWeight: 400 }}>
+                            Disable this to restore normal theme-colored bars.
+                        </span>
+                    </span>
+                </label>
+
+                <div className="background-file-row">
+                    <input
+                        ref={backgroundInputRef}
+                        type="file"
+                        accept="image/*"
+                        onChange={handleBackgroundFileSelected}
+                        style={{ display: 'none' }}
+                    />
+                    <button
+                        className="background-action-btn"
+                        onClick={() => backgroundInputRef.current?.click()}
+                    >
+                        Choose image
+                    </button>
+                    <button
+                        className="background-action-btn"
+                        onClick={handleClearBackgroundImage}
+                        disabled={!customBackgroundImage}
+                    >
+                        Clear
+                    </button>
+                    <span className="background-file-name">
+                        {customBackgroundName || 'No image selected'}
+                    </span>
+                </div>
+
+                <div className="background-slider-row">
+                    <label htmlFor="background-blur-slider">
+                        Blur strength: <strong>{customBackgroundBlur}px</strong>
+                    </label>
+                    <input
+                        id="background-blur-slider"
+                        type="range"
+                        min={0}
+                        max={40}
+                        step={1}
+                        value={customBackgroundBlur}
+                        onChange={e => {
+                            const parsed = Number.parseInt(e.target.value, 10);
+                            setCustomBackgroundBlur(clampBlur(Number.isFinite(parsed) ? parsed : 0));
+                        }}
+                        disabled={!customBackgroundImage}
+                    />
+                </div>
+
+                <div className="background-preview">
+                    {customBackgroundImage ? (
+                        <div
+                            className="background-preview-image"
+                            style={{
+                                backgroundImage: `url(${customBackgroundImage})`,
+                                filter: `blur(${customBackgroundBlur}px)`,
+                                transform: `scale(${(1 + customBackgroundBlur / 100).toFixed(2)})`
+                            }}
+                        />
+                    ) : (
+                        <div className="background-preview-empty">Image preview</div>
+                    )}
+                </div>
+            </div>
+        </>
+    );
+
     const renderOptions = () => (
         <>
             <h2 className="themes-section-title">Display Options</h2>
@@ -325,6 +477,7 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
         ui:      renderUI,
         syntax:  renderSyntax,
         preview: renderPreview,
+        background: renderBackground,
         options: renderOptions,
     };
 

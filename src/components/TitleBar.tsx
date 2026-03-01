@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import './TitleBar.css';
-import { CrystalBallIcon, PaletteIcon, PencilIcon, SettingsIcon, HelpIcon, MinimizeIcon, MaximizeIcon, RestoreIcon, CloseIcon } from './Icons';
+import { CrystalBallIcon, PaletteIcon, PencilIcon, SettingsIcon, HelpIcon, MinimizeIcon, MaximizeIcon, RestoreIcon, CloseIcon, QuartzIcon } from './Icons';
 
 interface TitleBarProps {
     appIcon?: string;
@@ -13,6 +13,7 @@ interface TitleBarProps {
     onMaximize: () => void;
     onClose: () => void;
     onParticleEditor?: () => void;
+    onQuartzAction?: (mode: 'paint' | 'port') => void;
 }
 
 export default function TitleBar({
@@ -26,12 +27,27 @@ export default function TitleBar({
     onMaximize,
     onClose,
     onParticleEditor,
+    onQuartzAction,
 }: TitleBarProps) {
     const [currentIcon, setCurrentIcon] = useState(appIcon);
+    const [showQuartzMenu, setShowQuartzMenu] = useState(false);
+    const quartzMenuRef = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => {
         setCurrentIcon(appIcon);
     }, [appIcon]);
+
+    useEffect(() => {
+        const handleOutsideClick = (event: MouseEvent) => {
+            if (!quartzMenuRef.current) return;
+            if (!quartzMenuRef.current.contains(event.target as Node)) {
+                setShowQuartzMenu(false);
+            }
+        };
+
+        window.addEventListener('mousedown', handleOutsideClick);
+        return () => window.removeEventListener('mousedown', handleOutsideClick);
+    }, []);
 
     return (
         <div className="title-bar" data-tauri-drag-region>
@@ -55,6 +71,38 @@ export default function TitleBar({
                     >
                         <CrystalBallIcon size={16} />
                     </button>
+
+                    <div className="toolbar-menu-wrap" ref={quartzMenuRef}>
+                        <button
+                            className="toolbar-btn"
+                            title="Quartz Actions"
+                            onClick={() => setShowQuartzMenu(prev => !prev)}
+                        >
+                            <QuartzIcon size={16} />
+                        </button>
+                        {showQuartzMenu && (
+                            <div className="toolbar-menu-popup">
+                                <button
+                                    className="toolbar-menu-item"
+                                    onClick={() => {
+                                        setShowQuartzMenu(false);
+                                        onQuartzAction?.('paint');
+                                    }}
+                                >
+                                    Paint In Quartz
+                                </button>
+                                <button
+                                    className="toolbar-menu-item"
+                                    onClick={() => {
+                                        setShowQuartzMenu(false);
+                                        onQuartzAction?.('port');
+                                    }}
+                                >
+                                    Port In Quartz
+                                </button>
+                            </div>
+                        )}
+                    </div>
 
                     <div className="toolbar-separator" />
 

@@ -42,6 +42,11 @@ pub fn run() {
         .setup(|app| {
             let app_handle = app.handle().clone();
 
+            // Write PID file so Quartz can detect us without tasklist.
+            if let Err(e) = app_commands::write_jade_pid_file() {
+                eprintln!("[Setup] Failed to write Jade PID file: {}", e);
+            }
+
             // Migrate preferences from old location if needed
             if let Err(e) = app_commands::migrate_preferences_if_needed(&app_handle) {
                 eprintln!("[Setup] Failed to migrate preferences: {}", e);
@@ -193,9 +198,20 @@ pub fn run() {
             app_commands::resolve_asset_path,
             app_commands::detect_image_editors,
             app_commands::open_tex_for_edit,
+            app_commands::file_exists,
+            app_commands::read_text_file,
+            app_commands::write_text_file,
+            app_commands::consume_interop_handoff,
+            app_commands::send_bin_to_quartz,
+            app_commands::notify_quartz_bin_updated,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, event| {
+            if let tauri::RunEvent::Exit = event {
+                app_commands::remove_jade_pid_file();
+            }
+        });
 }
 
 /// Set up system tray icon with menu
@@ -230,6 +246,7 @@ fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 "quit" => {
+                    app_commands::remove_jade_pid_file();
                     app.exit(0);
                 }
                 _ => {}

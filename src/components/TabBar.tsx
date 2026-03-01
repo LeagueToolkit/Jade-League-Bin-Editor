@@ -9,8 +9,8 @@ export interface EditorTab {
     content: string;
     isModified: boolean;
     isPinned: boolean;
-    /** 'editor' (default) or 'texture-preview' */
-    tabType?: 'editor' | 'texture-preview';
+    /** 'editor' (default), 'texture-preview', or 'quartz-diff' */
+    tabType?: 'editor' | 'texture-preview' | 'quartz-diff';
     /** For texture-preview tabs: decoded PNG data URL */
     textureDataUrl?: string | null;
     /** For texture-preview tabs: pixel dimensions */
@@ -20,6 +20,20 @@ export interface EditorTab {
     textureFormat?: number;
     /** For texture-preview tabs: error string if loading failed */
     textureError?: string | null;
+    /** For quartz-diff tabs: source editor tab id */
+    diffSourceTabId?: string;
+    /** For quartz-diff tabs: source BIN file path */
+    diffSourceFilePath?: string;
+    /** For quartz-diff tabs: unique history/diff entry id */
+    diffEntryId?: string;
+    /** For quartz-diff tabs: Quartz mode label */
+    diffMode?: 'paint' | 'port';
+    /** For quartz-diff tabs: original content before Quartz edits */
+    diffOriginalContent?: string;
+    /** For quartz-diff tabs: modified content after Quartz edits */
+    diffModifiedContent?: string;
+    /** For quartz-diff tabs: entry review status */
+    diffStatus?: 'pending' | 'accepted' | 'rejected';
 }
 
 interface TabBarProps {
@@ -178,5 +192,35 @@ export function createTexPreviewTab(filePath: string): EditorTab {
         textureHeight: 0,
         textureFormat: 0,
         textureError: null,
+    };
+}
+
+interface QuartzDiffTabParams {
+    entryId: string;
+    sourceTabId: string;
+    sourceFilePath: string;
+    fileName: string;
+    mode: 'paint' | 'port';
+    originalContent: string;
+    modifiedContent: string;
+    status?: 'pending' | 'accepted' | 'rejected';
+}
+
+export function createQuartzDiffTab(params: QuartzDiffTabParams): EditorTab {
+    return {
+        id: generateTabId(),
+        filePath: null,
+        fileName: `${params.fileName} (Quartz Diff)`,
+        content: params.modifiedContent,
+        isModified: false,
+        isPinned: false,
+        tabType: 'quartz-diff',
+        diffSourceTabId: params.sourceTabId,
+        diffSourceFilePath: params.sourceFilePath,
+        diffEntryId: params.entryId,
+        diffMode: params.mode,
+        diffOriginalContent: params.originalContent,
+        diffModifiedContent: params.modifiedContent,
+        diffStatus: params.status ?? 'pending',
     };
 }

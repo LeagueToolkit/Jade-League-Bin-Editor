@@ -3,6 +3,28 @@ interface IconProps {
     className?: string;
 }
 
+// Quartz / Crystal placeholder icon
+export function QuartzIcon({ size = 16, className = '' }: IconProps) {
+    return (
+        <svg
+            width={size}
+            height={size}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={className}
+        >
+            <path d="M12 2 4.5 8.5 7 20h10l2.5-11.5L12 2Z" />
+            <path d="M4.5 8.5h15" />
+            <path d="M12 2v18" />
+            <path d="M8 14h8" />
+        </svg>
+    );
+}
+
 // Crystal Ball / Particle Editor Icon
 export function CrystalBallIcon({ size = 16, className = '' }: IconProps) {
     return (

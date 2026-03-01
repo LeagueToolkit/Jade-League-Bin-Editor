@@ -104,6 +104,18 @@
     color: white;
 }
 
+/* General/Particle quick buttons should match Monaco widget background. */
+.menu-icon-btn.active.panel-active {
+    background: var(--vscode-editorWidget-background);
+    color: var(--vscode-editorWidget-foreground);
+    border-color: var(--vscode-widget-border);
+}
+
+.menu-icon-btn.active.panel-active:hover {
+    background: var(--vscode-editorWidget-background);
+    color: var(--vscode-editorWidget-foreground);
+}
+
 .menu-item-with-submenu {
     position: relative;
 }

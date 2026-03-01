@@ -853,3 +853,359 @@ fn open_with_os_default(file_path: &str) -> Result<(), String> {
         Ok(())
     }
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InteropHandoff {
+    pub target_app: String,
+    pub source_app: String,
+    pub action: String,
+    pub mode: Option<String>,
+    pub bin_path: String,
+    pub created_at_unix: u64,
+}
+
+fn get_interop_dir() -> Result<PathBuf, String> {
+    let appdata = env::var("APPDATA").map_err(|e| format!("Failed to get APPDATA: {}", e))?;
+    let dir = PathBuf::from(appdata)
+        .join("LeagueToolkit")
+        .join("Interop");
+
+    if !dir.exists() {
+        fs::create_dir_all(&dir).map_err(|e| format!("Failed to create interop dir: {}", e))?;
+    }
+    Ok(dir)
+}
+
+// ---------------------------------------------------------------------------
+// Message-queue interop: each handoff is written as a separate timestamped
+// file so rapid sends never overwrite each other.
+// ---------------------------------------------------------------------------
+
+const HANDOFF_STALE_SECONDS: u64 = 30;
+
+static INTEROP_MSG_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+fn write_interop_message(handoff: &InteropHandoff) -> Result<(), String> {
+    let dir = get_interop_dir()?;
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let seq = INTEROP_MSG_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let pid = std::process::id();
+    let filename = format!("handoff-{}-{}-{}.json", ts, pid, seq);
+    let path = dir.join(filename);
+
+    let content = serde_json::to_string_pretty(handoff)
+        .map_err(|e| format!("Failed to serialize interop handoff: {}", e))?;
+    fs::write(&path, content)
+        .map_err(|e| format!("Failed to write interop message: {}", e))
+}
+
+/// Read and delete all pending handoff messages targeted at `target_app`.
+/// Messages older than HANDOFF_STALE_SECONDS are silently discarded.
+fn consume_interop_messages(target_app: &str) -> Result<Vec<InteropHandoff>, String> {
+    let dir = get_interop_dir()?;
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut entries: Vec<_> = fs::read_dir(&dir)
+        .map_err(|e| format!("Failed to read interop dir: {}", e))?
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            name.starts_with("handoff-") && name.ends_with(".json")
+        })
+        .collect();
+
+    // Sort by filename (timestamp is embedded) so oldest is processed first.
+    entries.sort_by_key(|e| e.file_name());
+
+    let now_unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let mut results = Vec::new();
+
+    for entry in entries {
+        let path = entry.path();
+        let content = match fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(_) => {
+                let _ = fs::remove_file(&path);
+                continue;
+            }
+        };
+
+        // Always delete the file after reading.
+        let _ = fs::remove_file(&path);
+
+        let handoff: InteropHandoff = match serde_json::from_str(&content) {
+            Ok(h) => h,
+            Err(_) => continue, // Malformed — skip.
+        };
+
+        if handoff.target_app.to_lowercase() != target_app.to_lowercase() {
+            continue;
+        }
+
+        // Staleness guard.
+        if now_unix.saturating_sub(handoff.created_at_unix) > HANDOFF_STALE_SECONDS {
+            continue;
+        }
+
+        results.push(handoff);
+    }
+
+    Ok(results)
+}
+
+// ---------------------------------------------------------------------------
+// PID file helpers — fast process-alive checks without shelling to tasklist.
+// ---------------------------------------------------------------------------
+
+fn get_pid_file_path(app_name: &str) -> Result<PathBuf, String> {
+    Ok(get_interop_dir()?.join(format!("{}.pid", app_name)))
+}
+
+pub fn write_jade_pid_file() -> Result<(), String> {
+    let path = get_pid_file_path("jade")?;
+    fs::write(&path, std::process::id().to_string())
+        .map_err(|e| format!("Failed to write Jade PID file: {}", e))
+}
+
+pub fn remove_jade_pid_file() {
+    if let Ok(path) = get_pid_file_path("jade") {
+        let _ = fs::remove_file(path);
+    }
+}
+
+#[cfg(windows)]
+fn is_process_alive(pid: u32) -> bool {
+    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+    const STILL_ACTIVE: u32 = 259;
+
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            return false;
+        }
+        let mut exit_code: u32 = 0;
+        let ok = GetExitCodeProcess(handle, &mut exit_code);
+        CloseHandle(handle);
+        ok != 0 && exit_code == STILL_ACTIVE
+    }
+}
+
+#[cfg(windows)]
+extern "system" {
+    fn OpenProcess(dwDesiredAccess: u32, bInheritHandle: i32, dwProcessId: u32) -> *mut std::ffi::c_void;
+    fn GetExitCodeProcess(hProcess: *mut std::ffi::c_void, lpExitCode: *mut u32) -> i32;
+    fn CloseHandle(hObject: *mut std::ffi::c_void) -> i32;
+}
+
+fn is_quartz_running() -> bool {
+    let pid_path = match get_pid_file_path("quartz") {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+
+    let pid_str = match fs::read_to_string(&pid_path) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+
+    let pid: u32 = match pid_str.trim().parse() {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+
+    #[cfg(windows)]
+    { is_process_alive(pid) }
+
+    #[cfg(not(windows))]
+    { false }
+}
+
+
+#[tauri::command]
+pub async fn file_exists(path: String) -> Result<bool, String> {
+    Ok(Path::new(&path).exists())
+}
+
+#[tauri::command]
+pub async fn read_text_file(path: String) -> Result<String, String> {
+    fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read text file '{}': {}", path, e))
+}
+
+#[tauri::command]
+pub async fn write_text_file(path: String, content: String) -> Result<(), String> {
+    fs::write(&path, content)
+        .map_err(|e| format!("Failed to write text file '{}': {}", path, e))
+}
+
+#[tauri::command]
+pub async fn consume_interop_handoff(_app: tauri::AppHandle) -> Result<Option<InteropHandoff>, String> {
+    let messages = consume_interop_messages("jade")?;
+    // Return the most recent message (last in sorted order).
+    Ok(messages.into_iter().last())
+}
+
+/// Guard against rapid duplicate spawns.  Stores the last time we spawned
+/// Quartz so we don't launch it again within a short window.
+static LAST_QUARTZ_SPAWN: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+const SPAWN_DEBOUNCE_SECS: u64 = 3;
+
+#[tauri::command]
+pub async fn send_bin_to_quartz(app: tauri::AppHandle, bin_path: String, mode: String) -> Result<(), String> {
+    if !Path::new(&bin_path).exists() {
+        return Err(format!("Bin path does not exist: {}", bin_path));
+    }
+
+    let created_at_unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    write_interop_message(&InteropHandoff {
+        target_app: "quartz".to_string(),
+        source_app: "jade".to_string(),
+        action: "open-bin".to_string(),
+        mode: Some(mode),
+        bin_path: bin_path.clone(),
+        created_at_unix,
+    })?;
+
+    // If Quartz is already running (via PID file), no need to launch.
+    if is_quartz_running() {
+        return Ok(());
+    }
+
+    // Debounce: don't spawn again if we just did recently — the previous
+    // spawn may not have written its PID file yet.
+    {
+        let mut last = LAST_QUARTZ_SPAWN.lock().unwrap();
+        if let Some(ts) = *last {
+            if ts.elapsed().as_secs() < SPAWN_DEBOUNCE_SECS {
+                return Ok(());
+            }
+        }
+        *last = Some(std::time::Instant::now());
+    }
+
+    let pref_path = get_preference(
+        app.clone(),
+        "QuartzExecutablePath".to_string(),
+        "".to_string(),
+    )
+    .await
+    .unwrap_or_default();
+
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if !pref_path.trim().is_empty() {
+        candidates.push(PathBuf::from(pref_path.trim()));
+    }
+
+    if let Ok(local_app_data) = env::var("LOCALAPPDATA") {
+        candidates.push(
+            PathBuf::from(&local_app_data)
+                .join("Programs")
+                .join("Quartz")
+                .join("Quartz.exe"),
+        );
+    }
+
+    if let Ok(user_profile) = env::var("USERPROFILE") {
+        let desktop = PathBuf::from(&user_profile).join("Desktop");
+        candidates.push(
+            desktop
+                .join("Quartz")
+                .join("Quartz")
+                .join("dist")
+                .join("win-unpacked")
+                .join("Quartz.exe"),
+        );
+        candidates.push(desktop.join("Quartz").join("Quartz").join("Quartz.exe"));
+        candidates.push(desktop.join("Quartz.lnk"));
+    }
+
+    let executable = candidates
+        .into_iter()
+        .find(|p| p.exists())
+        .ok_or_else(|| {
+            "Could not find Quartz executable. Set preference QuartzExecutablePath in preferences.json.".to_string()
+        })?;
+
+    let exe_str = executable.to_string_lossy().to_string();
+    if exe_str.to_lowercase().ends_with(".lnk") {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", &exe_str])
+            .spawn()
+            .map_err(|e| format!("Failed to launch Quartz shortcut '{}': {}", exe_str, e))?;
+    } else {
+        spawn_detached(&exe_str)?;
+    }
+
+    Ok(())
+}
+
+/// Spawn a process fully detached from Jade (own process group, null stdio)
+/// so it survives Jade shutting down cleanly.
+#[cfg(windows)]
+fn spawn_detached(exe: &str) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+
+    std::process::Command::new(exe)
+        .creation_flags(CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| format!("Failed to launch '{}': {}", exe, e))?;
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn spawn_detached(exe: &str) -> Result<(), String> {
+    std::process::Command::new(exe)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| format!("Failed to launch '{}': {}", exe, e))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn notify_quartz_bin_updated(bin_path: String, mode: String) -> Result<(), String> {
+    if !Path::new(&bin_path).exists() {
+        return Err(format!("Bin path does not exist: {}", bin_path));
+    }
+
+    let created_at_unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let normalized_mode = if mode.to_lowercase() == "port" {
+        "port".to_string()
+    } else {
+        "paint".to_string()
+    };
+
+    write_interop_message(&InteropHandoff {
+        target_app: "quartz".to_string(),
+        source_app: "jade".to_string(),
+        action: "reload-bin".to_string(),
+        mode: Some(normalized_mode),
+        bin_path,
+        created_at_unix,
+    })?;
+
+    Ok(())
+}

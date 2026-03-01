@@ -9,6 +9,9 @@
   align-items: center;
   user-select: none;
   -webkit-app-region: drag;
+  position: relative;
+  z-index: 1200;
+  overflow: visible;
 }
 
 .title-bar-content {
@@ -53,6 +56,45 @@
   padding: 0 10px 0 0;
   height: 100%;
   -webkit-app-region: no-drag;
+}
+
+.toolbar-menu-wrap {
+  position: relative;
+}
+
+.toolbar-menu-popup {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 170px;
+  background: var(--tab-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  z-index: 200;
+  overflow: hidden;
+}
+
+.toolbar-menu-item {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-color);
+  text-align: left;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.toolbar-menu-item:last-child {
+  border-bottom: 0;
+}
+
+.toolbar-menu-item:hover {
+  background: var(--selected-tab-bg);
 }
 
 .toolbar-btn {
