@@ -40,7 +40,7 @@
     "windows": {
       "allowDowngrades": true,
       "nsis": {
-        "installMode": "both"
+        "installMode": "currentUser"
       }
     }
   }

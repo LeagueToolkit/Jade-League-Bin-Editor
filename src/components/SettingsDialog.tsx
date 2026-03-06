@@ -198,7 +198,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose }) => {
 
     const handleInstall = async () => {
         setUpdateState('installing');
-        try { await invoke('run_installer', { silent: false }); }
+        try { await invoke('run_installer', { silent: silentUpdate }); }
         catch (e) { setUpdateError(String(e)); setUpdateState('ready'); }
     };
 
