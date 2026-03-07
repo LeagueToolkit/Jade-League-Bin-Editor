@@ -51,6 +51,10 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
     const [customBackgroundImage, setCustomBackgroundImage] = useState('');
     const [customBackgroundName, setCustomBackgroundName] = useState('');
     const [customBackgroundBlur, setCustomBackgroundBlur] = useState(8);
+    const [customBackgroundBrightness, setCustomBackgroundBrightness] = useState(100);
+    const [customBackgroundSaturation, setCustomBackgroundSaturation] = useState(100);
+    const [customBackgroundOpacity, setCustomBackgroundOpacity] = useState(100);
+    const [customBackgroundVignette, setCustomBackgroundVignette] = useState(0);
     const backgroundInputRef = useRef<HTMLInputElement | null>(null);
 
     const [customTheme, setCustomTheme] = useState<CustomTheme>({
@@ -104,6 +108,11 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
         setCustomBackgroundImage('');
         setCustomBackgroundName('');
         setUseCustomBackground(false);
+        setCustomBackgroundBlur(8);
+        setCustomBackgroundBrightness(100);
+        setCustomBackgroundSaturation(100);
+        setCustomBackgroundOpacity(100);
+        setCustomBackgroundVignette(0);
     };
 
     const loadPreferences = async () => {
@@ -119,6 +128,10 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
             const backgroundImage = await invoke<string>('get_preference', { key: 'CustomBackgroundImage', defaultValue: '' });
             const backgroundName = await invoke<string>('get_preference', { key: 'CustomBackgroundImageName', defaultValue: '' });
             const backgroundBlurRaw = await invoke<string>('get_preference', { key: 'CustomBackgroundBlur', defaultValue: '8' });
+            const backgroundBrightnessRaw = await invoke<string>('get_preference', { key: 'CustomBackgroundBrightness', defaultValue: '100' });
+            const backgroundSaturationRaw = await invoke<string>('get_preference', { key: 'CustomBackgroundSaturation', defaultValue: '100' });
+            const backgroundOpacityRaw = await invoke<string>('get_preference', { key: 'CustomBackgroundOpacity', defaultValue: '100' });
+            const backgroundVignetteRaw = await invoke<string>('get_preference', { key: 'CustomBackgroundVignette', defaultValue: '0' });
 
             setSelectedTheme(theme);
             setSelectedSyntaxTheme(syntaxTheme);
@@ -134,6 +147,22 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
                 const parsedBlur = Number.parseInt(backgroundBlurRaw, 10);
                 const blur = Number.isFinite(parsedBlur) ? clampBlur(parsedBlur) : 8;
                 setCustomBackgroundBlur(blur);
+            }
+            {
+                const v = Number.parseInt(backgroundBrightnessRaw, 10);
+                setCustomBackgroundBrightness(Number.isFinite(v) ? Math.min(100, Math.max(0, v)) : 100);
+            }
+            {
+                const v = Number.parseInt(backgroundSaturationRaw, 10);
+                setCustomBackgroundSaturation(Number.isFinite(v) ? Math.min(100, Math.max(0, v)) : 100);
+            }
+            {
+                const v = Number.parseInt(backgroundOpacityRaw, 10);
+                setCustomBackgroundOpacity(Number.isFinite(v) ? Math.min(100, Math.max(0, v)) : 100);
+            }
+            {
+                const v = Number.parseInt(backgroundVignetteRaw, 10);
+                setCustomBackgroundVignette(Number.isFinite(v) ? Math.min(100, Math.max(0, v)) : 0);
             }
 
             if (useCustom === 'true') {
@@ -180,13 +209,21 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
             await invoke('set_preference', { key: 'CustomBackgroundImage', value: customBackgroundImage });
             await invoke('set_preference', { key: 'CustomBackgroundImageName', value: customBackgroundName });
             await invoke('set_preference', { key: 'CustomBackgroundBlur', value: String(customBackgroundBlur) });
+            await invoke('set_preference', { key: 'CustomBackgroundBrightness', value: String(customBackgroundBrightness) });
+            await invoke('set_preference', { key: 'CustomBackgroundSaturation', value: String(customBackgroundSaturation) });
+            await invoke('set_preference', { key: 'CustomBackgroundOpacity', value: String(customBackgroundOpacity) });
+            await invoke('set_preference', { key: 'CustomBackgroundVignette', value: String(customBackgroundVignette) });
 
             applyRoundedCorners(roundedCorners);
             applyModernUI(modernUI);
             applyCustomBackground({
                 enabled: useCustomBackground && customBackgroundImage.length > 0,
                 imageDataUrl: customBackgroundImage,
-                blur: customBackgroundBlur
+                blur: customBackgroundBlur,
+                brightness: customBackgroundBrightness / 100,
+                saturation: customBackgroundSaturation / 100,
+                opacity: customBackgroundOpacity / 100,
+                vignette: customBackgroundVignette / 100,
             });
             window.dispatchEvent(new CustomEvent('cigarette-mode-changed', { detail: cigaretteMode }));
 
@@ -359,22 +396,16 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
             </p>
 
             <div className="themes-options background-options">
-                <label className="checkbox-label">
-                    <input
-                        type="checkbox"
-                        checked={useCustomBackground}
-                        onChange={e => setUseCustomBackground(e.target.checked)}
-                        disabled={!customBackgroundImage}
-                    />
-                    <span>
-                        <strong>Enable custom image background</strong>
-                        <span style={{ display: 'block', fontSize: 11, opacity: 0.55, fontWeight: 400 }}>
-                            Disable this to restore normal theme-colored bars.
-                        </span>
-                    </span>
-                </label>
-
-                <div className="background-file-row">
+                <div className="background-header-row">
+                    <label className="checkbox-label">
+                        <input
+                            type="checkbox"
+                            checked={useCustomBackground}
+                            onChange={e => setUseCustomBackground(e.target.checked)}
+                            disabled={!customBackgroundImage}
+                        />
+                        <strong>Enable</strong>
+                    </label>
                     <input
                         ref={backgroundInputRef}
                         type="file"
@@ -400,23 +431,101 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
                     </span>
                 </div>
 
-                <div className="background-slider-row">
-                    <label htmlFor="background-blur-slider">
-                        Blur strength: <strong>{customBackgroundBlur}px</strong>
-                    </label>
-                    <input
-                        id="background-blur-slider"
-                        type="range"
-                        min={0}
-                        max={40}
-                        step={1}
-                        value={customBackgroundBlur}
-                        onChange={e => {
-                            const parsed = Number.parseInt(e.target.value, 10);
-                            setCustomBackgroundBlur(clampBlur(Number.isFinite(parsed) ? parsed : 0));
-                        }}
-                        disabled={!customBackgroundImage}
-                    />
+                <div className="background-sliders-grid">
+                    <div className="background-slider-row">
+                        <label htmlFor="background-blur-slider">
+                            Blur <strong>{customBackgroundBlur}px</strong>
+                        </label>
+                        <input
+                            id="background-blur-slider"
+                            type="range"
+                            min={0}
+                            max={40}
+                            step={1}
+                            value={customBackgroundBlur}
+                            onChange={e => {
+                                const parsed = Number.parseInt(e.target.value, 10);
+                                setCustomBackgroundBlur(clampBlur(Number.isFinite(parsed) ? parsed : 0));
+                            }}
+                            disabled={!customBackgroundImage}
+                        />
+                    </div>
+
+                    <div className="background-slider-row">
+                        <label htmlFor="background-brightness-slider">
+                            Brightness <strong>{customBackgroundBrightness}%</strong>
+                        </label>
+                        <input
+                            id="background-brightness-slider"
+                            type="range"
+                            min={0}
+                            max={100}
+                            step={1}
+                            value={customBackgroundBrightness}
+                            onChange={e => {
+                                const v = Number.parseInt(e.target.value, 10);
+                                setCustomBackgroundBrightness(Number.isFinite(v) ? v : 100);
+                            }}
+                            disabled={!customBackgroundImage}
+                        />
+                    </div>
+
+                    <div className="background-slider-row">
+                        <label htmlFor="background-saturation-slider">
+                            Saturation <strong>{customBackgroundSaturation}%</strong>
+                        </label>
+                        <input
+                            id="background-saturation-slider"
+                            type="range"
+                            min={0}
+                            max={100}
+                            step={1}
+                            value={customBackgroundSaturation}
+                            onChange={e => {
+                                const v = Number.parseInt(e.target.value, 10);
+                                setCustomBackgroundSaturation(Number.isFinite(v) ? v : 100);
+                            }}
+                            disabled={!customBackgroundImage}
+                        />
+                    </div>
+
+                    <div className="background-slider-row">
+                        <label htmlFor="background-opacity-slider">
+                            Opacity <strong>{customBackgroundOpacity}%</strong>
+                        </label>
+                        <input
+                            id="background-opacity-slider"
+                            type="range"
+                            min={0}
+                            max={100}
+                            step={1}
+                            value={customBackgroundOpacity}
+                            onChange={e => {
+                                const v = Number.parseInt(e.target.value, 10);
+                                setCustomBackgroundOpacity(Number.isFinite(v) ? v : 100);
+                            }}
+                            disabled={!customBackgroundImage}
+                        />
+                    </div>
+
+                    <div className="background-slider-row">
+                        <label htmlFor="background-vignette-slider">
+                            Vignette <strong>{customBackgroundVignette}%</strong>
+                        </label>
+                        <input
+                            id="background-vignette-slider"
+                            type="range"
+                            min={0}
+                            max={100}
+                            step={1}
+                            value={customBackgroundVignette}
+                            onChange={e => {
+                                const v = Number.parseInt(e.target.value, 10);
+                                setCustomBackgroundVignette(Number.isFinite(v) ? v : 0);
+                            }}
+                            disabled={!customBackgroundImage}
+                        />
+                    </div>
                 </div>
 
                 <div className="background-preview">
@@ -431,9 +540,18 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
                                 className="background-preview-image"
                                 style={{
                                     backgroundImage: `url(${customBackgroundImage})`,
-                                    filter: `blur(${customBackgroundBlur}px)`,
+                                    filter: `blur(${customBackgroundBlur}px) brightness(${customBackgroundBrightness / 100}) saturate(${customBackgroundSaturation / 100})`,
+                                    opacity: customBackgroundOpacity / 100,
                                 }}
                             />
+                            {customBackgroundVignette > 0 && (
+                                <div
+                                    className="background-preview-vignette"
+                                    style={{
+                                        background: `radial-gradient(ellipse at center, transparent 40%, rgba(0, 0, 0, ${customBackgroundVignette / 100}))`,
+                                    }}
+                                />
+                            )}
                         </>
                     ) : (
                         <div className="background-preview-empty">Image preview</div>

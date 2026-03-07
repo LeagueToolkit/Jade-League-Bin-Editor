@@ -18,6 +18,10 @@ interface CustomBackgroundOptions {
     enabled: boolean;
     imageDataUrl?: string | null;
     blur?: number;
+    brightness?: number;
+    saturation?: number;
+    opacity?: number;
+    vignette?: number;
 }
 
 /**
@@ -224,6 +228,10 @@ export function applyCustomBackground(options: CustomBackgroundOptions) {
         root.style.removeProperty('--custom-bg-image');
         root.style.removeProperty('--custom-bg-blur');
         root.style.removeProperty('--custom-bg-scale');
+        root.style.removeProperty('--custom-bg-brightness');
+        root.style.removeProperty('--custom-bg-saturation');
+        root.style.removeProperty('--custom-bg-opacity');
+        root.style.removeProperty('--custom-bg-vignette');
         return;
     }
 
@@ -232,10 +240,19 @@ export function applyCustomBackground(options: CustomBackgroundOptions) {
     const scale = (1 + (blur / 100)).toFixed(2);
     const escapedUrl = imageDataUrl.replace(/"/g, '\\"');
 
+    const brightness = Math.min(1, Math.max(0, options.brightness ?? 1));
+    const saturation = Math.min(1, Math.max(0, options.saturation ?? 1));
+    const opacity = Math.min(1, Math.max(0, options.opacity ?? 1));
+    const vignette = Math.min(1, Math.max(0, options.vignette ?? 0));
+
     root.setAttribute('data-custom-background', 'true');
     root.style.setProperty('--custom-bg-image', `url("${escapedUrl}")`);
     root.style.setProperty('--custom-bg-blur', `${blur}px`);
     root.style.setProperty('--custom-bg-scale', scale);
+    root.style.setProperty('--custom-bg-brightness', brightness.toFixed(2));
+    root.style.setProperty('--custom-bg-saturation', saturation.toFixed(2));
+    root.style.setProperty('--custom-bg-opacity', opacity.toFixed(2));
+    root.style.setProperty('--custom-bg-vignette', vignette.toFixed(2));
 }
 
 /**
@@ -373,6 +390,10 @@ export async function loadSavedTheme(
         const useCustomBackground = await invoke('get_preference', { key: 'UseCustomBackgroundImage', defaultValue: 'false' }) as string;
         const customBackgroundImage = await invoke('get_preference', { key: 'CustomBackgroundImage', defaultValue: '' }) as string;
         const customBackgroundBlurRaw = await invoke('get_preference', { key: 'CustomBackgroundBlur', defaultValue: '8' }) as string;
+        const customBackgroundBrightnessRaw = await invoke('get_preference', { key: 'CustomBackgroundBrightness', defaultValue: '100' }) as string;
+        const customBackgroundSaturationRaw = await invoke('get_preference', { key: 'CustomBackgroundSaturation', defaultValue: '100' }) as string;
+        const customBackgroundOpacityRaw = await invoke('get_preference', { key: 'CustomBackgroundOpacity', defaultValue: '100' }) as string;
+        const customBackgroundVignetteRaw = await invoke('get_preference', { key: 'CustomBackgroundVignette', defaultValue: '0' }) as string;
 
         // Apply rounded corners (default to true/ON)
         applyRoundedCorners(roundedCorners === 'true');
@@ -407,15 +428,23 @@ export async function loadSavedTheme(
             applyTheme(theme);
         }
 
-        // Apply user background image + blur settings.
+        // Apply user background image + effect settings.
         const parsedBlur = Number.parseInt(customBackgroundBlurRaw, 10);
         const customBackgroundBlur = Number.isFinite(parsedBlur)
             ? Math.min(40, Math.max(0, parsedBlur))
             : 8;
+        const parsePercent = (raw: string, fallback: number) => {
+            const v = Number.parseInt(raw, 10);
+            return Number.isFinite(v) ? Math.min(100, Math.max(0, v)) / 100 : fallback;
+        };
         applyCustomBackground({
             enabled: useCustomBackground === 'true',
             imageDataUrl: customBackgroundImage,
-            blur: customBackgroundBlur
+            blur: customBackgroundBlur,
+            brightness: parsePercent(customBackgroundBrightnessRaw, 1),
+            saturation: parsePercent(customBackgroundSaturationRaw, 1),
+            opacity: parsePercent(customBackgroundOpacityRaw, 1),
+            vignette: parsePercent(customBackgroundVignetteRaw, 0),
         });
 
         // Apply Monaco theme if instance is available
