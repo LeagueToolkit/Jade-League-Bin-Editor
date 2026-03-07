@@ -341,59 +341,54 @@ pub async fn run_installer(silent: bool, app: tauri::AppHandle) -> Result<(), St
 
     let exe_path = install_dir.join("jade-rust.exe");
 
-    if silent {
-        // Silent: write a bat that closes Jade, runs installer silently, relaunches
-        let bat_content = format!(
-            "@echo off\r\n\
-             :wait\r\n\
-             tasklist /FI \"IMAGENAME eq jade-rust.exe\" 2>NUL | find /I \"jade-rust.exe\" >NUL\r\n\
-             if not errorlevel 1 (\r\n\
-                 timeout /t 1 /nobreak >nul\r\n\
-                 goto wait\r\n\
-             )\r\n\
-             \"{}\" /S /D={}\r\n\
-             start \"\" \"{}\"\r\n\
-             del \"%~f0\"\r\n",
-            path.display(),
-            install_dir.display(),
-            exe_path.display(),
-        );
-        let bat_path = std::env::temp_dir().join("jade_update.bat");
-        std::fs::write(&bat_path, &bat_content)
-            .map_err(|e| format!("Failed to write update script: {}", e))?;
+    let bat_path = std::env::temp_dir().join("jade_update.bat");
+    let log_path = std::env::temp_dir().join("jade_update.log");
 
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", "/min", &bat_path.to_string_lossy()])
-            .spawn()
-            .map_err(|e| format!("Failed to launch update script: {}", e))?;
-
-        app.exit(0);
+    let installer_cmd = if silent {
+        format!("\"{}\" /S /D={}", path.display(), install_dir.display())
     } else {
-        // Non-silent: write a bat that closes Jade, runs installer normally (upgrade in place)
-        let bat_content = format!(
-            "@echo off\r\n\
-             :wait\r\n\
-             tasklist /FI \"IMAGENAME eq jade-rust.exe\" 2>NUL | find /I \"jade-rust.exe\" >NUL\r\n\
-             if not errorlevel 1 (\r\n\
-                 timeout /t 1 /nobreak >nul\r\n\
-                 goto wait\r\n\
-             )\r\n\
-             \"{}\" /D={}\r\n\
-             del \"%~f0\"\r\n",
-            path.display(),
-            install_dir.display(),
-        );
-        let bat_path = std::env::temp_dir().join("jade_update.bat");
-        std::fs::write(&bat_path, &bat_content)
-            .map_err(|e| format!("Failed to write update script: {}", e))?;
+        format!("\"{}\" /D={}", path.display(), install_dir.display())
+    };
 
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", "/min", &bat_path.to_string_lossy()])
-            .spawn()
-            .map_err(|e| format!("Failed to launch update script: {}", e))?;
+    let relaunch_line = if silent {
+        format!("start \"\" \"{}\"\r\n", exe_path.display())
+    } else {
+        String::new()
+    };
 
-        app.exit(0);
-    }
+    let bat_content = format!(
+"@echo off\r
+echo [%date% %time%] Update script started > \"{log}\"\r
+:wait\r
+tasklist /FI \"IMAGENAME eq jade-rust.exe\" 2>NUL | find /I \"jade-rust.exe\" >NUL\r
+if not errorlevel 1 (\r
+    echo [%date% %time%] Waiting for Jade to exit... >> \"{log}\"\r
+    timeout /t 1 /nobreak >nul\r
+    goto wait\r
+)\r
+echo [%date% %time%] Jade exited, running installer >> \"{log}\"\r
+{cmd}\r
+echo [%date% %time%] Installer finished with errorlevel %errorlevel% >> \"{log}\"\r
+{relaunch}del \"%~f0\"\r
+",
+        log = log_path.display(),
+        cmd = installer_cmd,
+        relaunch = relaunch_line,
+    );
+
+    std::fs::write(&bat_path, &bat_content)
+        .map_err(|e| format!("Failed to write update script: {}", e))?;
+
+    // Use /C with cmd directly — no start, so the script runs in its own process
+    std::process::Command::new("cmd")
+        .args(["/C", &bat_path.to_string_lossy()])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| format!("Failed to launch update script: {}", e))?;
+
+    app.exit(0);
 
     Ok(())
 }
