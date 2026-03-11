@@ -7,6 +7,7 @@ import type * as MonacoType from 'monaco-editor';
 import { registerRitobinLanguage, registerRitobinTheme, RITOBIN_LANGUAGE_ID, RITOBIN_THEME_ID } from "./lib/ritobinLanguage";
 import { openBinFile, saveBinFile, saveBinFileAs, readBinDirect, writeBinDirect } from "./lib/binOperations";
 import { loadSavedTheme } from "./lib/themeApplicator";
+import { checkBrackets } from "./lib/syntaxChecker";
 import { texBufferToDataURL } from "./lib/texFormat";
 import TitleBar from "./components/TitleBar";
 import MenuBar from "./components/MenuBar";
@@ -151,6 +152,9 @@ function App() {
   const emitterDecorationIds = useRef<string[]>([]);
   const emitterDecorDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const emitterHintsEnabled = useRef(true);
+  const syntaxCheckingEnabled = useRef(true);
+  const syntaxCheckDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const syntaxDecorationIds = useRef<string[]>([]);
   const mutationObserverRef = useRef<MutationObserver | null>(null);
   const mutationSetupTimeoutRef = useRef<number | null>(null);
   const undoCheckIntervalRef = useRef<number | null>(null);
@@ -216,6 +220,9 @@ function App() {
       .catch(() => setQuartzInteropEnabled(true));
     invoke<string>('get_preference', { key: 'EmitterNameHints', defaultValue: 'True' })
       .then(val => { emitterHintsEnabled.current = val !== 'False'; })
+      .catch(() => {});
+    invoke<string>('get_preference', { key: 'SyntaxChecking', defaultValue: 'True' })
+      .then(val => { syntaxCheckingEnabled.current = val !== 'False'; })
       .catch(() => {});
 
     const handleCigaretteModeChanged = (e: Event) => {
@@ -1453,6 +1460,8 @@ function App() {
 
     // Update emitter name decorations for this model
     updateEmitterNameDecorations(editor);
+    // Run syntax checker for this model
+    updateSyntaxMarkers(editor);
   }, [activeTabId]); // Only re-run when active tab changes
 
   const handleThemeApplied = () => {
@@ -1793,6 +1802,58 @@ function App() {
     emitterDecorationIds.current = model.deltaDecorations(emitterDecorationIds.current, decorations);
   }, []);
 
+  // Run the custom bracket syntax checker and set Monaco markers + line decorations
+  const updateSyntaxMarkers = useCallback((editor: MonacoType.editor.IStandaloneCodeEditor) => {
+    const monaco = monacoRef.current;
+    const model = editor.getModel();
+    if (!monaco || !model || model.isDisposed()) return;
+
+    if (!syntaxCheckingEnabled.current) {
+      monaco.editor.setModelMarkers(model, 'syntax-checker', []);
+      syntaxDecorationIds.current = model.deltaDecorations(syntaxDecorationIds.current, []);
+      return;
+    }
+
+    const text = model.getValue();
+    const errors = checkBrackets(text);
+
+    // Markers give the squiggly underline + problems list
+    const markers: MonacoType.editor.IMarkerData[] = errors.map(err => ({
+      severity: monaco.MarkerSeverity.Error,
+      message: err.message,
+      startLineNumber: err.line,
+      startColumn: err.column,
+      endLineNumber: err.line,
+      endColumn: err.column + 1,
+    }));
+    monaco.editor.setModelMarkers(model, 'syntax-checker', markers);
+
+    // Decorations give the red line highlight + red minimap dot
+    const seenLines = new Set<number>();
+    const decorations: MonacoType.editor.IModelDeltaDecoration[] = [];
+    for (const err of errors) {
+      if (seenLines.has(err.line)) continue;
+      seenLines.add(err.line);
+      decorations.push({
+        range: new monaco.Range(err.line, 1, err.line, 1),
+        options: {
+          isWholeLine: true,
+          className: 'syntax-error-line',
+          glyphMarginClassName: 'syntax-error-glyph',
+          minimap: {
+            color: '#ff3333',
+            position: monaco.editor.MinimapPosition.Inline,
+          },
+          overviewRuler: {
+            color: '#ff3333',
+            position: monaco.editor.OverviewRulerLane.Full,
+          },
+        },
+      });
+    }
+    syntaxDecorationIds.current = model.deltaDecorations(syntaxDecorationIds.current, decorations);
+  }, []);
+
   const handleEditorMount = (editor: MonacoType.editor.IStandaloneCodeEditor) => {
     // Clean up any previous subscriptions before creating new ones
     editorDisposablesRef.current.forEach(disposable => {
@@ -1959,6 +2020,7 @@ function App() {
           }
           setLineCount(model.getLineCount());
           updateEmitterNameDecorations(editor);
+          updateSyntaxMarkers(editor);
         }
       }, 0);
     }
@@ -2081,6 +2143,11 @@ function App() {
       if (emitterDecorDebounce.current) clearTimeout(emitterDecorDebounce.current);
       emitterDecorDebounce.current = setTimeout(() => {
         if (editorRef.current) updateEmitterNameDecorations(editorRef.current);
+      }, 500);
+      // Debounced syntax checking
+      if (syntaxCheckDebounce.current) clearTimeout(syntaxCheckDebounce.current);
+      syntaxCheckDebounce.current = setTimeout(() => {
+        if (editorRef.current) updateSyntaxMarkers(editorRef.current);
       }, 500);
     }
   };
@@ -3088,6 +3155,7 @@ function App() {
           onChange={handleEditorChange}
           options={{
             minimap: { enabled: true },
+            glyphMargin: true,
             fontSize: 14,
             scrollBeyondLastLine: false,
             automaticLayout: true,
@@ -3200,6 +3268,10 @@ function App() {
         onEmitterHintsChange={(enabled) => {
           emitterHintsEnabled.current = enabled;
           if (editorRef.current) updateEmitterNameDecorations(editorRef.current);
+        }}
+        onSyntaxCheckingChange={(enabled) => {
+          syntaxCheckingEnabled.current = enabled;
+          if (editorRef.current) updateSyntaxMarkers(editorRef.current);
         }}
       />
 

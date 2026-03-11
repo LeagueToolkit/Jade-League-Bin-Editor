@@ -6,6 +6,7 @@ interface PreferencesDialogProps {
     isOpen: boolean;
     onClose: () => void;
     onEmitterHintsChange?: (enabled: boolean) => void;
+    onSyntaxCheckingChange?: (enabled: boolean) => void;
 }
 
 interface ImageEditorStatus {
@@ -14,11 +15,12 @@ interface ImageEditorStatus {
     gimp: boolean;
 }
 
-const PreferencesDialog: React.FC<PreferencesDialogProps> = ({ isOpen, onClose, onEmitterHintsChange }) => {
+const PreferencesDialog: React.FC<PreferencesDialogProps> = ({ isOpen, onClose, onEmitterHintsChange, onSyntaxCheckingChange }) => {
     const [importLinkedBins, setImportLinkedBins] = useState(false);
     const [recursiveLinkedBins, setRecursiveLinkedBins] = useState(false);
     const [useQuartzPyWorkflow, setUseQuartzPyWorkflow] = useState(false);
     const [emitterNameHints, setEmitterNameHints] = useState(true);
+    const [syntaxChecking, setSyntaxChecking] = useState(true);
     const [texEditorApp, setTexEditorApp] = useState<string>('default');
     const [imageEditors, setImageEditors] = useState<ImageEditorStatus>({
         paintnet: false,
@@ -64,6 +66,12 @@ const PreferencesDialog: React.FC<PreferencesDialogProps> = ({ isOpen, onClose, 
             });
             setEmitterNameHints(emitterHints !== 'False');
 
+            const syntaxCheck = await invoke<string>('get_preference', {
+                key: 'SyntaxChecking',
+                defaultValue: 'True',
+            });
+            setSyntaxChecking(syntaxCheck !== 'False');
+
             const editors = await invoke<ImageEditorStatus>('detect_image_editors');
             setImageEditors(editors);
         } catch (e) {
@@ -107,6 +115,12 @@ const PreferencesDialog: React.FC<PreferencesDialogProps> = ({ isOpen, onClose, 
         setEmitterNameHints(checked);
         savePreference('EmitterNameHints', checked ? 'True' : 'False');
         onEmitterHintsChange?.(checked);
+    };
+
+    const handleSyntaxCheckingChange = (checked: boolean) => {
+        setSyntaxChecking(checked);
+        savePreference('SyntaxChecking', checked ? 'True' : 'False');
+        onSyntaxCheckingChange?.(checked);
     };
 
     if (!isOpen) return null;
@@ -180,6 +194,20 @@ const PreferencesDialog: React.FC<PreferencesDialogProps> = ({ isOpen, onClose, 
                         </label>
                         <p className="preference-description">
                             Displays emitter names inline next to collapsed VfxEmitterDefinitionData blocks in the editor.
+                        </p>
+                    </div>
+
+                    <div className="preference-group">
+                        <label className="preference-checkbox">
+                            <input
+                                type="checkbox"
+                                checked={syntaxChecking}
+                                onChange={(e) => handleSyntaxCheckingChange(e.target.checked)}
+                            />
+                            <span className="checkbox-label">Live Syntax Checking</span>
+                        </label>
+                        <p className="preference-description">
+                            Highlights lines with syntax errors (such as mismatched or unclosed brackets) in the editor in real time.
                         </p>
                     </div>
 

@@ -140,6 +140,19 @@ body {
   background: var(--editor-bg);
 }
 
+/* Syntax checker — error line highlight & glyph dot */
+.syntax-error-line {
+  background: rgba(255, 0, 0, 0.10) !important;
+}
+.syntax-error-glyph {
+  background: #ff3333;
+  border-radius: 50%;
+  width: 8px !important;
+  height: 8px !important;
+  margin-left: 4px;
+  margin-top: 6px;
+}
+
 /* Monaco fixed overflow widgets */
 .monaco-editor .overflowingContentWidgets,
 .monaco-editor-hover,
