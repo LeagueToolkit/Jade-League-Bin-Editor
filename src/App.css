@@ -153,6 +153,26 @@ body {
   margin-top: 6px;
 }
 
+/* Syntax checker — quick fix / code action menu styling */
+.monaco-editor .action-widget {
+  background-color: var(--editor-bg, #1e1e1e) !important;
+  border: 1px solid var(--selected-tab-bg, #3e3e42) !important;
+  color: var(--text-color, #d4d4d4) !important;
+  min-width: 300px !important;
+}
+.monaco-editor .action-widget .action-widget-action-bar .action {
+  color: var(--text-color, #d4d4d4) !important;
+}
+.monaco-editor .action-widget .action-widget-action-bar .action:hover,
+.monaco-editor .action-widget .action-widget-action-bar .action.focused {
+  background-color: var(--selected-tab-bg, #3e3e42) !important;
+}
+.monaco-editor .action-widget .action-widget-action-bar .action .title {
+  overflow: visible !important;
+  text-overflow: unset !important;
+  white-space: nowrap !important;
+}
+
 /* Monaco fixed overflow widgets */
 .monaco-editor .overflowingContentWidgets,
 .monaco-editor-hover,

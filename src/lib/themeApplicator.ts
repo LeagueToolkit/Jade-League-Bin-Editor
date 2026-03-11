@@ -273,6 +273,7 @@ export function createMonacoTheme(monaco: Monaco, themeId: string, syntaxThemeId
     // preview filename) can stay in sync with the active syntax theme.
     document.documentElement.style.setProperty('--syntax-string-color', colors.stringColor);
     document.documentElement.style.setProperty('--syntax-comment-color', colors.comment);
+    document.documentElement.style.setProperty('--syntax-property-color', colors.propertyColor);
 
     const editorBg = theme?.editorBg || '#1E1E1E';
     const textColor = theme?.text || '#D4D4D4';
@@ -294,8 +295,13 @@ export function createMonacoTheme(monaco: Monaco, themeId: string, syntaxThemeId
             { token: 'comment', foreground: colors.comment.replace('#', '') },
             { token: 'string', foreground: colors.stringColor.replace('#', '') },
             { token: 'keyword', foreground: colors.keyword.replace('#', ''), fontStyle: 'bold' },
+            { token: 'keyword.bool', foreground: colors.keyword.replace('#', ''), fontStyle: 'bold' },
             { token: 'number', foreground: colors.number.replace('#', '') },
-            { token: 'type', foreground: colors.propertyColor.replace('#', '') },
+            { token: 'number.hex', foreground: colors.number.replace('#', '') },
+            { token: 'number.float', foreground: colors.number.replace('#', '') },
+            { token: 'type', foreground: colors.keyword.replace('#', '') },
+            { token: 'type.identifier', foreground: colors.propertyColor.replace('#', '') },
+            { token: 'variable', foreground: colors.propertyColor.replace('#', '') },
             { token: 'identifier', foreground: colors.propertyColor.replace('#', '') },
             { token: 'delimiter.bracket', foreground: brackets.color1.replace('#', '') },
             { token: 'delimiter.square', foreground: brackets.color2.replace('#', '') },

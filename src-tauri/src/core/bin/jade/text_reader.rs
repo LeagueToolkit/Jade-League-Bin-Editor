@@ -124,6 +124,31 @@ impl<'a> TextReader<'a> {
         String::from_utf8_lossy(&self.text[start..self.pos]).to_string()
     }
 
+    fn read_hex_digits(&mut self, count: usize) -> Option<u32> {
+        let mut value: u32 = 0;
+        for _ in 0..count {
+            if self.is_eof() { return None; }
+            let c = self.peek();
+            let digit = match c {
+                b'0'..=b'9' => (c - b'0') as u32,
+                b'a'..=b'f' => (c - b'a' + 10) as u32,
+                b'A'..=b'F' => (c - b'A' + 10) as u32,
+                _ => return None,
+            };
+            value = (value << 4) | digit;
+            self.read_char();
+        }
+        Some(value)
+    }
+
+    fn write_utf8(result: &mut String, code_point: u32) {
+        if let Some(c) = char::from_u32(code_point) {
+            result.push(c);
+        } else {
+            result.push('\u{FFFD}');
+        }
+    }
+
     fn read_quoted_string(&mut self) -> Option<String> {
         self.skip_whitespace();
         let q = self.peek();
@@ -138,9 +163,56 @@ impl<'a> TextReader<'a> {
                     b'n' => result.push('\n'),
                     b'r' => result.push('\r'),
                     b't' => result.push('\t'),
+                    b'a' => result.push('\x07'),
+                    b'b' => result.push('\x08'),
+                    b'f' => result.push('\x0C'),
                     b'\\' => result.push('\\'),
                     b'"' => result.push('"'),
                     b'\'' => result.push('\''),
+                    b'x' => {
+                        match self.read_hex_digits(2) {
+                            Some(v) => Self::write_utf8(&mut result, v),
+                            None => { self.add_error("Invalid \\x escape: expected 2 hex digits"); }
+                        }
+                    }
+                    b'u' => {
+                        match self.read_hex_digits(4) {
+                            Some(v) => {
+                                // Handle UTF-16 surrogate pairs
+                                if v >= 0xD800 && v <= 0xDBFF {
+                                    // High surrogate — look for \uLOW
+                                    if !self.is_eof() && self.peek() == b'\\' {
+                                        let saved = self.pos;
+                                        self.read_char(); // consume '\'
+                                        if !self.is_eof() && self.peek() == b'u' {
+                                            self.read_char(); // consume 'u'
+                                            if let Some(low) = self.read_hex_digits(4) {
+                                                if low >= 0xDC00 && low <= 0xDFFF {
+                                                    let cp = ((v - 0xD800) << 10 | (low - 0xDC00)) + 0x10000;
+                                                    Self::write_utf8(&mut result, cp);
+                                                } else {
+                                                    // Not a low surrogate, emit high as-is and reparse
+                                                    Self::write_utf8(&mut result, v);
+                                                    Self::write_utf8(&mut result, low);
+                                                }
+                                            } else {
+                                                Self::write_utf8(&mut result, v);
+                                                self.pos = saved + 1; // back to after the '\'
+                                            }
+                                        } else {
+                                            Self::write_utf8(&mut result, v);
+                                            self.pos = saved; // back to the '\'
+                                        }
+                                    } else {
+                                        Self::write_utf8(&mut result, v);
+                                    }
+                                } else {
+                                    Self::write_utf8(&mut result, v);
+                                }
+                            }
+                            None => { self.add_error("Invalid \\u escape: expected 4 hex digits"); }
+                        }
+                    }
                     _ => result.push(c as char),
                 }
                 escape = false;

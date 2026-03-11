@@ -74,6 +74,12 @@ impl TextWriter {
                 '\n' => self.raw("\\n"),
                 '\r' => self.raw("\\r"),
                 '\t' => self.raw("\\t"),
+                '\x07' => self.raw("\\a"),
+                '\x08' => self.raw("\\b"),
+                '\x0C' => self.raw("\\f"),
+                c if (c as u32) < 0x20 => {
+                    self.raw(&format!("\\x{:02x}", c as u32));
+                }
                 _ => self.buf.push(c),
             }
         }

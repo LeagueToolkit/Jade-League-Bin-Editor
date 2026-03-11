@@ -59,6 +59,7 @@ monaco-editor-main/
 Quartz-main/
 vscode-main/
 Ritobin/
+ritobin_test/
 
 # Local testing - .NET build artifacts
 src-tauri/BinCli.deps.json

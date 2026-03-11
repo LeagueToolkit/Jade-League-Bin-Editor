@@ -7,7 +7,7 @@ import type * as MonacoType from 'monaco-editor';
 import { registerRitobinLanguage, registerRitobinTheme, RITOBIN_LANGUAGE_ID, RITOBIN_THEME_ID } from "./lib/ritobinLanguage";
 import { openBinFile, saveBinFile, saveBinFileAs, readBinDirect, writeBinDirect } from "./lib/binOperations";
 import { loadSavedTheme } from "./lib/themeApplicator";
-import { checkBrackets } from "./lib/syntaxChecker";
+import { checkSyntax, suggestType } from "./lib/syntaxChecker";
 import { texBufferToDataURL } from "./lib/texFormat";
 import TitleBar from "./components/TitleBar";
 import MenuBar from "./components/MenuBar";
@@ -108,6 +108,7 @@ function App() {
   const [particlePanelOpen, setParticlePanelOpen] = useState(false);
   const [particleDialogOpen, setParticleDialogOpen] = useState(false);
   const [monacoInstance, setMonacoInstance] = useState<Monaco | null>(null);
+  const [editorTheme, setEditorTheme] = useState(RITOBIN_THEME_ID);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const [isMaximized, setIsMaximized] = useState(false);
   const [lineCount, setLineCount] = useState(0);
@@ -1358,7 +1359,45 @@ function App() {
     registerRitobinTheme(monaco);
     monacoRef.current = monaco;
     setMonacoInstance(monaco);
-    loadSavedTheme(invoke, monaco);
+    loadSavedTheme(invoke, monaco).then(() => setEditorTheme('jade-dynamic'));
+
+    // Register quick-fix provider for syntax errors (e.g. "lin" → "link")
+    monaco.languages.registerCodeActionProvider(RITOBIN_LANGUAGE_ID, {
+      provideCodeActions(model: MonacoType.editor.ITextModel, _range: MonacoType.Range, context: MonacoType.languages.CodeActionContext) {
+        const actions: MonacoType.languages.CodeAction[] = [];
+        for (const marker of context.markers) {
+          // Match "Unknown type" errors from our syntax checker
+          const unknownMatch = marker.message.match(/^Unknown (?:(?:key |value )?type )"(.+?)"/);
+          if (!unknownMatch) continue;
+          const badType = unknownMatch[1];
+          const suggestion = suggestType(badType);
+          if (!suggestion) continue;
+
+          actions.push({
+            title: `Change to "${suggestion}"`,
+            kind: 'quickfix',
+            diagnostics: [marker],
+            isPreferred: true,
+            edit: {
+              edits: [{
+                resource: model.uri,
+                textEdit: {
+                  range: {
+                    startLineNumber: marker.startLineNumber,
+                    startColumn: marker.startColumn,
+                    endLineNumber: marker.endLineNumber,
+                    endColumn: marker.endColumn,
+                  },
+                  text: suggestion,
+                },
+                versionId: model.getVersionId(),
+              }],
+            },
+          });
+        }
+        return { actions, dispose() {} };
+      },
+    });
   }
 
   // Model-based tab switching: swap Monaco model when active tab changes
@@ -1466,7 +1505,7 @@ function App() {
 
   const handleThemeApplied = () => {
     if (monacoInstance) {
-      loadSavedTheme(invoke, monacoInstance);
+      loadSavedTheme(invoke, monacoInstance).then(() => setEditorTheme('jade-dynamic'));
     }
   };
 
@@ -1815,7 +1854,7 @@ function App() {
     }
 
     const text = model.getValue();
-    const errors = checkBrackets(text);
+    const errors = checkSyntax(text);
 
     // Markers give the squiggly underline + problems list
     const markers: MonacoType.editor.IMarkerData[] = errors.map(err => ({
@@ -1824,7 +1863,7 @@ function App() {
       startLineNumber: err.line,
       startColumn: err.column,
       endLineNumber: err.line,
-      endColumn: err.column + 1,
+      endColumn: err.column + (err.length || 1),
     }));
     monaco.editor.setModelMarkers(model, 'syntax-checker', markers);
 
@@ -3149,7 +3188,7 @@ function App() {
         <Editor
           height="100%"
           defaultLanguage={RITOBIN_LANGUAGE_ID}
-          theme={RITOBIN_THEME_ID}
+          theme={editorTheme}
           beforeMount={handleBeforeMount}
           onMount={handleEditorMount}
           onChange={handleEditorChange}
@@ -3171,6 +3210,7 @@ function App() {
             ...({
               "bracketPairColorization.enabled": true,
               "suggest.maxVisibleSuggestions": 5,
+              "semanticHighlighting.enabled": false,
             } as any),
           }}
         />
