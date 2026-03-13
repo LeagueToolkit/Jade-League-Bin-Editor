@@ -69,5 +69,9 @@ src-tauri/BinCli.runtimeconfig.json
 src-tauri/JadeCS/
 src-tauri/src/ritobin/
 
+# GitHub cover image
+github-cover.html
+No Brain Cat GIF.png
+
 # Misc
 nul

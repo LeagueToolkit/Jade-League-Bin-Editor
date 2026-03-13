@@ -298,6 +298,14 @@ fn apply_saved_icon(app: &tauri::AppHandle, icon_path: &str) -> Result<(), Strin
     if let Some(window) = app.get_webview_window("main") {
         window.set_icon(icon)
             .map_err(|e| format!("Failed to set window icon: {}", e))?;
+
+        // Also set via Win32 API to update taskbar icon in release builds
+        #[cfg(target_os = "windows")]
+        {
+            if let Err(e) = app_commands::set_native_window_icon(&window, icon_path) {
+                eprintln!("[Icon] Failed to set native taskbar icon on startup: {}", e);
+            }
+        }
     }
 
     Ok(())

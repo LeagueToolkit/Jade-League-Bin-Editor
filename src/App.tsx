@@ -327,7 +327,7 @@ function App() {
 
     const handleIconChange = (event: Event) => {
       const customEvent = event as CustomEvent;
-      setAppIcon(customEvent.detail);
+      setAppIcon(customEvent.detail || '/jade.ico');
     };
 
     window.addEventListener('icon-changed', handleIconChange);

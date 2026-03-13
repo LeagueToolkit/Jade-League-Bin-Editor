@@ -308,21 +308,138 @@ pub fn update_window_icon(app: &tauri::AppHandle, icon_path: &str) -> Result<(),
     // Load and decode the image
     let img = image::open(icon_path)
         .map_err(|e| format!("Failed to load icon image: {}", e))?;
-    
+
     // Convert to RGBA8
     let rgba = img.to_rgba8();
     let (width, height) = rgba.dimensions();
     let rgba_data = rgba.into_raw();
-    
+
     // Create Tauri Image
     let icon = tauri::image::Image::new_owned(rgba_data, width, height);
-    
+
     // Update all windows
     if let Some(window) = app.get_webview_window("main") {
         window.set_icon(icon)
             .map_err(|e| format!("Failed to set window icon: {}", e))?;
+
+        // Also set the icon via Win32 API to update the taskbar icon in release builds
+        #[cfg(target_os = "windows")]
+        {
+            if let Err(e) = set_native_window_icon(&window, icon_path) {
+                eprintln!("[Icon] Failed to set native taskbar icon: {}", e);
+            }
+        }
     }
-    
+
+    Ok(())
+}
+
+/// Use Win32 API to explicitly set ICON_BIG (taskbar) and ICON_SMALL (title bar).
+/// Tauri's set_icon may not update the taskbar icon in release builds on Windows.
+#[cfg(target_os = "windows")]
+pub fn set_native_window_icon(window: &tauri::WebviewWindow, icon_path: &str) -> Result<(), String> {
+    use windows::Win32::UI::WindowsAndMessaging::*;
+    use windows::Win32::Foundation::*;
+
+    let img = image::open(icon_path)
+        .map_err(|e| format!("Failed to load icon: {}", e))?;
+
+    let hwnd = window.hwnd().map_err(|e| format!("Failed to get HWND: {}", e))?;
+    let hwnd = HWND(hwnd.0);
+
+    // Create and set big icon (used by taskbar, Alt+Tab)
+    let big_size = unsafe { GetSystemMetrics(SM_CXICON) } as u32;
+    let big_img = img.resize_exact(big_size, big_size, image::imageops::FilterType::Lanczos3).to_rgba8();
+    let big_icon = create_hicon_from_rgba(&big_img, big_size, big_size)?;
+    unsafe {
+        SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_BIG as usize), LPARAM(big_icon.0 as isize));
+    }
+
+    // Create and set small icon (used by title bar)
+    let small_size = unsafe { GetSystemMetrics(SM_CXSMICON) } as u32;
+    let small_img = img.resize_exact(small_size, small_size, image::imageops::FilterType::Lanczos3).to_rgba8();
+    let small_icon = create_hicon_from_rgba(&small_img, small_size, small_size)?;
+    unsafe {
+        SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_SMALL as usize), LPARAM(small_icon.0 as isize));
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn create_hicon_from_rgba(rgba: &image::RgbaImage, width: u32, height: u32) -> Result<windows::Win32::UI::WindowsAndMessaging::HICON, String> {
+    use windows::Win32::UI::WindowsAndMessaging::*;
+    use windows::Win32::Graphics::Gdi::*;
+
+    // Convert RGBA to BGRA (Windows bitmap format), flipped vertically (bottom-up)
+    let mut bgra: Vec<u8> = vec![0u8; (width * height * 4) as usize];
+    for y in 0..height {
+        for x in 0..width {
+            let pixel = rgba.get_pixel(x, y);
+            let dst_idx = ((y * width + x) * 4) as usize;
+            bgra[dst_idx] = pixel[2];     // B
+            bgra[dst_idx + 1] = pixel[1]; // G
+            bgra[dst_idx + 2] = pixel[0]; // R
+            bgra[dst_idx + 3] = pixel[3]; // A
+        }
+    }
+
+    unsafe {
+        let color_bitmap = CreateBitmap(width as i32, height as i32, 1, 32, Some(bgra.as_ptr() as *const _));
+        let mask_data = vec![0u8; ((width + 7) / 8 * height) as usize];
+        let mask_bitmap = CreateBitmap(width as i32, height as i32, 1, 1, Some(mask_data.as_ptr() as *const _));
+
+        let icon_info = ICONINFO {
+            fIcon: true.into(),
+            xHotspot: 0,
+            yHotspot: 0,
+            hbmMask: mask_bitmap,
+            hbmColor: color_bitmap,
+        };
+
+        let hicon = CreateIconIndirect(&icon_info)
+            .map_err(|e| format!("CreateIconIndirect failed: {}", e))?;
+
+        let _ = DeleteObject(color_bitmap);
+        let _ = DeleteObject(mask_bitmap);
+
+        Ok(hicon)
+    }
+}
+
+/// Restore the default icon via Win32 API using Tauri's embedded default icon data
+#[cfg(target_os = "windows")]
+fn restore_native_default_icon(window: &tauri::WebviewWindow, app: &tauri::AppHandle) -> Result<(), String> {
+    use windows::Win32::UI::WindowsAndMessaging::*;
+    use windows::Win32::Foundation::*;
+
+    let default_icon = app.default_window_icon()
+        .ok_or("No default window icon found")?;
+
+    let rgba_data = default_icon.rgba();
+    let width = default_icon.width();
+    let height = default_icon.height();
+
+    let rgba_img = image::RgbaImage::from_raw(width, height, rgba_data.to_vec())
+        .ok_or("Failed to create image from default icon data")?;
+
+    let hwnd = window.hwnd().map_err(|e| format!("Failed to get HWND: {}", e))?;
+    let hwnd = HWND(hwnd.0);
+
+    let big_size = unsafe { GetSystemMetrics(SM_CXICON) } as u32;
+    let big_img = image::imageops::resize(&rgba_img, big_size, big_size, image::imageops::FilterType::Lanczos3);
+    let big_icon = create_hicon_from_rgba(&big_img, big_size, big_size)?;
+    unsafe {
+        SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_BIG as usize), LPARAM(big_icon.0 as isize));
+    }
+
+    let small_size = unsafe { GetSystemMetrics(SM_CXSMICON) } as u32;
+    let small_img = image::imageops::resize(&rgba_img, small_size, small_size, image::imageops::FilterType::Lanczos3);
+    let small_icon = create_hicon_from_rgba(&small_img, small_size, small_size)?;
+    unsafe {
+        SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_SMALL as usize), LPARAM(small_icon.0 as isize));
+    }
+
     Ok(())
 }
 
@@ -347,6 +464,14 @@ pub async fn clear_custom_icon(app: tauri::AppHandle) -> Result<(), String> {
         if let Some(icon) = app.default_window_icon().cloned() {
             window.set_icon(icon)
                 .map_err(|e| format!("Failed to restore default icon: {}", e))?;
+        }
+
+        // Also restore via Win32 API so the taskbar icon updates in release builds
+        #[cfg(target_os = "windows")]
+        {
+            if let Err(e) = restore_native_default_icon(&window, &app) {
+                eprintln!("[Icon] Failed to restore native taskbar icon: {}", e);
+            }
         }
     }
 
