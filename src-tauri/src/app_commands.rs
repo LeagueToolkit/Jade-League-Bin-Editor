@@ -484,22 +484,24 @@ fn save_as_ico(src_path: &str, ico_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Force the taskbar to refresh this window's icon by briefly toggling it
-/// off and back onto the taskbar. This works around Windows caching the icon
-/// per AppUserModelID when the app is launched from an installed shortcut.
+/// Force the taskbar to refresh this window's icon by hiding and re-showing
+/// the window. This forces Explorer to drop and recreate the taskbar button,
+/// picking up the updated shortcut icon.
 #[cfg(target_os = "windows")]
 fn refresh_taskbar_icon(hwnd: windows::Win32::Foundation::HWND) {
     use windows::Win32::UI::WindowsAndMessaging::*;
 
     unsafe {
-        // Add WS_EX_TOOLWINDOW to hide from taskbar
-        let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
-        SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_TOOLWINDOW.0 as i32);
+        // Hide the window — Explorer removes the taskbar button
+        ShowWindow(hwnd, SW_HIDE);
 
-        // Remove WS_EX_TOOLWINDOW to re-add to taskbar with fresh icon
-        SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style);
+        // Brief pause so Explorer processes the removal
+        std::thread::sleep(std::time::Duration::from_millis(200));
 
-        println!("[Icon] Refreshed taskbar icon");
+        // Show it again — Explorer creates a fresh taskbar button with the current icon
+        ShowWindow(hwnd, SW_SHOW);
+
+        println!("[Icon] Refreshed taskbar icon via hide/show");
     }
 }
 
