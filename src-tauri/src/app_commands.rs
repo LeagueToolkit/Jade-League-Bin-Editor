@@ -317,12 +317,20 @@ pub fn update_window_icon(app: &tauri::AppHandle, icon_path: &str) -> Result<(),
     // Create Tauri Image
     let icon = tauri::image::Image::new_owned(rgba_data, width, height);
 
+    // Update the Start Menu shortcut icon FIRST so the taskbar picks it up on refresh
+    #[cfg(target_os = "windows")]
+    {
+        if let Err(e) = update_shortcut_icon(Some(icon_path)) {
+            eprintln!("[Icon] Failed to update shortcut icon: {}", e);
+        }
+    }
+
     // Update all windows
     if let Some(window) = app.get_webview_window("main") {
         window.set_icon(icon)
             .map_err(|e| format!("Failed to set window icon: {}", e))?;
 
-        // Also set the icon via Win32 API to update the taskbar icon in release builds
+        // Also set the icon via Win32 API and refresh the taskbar
         #[cfg(target_os = "windows")]
         {
             if let Err(e) = set_native_window_icon(&window, icon_path) {
@@ -332,6 +340,167 @@ pub fn update_window_icon(app: &tauri::AppHandle, icon_path: &str) -> Result<(),
     }
 
     Ok(())
+}
+
+/// Update the Start Menu shortcut's icon so the taskbar reflects the custom icon.
+/// When installed via NSIS, Windows uses the shortcut's icon (tied to the AppUserModelID)
+/// for the taskbar, ignoring WM_SETICON.
+#[cfg(target_os = "windows")]
+fn update_shortcut_icon(icon_path: Option<&str>) -> Result<(), String> {
+    // Find the Start Menu shortcut
+    let appdata = env::var("APPDATA").map_err(|e| format!("No APPDATA: {}", e))?;
+    let shortcut_path = PathBuf::from(&appdata)
+        .join("Microsoft")
+        .join("Windows")
+        .join("Start Menu")
+        .join("Programs")
+        .join("Jade.lnk");
+
+    if !shortcut_path.exists() {
+        // Try with subfolder
+        let alt_path = PathBuf::from(&appdata)
+            .join("Microsoft")
+            .join("Windows")
+            .join("Start Menu")
+            .join("Programs")
+            .join("Jade")
+            .join("Jade.lnk");
+        if !alt_path.exists() {
+            println!("[Icon] No Start Menu shortcut found, skipping shortcut icon update");
+            return Ok(());
+        }
+        return update_shortcut_icon_at(&alt_path, icon_path);
+    }
+
+    update_shortcut_icon_at(&shortcut_path, icon_path)
+}
+
+#[cfg(target_os = "windows")]
+fn update_shortcut_icon_at(shortcut_path: &Path, icon_path: Option<&str>) -> Result<(), String> {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    use windows::core::{PCWSTR, Interface};
+    use windows::Win32::UI::Shell::*;
+    use windows::Win32::System::Com::*;
+
+    fn to_wide(s: &str) -> Vec<u16> {
+        OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
+    }
+
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+
+        // Create IShellLink instance
+        let shell_link: IShellLinkW = CoCreateInstance(
+            &ShellLink,
+            None,
+            CLSCTX_INPROC_SERVER,
+        ).map_err(|e| format!("CoCreateInstance(ShellLink) failed: {}", e))?;
+
+        // Load existing shortcut via IPersistFile
+        let persist_file: IPersistFile = shell_link.cast()
+            .map_err(|e| format!("QueryInterface(IPersistFile) failed: {}", e))?;
+
+        let shortcut_wide = to_wide(&shortcut_path.to_string_lossy());
+        persist_file.Load(PCWSTR(shortcut_wide.as_ptr()), STGM_READWRITE)
+            .map_err(|e| format!("IPersistFile::Load failed: {}", e))?;
+
+        // Set or clear the icon
+        match icon_path {
+            Some(path) => {
+                // Convert the custom image to .ico and save it
+                let ico_path = get_config_dir()?.join("custom_icon.ico");
+                save_as_ico(path, &ico_path)?;
+
+                let ico_wide = to_wide(&ico_path.to_string_lossy());
+                shell_link.SetIconLocation(PCWSTR(ico_wide.as_ptr()), 0)
+                    .map_err(|e| format!("SetIconLocation failed: {}", e))?;
+            }
+            None => {
+                // Restore: point back to the exe's embedded icon (index 0)
+                let exe_path = std::env::current_exe()
+                    .map_err(|e| format!("current_exe failed: {}", e))?;
+                let exe_wide = to_wide(&exe_path.to_string_lossy());
+                shell_link.SetIconLocation(PCWSTR(exe_wide.as_ptr()), 0)
+                    .map_err(|e| format!("SetIconLocation failed: {}", e))?;
+            }
+        }
+
+        // Save the shortcut
+        persist_file.Save(PCWSTR(shortcut_wide.as_ptr()), true)
+            .map_err(|e| format!("IPersistFile::Save failed: {}", e))?;
+
+        println!("[Icon] Updated shortcut icon at {:?}", shortcut_path);
+    }
+
+    Ok(())
+}
+
+/// Convert an image to .ico format and save it
+#[cfg(target_os = "windows")]
+fn save_as_ico(src_path: &str, ico_path: &Path) -> Result<(), String> {
+    let img = image::open(src_path)
+        .map_err(|e| format!("Failed to open image for ico conversion: {}", e))?;
+
+    // Resize to 256x256 (max ico size)
+    let resized = img.resize_exact(256, 256, image::imageops::FilterType::Lanczos3);
+    let rgba = resized.to_rgba8();
+    let (w, h) = (rgba.width(), rgba.height());
+    let raw = rgba.into_raw();
+
+    // Write ICO file manually: header + one directory entry + PNG data
+    let mut png_data = Vec::new();
+    {
+        use std::io::Cursor;
+        use image::ImageEncoder;
+        let mut cursor = Cursor::new(&mut png_data);
+        let encoder = image::codecs::png::PngEncoder::new(&mut cursor);
+        encoder.write_image(&raw, w, h, image::ExtendedColorType::Rgba8)
+            .map_err(|e| format!("PNG encode failed: {}", e))?;
+    }
+
+    let mut ico = Vec::new();
+    // ICO header: reserved(2) + type(2) + count(2)
+    ico.extend_from_slice(&[0, 0]); // reserved
+    ico.extend_from_slice(&1u16.to_le_bytes()); // type = 1 (icon)
+    ico.extend_from_slice(&1u16.to_le_bytes()); // count = 1
+
+    // Directory entry (16 bytes)
+    ico.push(0); // width (0 = 256)
+    ico.push(0); // height (0 = 256)
+    ico.push(0); // color palette
+    ico.push(0); // reserved
+    ico.extend_from_slice(&1u16.to_le_bytes()); // color planes
+    ico.extend_from_slice(&32u16.to_le_bytes()); // bits per pixel
+    ico.extend_from_slice(&(png_data.len() as u32).to_le_bytes()); // image size
+    ico.extend_from_slice(&22u32.to_le_bytes()); // offset (6 header + 16 entry = 22)
+
+    // Image data (PNG)
+    ico.extend_from_slice(&png_data);
+
+    fs::write(ico_path, ico)
+        .map_err(|e| format!("Failed to write ico file: {}", e))?;
+
+    Ok(())
+}
+
+/// Force the taskbar to refresh this window's icon by briefly toggling it
+/// off and back onto the taskbar. This works around Windows caching the icon
+/// per AppUserModelID when the app is launched from an installed shortcut.
+#[cfg(target_os = "windows")]
+fn refresh_taskbar_icon(hwnd: windows::Win32::Foundation::HWND) {
+    use windows::Win32::UI::WindowsAndMessaging::*;
+
+    unsafe {
+        // Add WS_EX_TOOLWINDOW to hide from taskbar
+        let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
+        SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_TOOLWINDOW.0 as i32);
+
+        // Remove WS_EX_TOOLWINDOW to re-add to taskbar with fresh icon
+        SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style);
+
+        println!("[Icon] Refreshed taskbar icon");
+    }
 }
 
 /// Use Win32 API to explicitly set ICON_BIG (taskbar) and ICON_SMALL (title bar).
@@ -362,6 +531,9 @@ pub fn set_native_window_icon(window: &tauri::WebviewWindow, icon_path: &str) ->
     unsafe {
         SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_SMALL as usize), LPARAM(small_icon.0 as isize));
     }
+
+    // Force taskbar to pick up the new icon (works around AUMID caching)
+    refresh_taskbar_icon(hwnd);
 
     Ok(())
 }
@@ -440,6 +612,9 @@ fn restore_native_default_icon(window: &tauri::WebviewWindow, app: &tauri::AppHa
         SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_SMALL as usize), LPARAM(small_icon.0 as isize));
     }
 
+    // Force taskbar to pick up the restored icon
+    refresh_taskbar_icon(hwnd);
+
     Ok(())
 }
 
@@ -459,14 +634,21 @@ pub async fn clear_custom_icon(app: tauri::AppHandle) -> Result<(), String> {
             .map_err(|e| format!("Failed to write preferences: {}", e))?;
     }
 
-    // Restore default window icon
+    // Restore the Start Menu shortcut icon FIRST so the taskbar picks it up on refresh
+    #[cfg(target_os = "windows")]
+    {
+        if let Err(e) = update_shortcut_icon(None) {
+            eprintln!("[Icon] Failed to restore shortcut icon: {}", e);
+        }
+    }
+
+    // Restore default window icon + taskbar refresh
     if let Some(window) = app.get_webview_window("main") {
         if let Some(icon) = app.default_window_icon().cloned() {
             window.set_icon(icon)
                 .map_err(|e| format!("Failed to restore default icon: {}", e))?;
         }
 
-        // Also restore via Win32 API so the taskbar icon updates in release builds
         #[cfg(target_os = "windows")]
         {
             if let Err(e) = restore_native_default_icon(&window, &app) {
