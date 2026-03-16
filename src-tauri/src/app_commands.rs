@@ -989,14 +989,39 @@ pub async fn resolve_asset_path(base_file: String, asset_path: String) -> Result
         return Ok(if as_path.exists() { Some(asset_norm) } else { None });
     }
 
-    // 2. Walk up from the directory of base_file.
     let base = std::path::Path::new(&base_file);
-    let mut dir = if base.is_file() {
+    let start_dir = if base.is_file() {
         base.parent().map(|p| p.to_path_buf())
     } else {
         Some(base.to_path_buf())
     };
 
+    // 2. Smart resolve: if the asset path has a known prefix (e.g. "ASSETS/Characters/Talon/..."),
+    //    look for the prefix root in the ancestor directories. This avoids joining the full
+    //    relative path at every level and instead finds the correct root in one shot.
+    let asset_parts: Vec<&str> = asset_norm.split('/').collect();
+    if let (Some(dir), Some(first_segment)) = (&start_dir, asset_parts.first()) {
+        // Walk up looking for a directory that contains the first segment of the asset path
+        let mut d = Some(dir.as_path());
+        while let Some(current) = d {
+            let candidate = current.join(&asset_norm);
+            if candidate.exists() {
+                return Ok(Some(candidate.to_string_lossy().replace('\\', "/")));
+            }
+            // Optimisation: if this directory contains the first segment as a child dir,
+            // and the full path doesn't exist, the asset isn't here — stop early.
+            let first_child = current.join(first_segment);
+            if first_child.is_dir() {
+                // The root is right but the specific file doesn't exist under it.
+                // No point walking further up.
+                return Ok(None);
+            }
+            d = current.parent();
+        }
+    }
+
+    // 3. Fallback: simple walk up (for paths without directory prefixes, e.g. just "foo.tex")
+    let mut dir = start_dir;
     while let Some(d) = dir {
         let candidate = d.join(&asset_norm);
         if candidate.exists() {

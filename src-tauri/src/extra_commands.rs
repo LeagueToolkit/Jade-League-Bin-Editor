@@ -195,6 +195,8 @@ fn is_newer_version(remote: &str, current: &str) -> bool {
 fn make_client() -> reqwest::Client {
     reqwest::Client::builder()
         .user_agent("jade-app")
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(300))
         .build()
         .unwrap_or_default()
 }
@@ -269,9 +271,11 @@ pub async fn start_update_download(app: tauri::AppHandle) -> Result<(), String> 
     use std::io::Write;
 
     // Use cached release, fall back to fetching if cache is empty
-    let json = CACHED_RELEASE.lock().take()
-        .ok_or(())
-        .or_else(|_| futures::executor::block_on(fetch_latest_release()))?;
+    let cached = CACHED_RELEASE.lock().take();
+    let json = match cached {
+        Some(val) => val,
+        None => fetch_latest_release().await?,
+    };
 
     let assets = json["assets"].as_array()
         .ok_or("No assets found in release")?;

@@ -203,6 +203,11 @@ body {
   display: block; bottom: 0; left: 0; --cx: 3px; --cy: 0px;
 }
 
+/* Image path hover — pointer cursor on hoverable texture/image paths */
+.monaco-editor .image-path-hover-target {
+  cursor: pointer !important;
+}
+
 /* Syntax checker — quick fix / code action menu styling */
 .monaco-editor .action-widget {
   background-color: var(--editor-bg, #1e1e1e) !important;

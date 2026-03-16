@@ -233,6 +233,154 @@ export function decompressTEX(tex: TEXData): Uint8Array {
   return pixels;
 }
 
+// ── DDS file support ────────────────────────────────────────────────
+
+const DDS_MAGIC = 0x20534444; // "DDS "
+const FOURCC_DXT1 = 0x31545844; // "DXT1"
+const FOURCC_DXT5 = 0x35545844; // "DXT5"
+const DDPF_FOURCC = 0x4;
+const DDPF_RGB = 0x40;
+const DDPF_ALPHAPIXELS = 0x1;
+
+type DDSFormat = 'DXT1' | 'DXT5' | 'BGRA8' | 'RGBA8';
+
+interface DDSData {
+  width: number;
+  height: number;
+  format: DDSFormat;
+  data: Uint8Array; // largest mip only
+}
+
+export function readDDS(buffer: ArrayBuffer): DDSData {
+  const view = new DataView(buffer);
+
+  if (view.getUint32(0, true) !== DDS_MAGIC) {
+    throw new Error('Invalid DDS file signature');
+  }
+
+  // DDS_HEADER at offset 4
+  const height = view.getUint32(12, true);
+  const width = view.getUint32(16, true);
+
+  // DDS_PIXELFORMAT at offset 76
+  const pfFlags = view.getUint32(80, true);
+  const fourCC = view.getUint32(84, true);
+  const rgbBitCount = view.getUint32(88, true);
+  const rMask = view.getUint32(92, true);
+
+  let format: DDSFormat;
+  let bytesPerBlock: number;
+  let blockDim = 4; // DXT block dimension
+
+  if (pfFlags & DDPF_FOURCC) {
+    if (fourCC === FOURCC_DXT1) { format = 'DXT1'; bytesPerBlock = 8; }
+    else if (fourCC === FOURCC_DXT5) { format = 'DXT5'; bytesPerBlock = 16; }
+    else throw new Error(`Unsupported DDS FourCC: 0x${fourCC.toString(16)}`);
+  } else if ((pfFlags & (DDPF_RGB | DDPF_ALPHAPIXELS)) && rgbBitCount === 32) {
+    // Uncompressed 32-bit — check channel order from masks
+    format = rMask === 0x00FF0000 ? 'BGRA8' : 'RGBA8';
+    bytesPerBlock = 4;
+    blockDim = 1;
+  } else if ((pfFlags & DDPF_RGB) && rgbBitCount === 32) {
+    format = rMask === 0x00FF0000 ? 'BGRA8' : 'RGBA8';
+    bytesPerBlock = 4;
+    blockDim = 1;
+  } else {
+    throw new Error(`Unsupported DDS pixel format (flags=0x${pfFlags.toString(16)}, bpp=${rgbBitCount})`);
+  }
+
+  // Pixel data starts at offset 128. DDS stores largest mip first — we only need mip 0.
+  const dataOffset = 128;
+  const bw = Math.ceil(width / blockDim);
+  const bh = Math.ceil(height / blockDim);
+  const mip0Size = bytesPerBlock * bw * bh;
+  const available = Math.min(mip0Size, buffer.byteLength - dataOffset);
+  const data = new Uint8Array(buffer, dataOffset, available);
+
+  return { width, height, format, data };
+}
+
+/** Decompress a DDS buffer into RGBA pixels and return a data URL */
+export function ddsBufferToDataURL(buffer: ArrayBuffer, maxDim?: number): { dataURL: string; width: number; height: number; format: number; ddsFormat: string } {
+  const dds = readDDS(buffer);
+  const { width, height, format, data } = dds;
+  const pixels = new Uint8Array(width * height * 4);
+
+  if (format === 'DXT1') {
+    const blockSize = 8;
+    const bw = Math.ceil(width / 4);
+    const bh = Math.ceil(height / 4);
+    for (let by = 0; by < bh; by++) {
+      for (let bx = 0; bx < bw; bx++) {
+        const off = (by * bw + bx) * blockSize;
+        if (off + blockSize <= data.length) {
+          decompressDXT1Block(data.subarray(off, off + blockSize), bx * 4, by * 4, width, height, pixels);
+        }
+      }
+    }
+  } else if (format === 'DXT5') {
+    const blockSize = 16;
+    const bw = Math.ceil(width / 4);
+    const bh = Math.ceil(height / 4);
+    for (let by = 0; by < bh; by++) {
+      for (let bx = 0; bx < bw; bx++) {
+        const off = (by * bw + bx) * blockSize;
+        if (off + blockSize <= data.length) {
+          decompressDXT5Block(data.subarray(off, off + blockSize), bx * 4, by * 4, width, height, pixels);
+        }
+      }
+    }
+  } else if (format === 'BGRA8') {
+    for (let i = 0; i < data.length; i += 4) {
+      pixels[i] = data[i + 2];     // R <- B
+      pixels[i + 1] = data[i + 1]; // G
+      pixels[i + 2] = data[i];     // B <- R
+      pixels[i + 3] = data[i + 3]; // A
+    }
+  } else {
+    // RGBA8
+    pixels.set(data.subarray(0, width * height * 4));
+  }
+
+  // Map to TEXFormat number for formatName compatibility
+  const fmtNum = format === 'DXT1' ? TEXFormat.DXT1 : format === 'DXT5' ? TEXFormat.DXT5 : format === 'BGRA8' ? TEXFormat.BGRA8 : 0;
+
+  return { dataURL: pixelsToDataURL(pixels, width, height, maxDim), width, height, format: fmtNum, ddsFormat: format };
+}
+
+/** Render pixels to a canvas, optionally downscaling if larger than maxDim. Returns PNG data URL. */
+function pixelsToDataURL(pixels: Uint8Array, width: number, height: number, maxDim?: number): string {
+  const srcCanvas = document.createElement('canvas');
+  srcCanvas.width = width;
+  srcCanvas.height = height;
+  const srcCtx = srcCanvas.getContext('2d')!;
+  srcCtx.putImageData(new ImageData(new Uint8ClampedArray(pixels), width, height), 0, 0);
+
+  if (maxDim && (width > maxDim || height > maxDim)) {
+    const scale = maxDim / Math.max(width, height);
+    const dw = Math.round(width * scale);
+    const dh = Math.round(height * scale);
+    const dstCanvas = document.createElement('canvas');
+    dstCanvas.width = dw;
+    dstCanvas.height = dh;
+    const dstCtx = dstCanvas.getContext('2d')!;
+    dstCtx.drawImage(srcCanvas, 0, 0, dw, dh);
+    return dstCanvas.toDataURL('image/png');
+  }
+
+  return srcCanvas.toDataURL('image/png');
+}
+
+export function ddsFormatName(fmt: string): string {
+  switch (fmt) {
+    case 'DXT1': return 'DXT1 (BC1)';
+    case 'DXT5': return 'DXT5 (BC3)';
+    case 'BGRA8': return 'BGRA8';
+    case 'RGBA8': return 'RGBA8';
+    default: return fmt;
+  }
+}
+
 export function loadTEXAsImageData(buffer: ArrayBuffer): ImageData {
   const tex = readTEX(buffer);
   const pixels = decompressTEX(tex);
@@ -240,17 +388,11 @@ export function loadTEXAsImageData(buffer: ArrayBuffer): ImageData {
 }
 
 /** Decode a .tex ArrayBuffer and render it to a canvas, returning a PNG data URL. */
-export function texBufferToDataURL(buffer: ArrayBuffer): { dataURL: string; width: number; height: number; format: number } {
+export function texBufferToDataURL(buffer: ArrayBuffer, maxDim?: number): { dataURL: string; width: number; height: number; format: number } {
   const tex = readTEX(buffer);
   const pixels = decompressTEX(tex);
-  const canvas = document.createElement('canvas');
-  canvas.width = tex.width;
-  canvas.height = tex.height;
-  const ctx = canvas.getContext('2d')!;
-  const imageData = new ImageData(new Uint8ClampedArray(pixels), tex.width, tex.height);
-  ctx.putImageData(imageData, 0, 0);
   return {
-    dataURL: canvas.toDataURL('image/png'),
+    dataURL: pixelsToDataURL(pixels, tex.width, tex.height, maxDim),
     width: tex.width,
     height: tex.height,
     format: tex.format,

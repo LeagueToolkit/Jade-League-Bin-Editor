@@ -97,17 +97,24 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose }) => {
             loadPreferences();
             checkHashStatus();
             checkPreloadStatus();
-            // Auto-fetch update info when opening settings if we don't have it yet
-            if (!updateInfo && updateState === 'idle') {
+            // Restore cached update info from broadcast if we have it
+            if (!updateInfo && cachedUpdateRef.current) {
+                const info = cachedUpdateRef.current;
+                setUpdateInfo(info);
+                setUpdateState(info.available ? 'available' : 'up-to-date');
+            } else if (!updateInfo && updateState === 'idle') {
+                // No cached result — fetch fresh
                 handleCheckForUpdate();
             }
         }
     }, [isOpen]);
 
-    // Listen for auto-check results broadcast from App.tsx
+    // Listen for auto-check results broadcast from App.tsx and cache across mounts
+    const cachedUpdateRef = useRef<UpdateInfo | null>(null);
     useEffect(() => {
         const handler = (e: Event) => {
             const info = (e as CustomEvent<UpdateInfo>).detail;
+            cachedUpdateRef.current = info;
             setUpdateInfo(info);
             setUpdateState(info.available ? 'available' : 'up-to-date');
         };

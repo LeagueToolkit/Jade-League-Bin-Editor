@@ -5,10 +5,11 @@ import { listen } from "@tauri-apps/api/event";
 import Editor, { Monaco } from "@monaco-editor/react";
 import type * as MonacoType from 'monaco-editor';
 import { registerRitobinLanguage, registerRitobinTheme, RITOBIN_LANGUAGE_ID, RITOBIN_THEME_ID } from "./lib/ritobinLanguage";
+import { registerColorProvider } from "./lib/colorProvider";
 import { openBinFile, saveBinFile, saveBinFileAs, readBinDirect, writeBinDirect } from "./lib/binOperations";
 import { loadSavedTheme } from "./lib/themeApplicator";
 import { checkSyntax, suggestType } from "./lib/syntaxChecker";
-import { texBufferToDataURL } from "./lib/texFormat";
+import { texBufferToDataURL, ddsBufferToDataURL, ddsFormatName } from "./lib/texFormat";
 import TitleBar from "./components/TitleBar";
 import MenuBar from "./components/MenuBar";
 import TabBar, { EditorTab, createQuartzDiffTab, createTab, createTexPreviewTab, getFileName } from "./components/TabBar";
@@ -122,8 +123,9 @@ function App() {
 
   // Texture hover popup state
   interface TexPopupState {
-    x: number;
-    y: number;
+    top: number;
+    left: number;
+    above: boolean;
     rawPath: string;
     resolvedPath: string | null;
     imageDataUrl: string | null;
@@ -1361,6 +1363,9 @@ function App() {
     setMonacoInstance(monaco);
     loadSavedTheme(invoke, monaco).then(() => setEditorTheme('jade-dynamic'));
 
+    // Register color swatches + picker for vec4 inside Color/birthColor blocks
+    registerColorProvider(monaco);
+
     // Register quick-fix provider for syntax errors (e.g. "lin" → "link")
     monaco.languages.registerCodeActionProvider(RITOBIN_LANGUAGE_ID, {
       provideCodeActions(model: MonacoType.editor.ITextModel, _range: MonacoType.Range, context: MonacoType.languages.CodeActionContext) {
@@ -1522,26 +1527,60 @@ function App() {
    * Given a line of text and a column (1-based), extract a .tex path if the
    * cursor is inside a quoted string that ends with ".tex".
    */
-  function extractTexPathAtColumn(line: string, column: number): string | null {
-    // Walk backwards from the column to find an opening quote
-    const col0 = column - 1; // 0-based
-    let start = -1;
-    for (let i = col0; i >= 0; i--) {
-      if (line[i] === '"') { start = i + 1; break; }
-      if (line[i] === '\n') break;
-    }
-    if (start === -1) return null;
+  const IMAGE_EXTENSIONS = ['.tex', '.dds', '.png', '.jpg', '.jpeg', '.tga', '.bmp'];
 
-    // Walk forwards to find a closing quote
-    let end = -1;
-    for (let i = col0; i < line.length; i++) {
-      if (line[i] === '"') { end = i; break; }
-    }
-    if (end === -1) return null;
+  /** Find an image path on this line at the given column. Hitbox is the full quoted region (inclusive of quotes). */
+  function extractImagePathAtColumn(line: string, column: number): { path: string; startCol: number } | null {
+    let i = 0;
+    while (i < line.length) {
+      const qStart = line.indexOf('"', i);
+      if (qStart === -1) break;
+      const qEnd = line.indexOf('"', qStart + 1);
+      if (qEnd === -1) break;
 
-    const candidate = line.slice(start, end);
-    if (candidate.toLowerCase().endsWith('.tex')) return candidate;
+      const candidate = line.slice(qStart + 1, qEnd);
+      const lower = candidate.toLowerCase();
+      if (IMAGE_EXTENSIONS.some(ext => lower.endsWith(ext))) {
+        // Hitbox: opening " to closing " inclusive (1-based columns)
+        const hitStart = qStart + 1;
+        const hitEnd = qEnd + 2; // 1-based column AFTER closing "
+        if (column >= hitStart && column < hitEnd) {
+          return { path: candidate, startCol: qStart + 1 };
+        }
+      }
+
+      i = qEnd + 1;
+    }
     return null;
+  }
+
+  /** Find all image paths in the model, for decorations */
+  function findAllImagePaths(model: MonacoType.editor.ITextModel): MonacoType.editor.IModelDeltaDecoration[] {
+    const decorations: MonacoType.editor.IModelDeltaDecoration[] = [];
+    const lineCount = model.getLineCount();
+    for (let ln = 1; ln <= lineCount; ln++) {
+      const line = model.getLineContent(ln);
+      let i = 0;
+      while (i < line.length) {
+        const qStart = line.indexOf('"', i);
+        if (qStart === -1) break;
+        const qEnd = line.indexOf('"', qStart + 1);
+        if (qEnd === -1) break;
+        const candidate = line.slice(qStart + 1, qEnd);
+        const lower = candidate.toLowerCase();
+        if (IMAGE_EXTENSIONS.some(ext => lower.endsWith(ext))) {
+          decorations.push({
+            range: {
+              startLineNumber: ln, startColumn: qStart + 1,
+              endLineNumber: ln, endColumn: qEnd + 2,
+            },
+            options: { inlineClassName: 'image-path-hover-target' },
+          });
+        }
+        i = qEnd + 1;
+      }
+    }
+    return decorations;
   }
 
   /**
@@ -1562,7 +1601,18 @@ function App() {
       const binaryStr = atob(b64);
       const bytes = new Uint8Array(binaryStr.length);
       for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
-      const { dataURL, width, height, format } = texBufferToDataURL(bytes.buffer);
+
+      const ext = resolvedPath.toLowerCase().slice(resolvedPath.lastIndexOf('.'));
+      let dataURL: string, width: number, height: number, format: number;
+
+      if (ext === '.dds') {
+        const result = ddsBufferToDataURL(bytes.buffer);
+        dataURL = result.dataURL; width = result.width; height = result.height; format = result.format;
+      } else {
+        const result = texBufferToDataURL(bytes.buffer);
+        dataURL = result.dataURL; width = result.width; height = result.height; format = result.format;
+      }
+
       setTabs(prev => prev.map(t =>
         t.id === tabId
           ? { ...t, textureDataUrl: dataURL, textureWidth: width, textureHeight: height, textureFormat: format, textureError: null }
@@ -1694,8 +1744,21 @@ function App() {
 
   /**
    * Resolve a .tex asset path and decode it for the hover popup.
-   * Called whenever the popup's rawPath changes.
+   * Results are cached so re-hovering the same path is instant.
    */
+  const BROWSER_IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.bmp'];
+  const TEX_EXT = '.tex';
+  const POPUP_PREVIEW_MAX_DIM = 512; // downscale large textures for the small popup
+
+  /** Decode base64 string to Uint8Array efficiently */
+  function b64ToBytes(b64: string): Uint8Array {
+    const binaryStr = atob(b64);
+    const len = binaryStr.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) bytes[i] = binaryStr.charCodeAt(i);
+    return bytes;
+  }
+
   const loadTextureForPopup = useCallback(async (rawPath: string, baseFile: string | null) => {
     try {
       const resolved: string | null = baseFile
@@ -1703,44 +1766,46 @@ function App() {
         : null;
 
       if (!resolved) {
-        setTexPopup(prev =>
-          prev?.rawPath === rawPath
-            ? { ...prev, error: `File not found: ${rawPath}`, resolvedPath: null }
-            : prev
-        );
+        setTexPopup(prev => prev?.rawPath === rawPath
+          ? { ...prev, error: `File not found: ${rawPath}`, resolvedPath: null }
+          : prev);
         return;
       }
 
-      const b64: string = await invoke('read_file_base64', { path: resolved });
-      const binaryStr = atob(b64);
-      const bytes = new Uint8Array(binaryStr.length);
-      for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
-      const { dataURL, width, height, format } = texBufferToDataURL(bytes.buffer);
+      const ext = rawPath.toLowerCase().slice(rawPath.lastIndexOf('.'));
 
-      // Import lazily to keep bundle tidy
-      const { formatName } = await import('./lib/texFormat');
-
-      setTexPopup(prev =>
-        prev?.rawPath === rawPath
-          ? {
-              ...prev,
-              resolvedPath: resolved,
-              imageDataUrl: dataURL,
-              texWidth: width,
-              texHeight: height,
-              formatStr: formatName(format),
-              formatNum: format,
-              error: null,
-            }
-          : prev
-      );
+      if (ext === TEX_EXT) {
+        const bytes = b64ToBytes(await invoke('read_file_base64', { path: resolved }));
+        const { dataURL, width, height, format } = texBufferToDataURL(bytes.buffer, POPUP_PREVIEW_MAX_DIM);
+        const { formatName } = await import('./lib/texFormat');
+        setTexPopup(prev => prev?.rawPath === rawPath
+          ? { ...prev, resolvedPath: resolved, imageDataUrl: dataURL, texWidth: width, texHeight: height, formatStr: formatName(format), formatNum: format, error: null }
+          : prev);
+      } else if (ext === '.dds') {
+        const bytes = b64ToBytes(await invoke('read_file_base64', { path: resolved }));
+        const { dataURL, width, height, ddsFormat } = ddsBufferToDataURL(bytes.buffer, POPUP_PREVIEW_MAX_DIM);
+        setTexPopup(prev => prev?.rawPath === rawPath
+          ? { ...prev, resolvedPath: resolved, imageDataUrl: dataURL, texWidth: width, texHeight: height, formatStr: ddsFormatName(ddsFormat), formatNum: 0, error: null }
+          : prev);
+      } else if (BROWSER_IMAGE_EXTS.includes(ext)) {
+        const b64: string = await invoke('read_file_base64', { path: resolved });
+        const mime = ext === '.png' ? 'image/png' : ext === '.bmp' ? 'image/bmp' : 'image/jpeg';
+        const dataURL = `data:${mime};base64,${b64}`;
+        const img = new Image();
+        await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = rej; img.src = dataURL; });
+        setTexPopup(prev => prev?.rawPath === rawPath
+          ? { ...prev, resolvedPath: resolved, imageDataUrl: dataURL, texWidth: img.width, texHeight: img.height, formatStr: ext.slice(1).toUpperCase(), formatNum: 0, error: null }
+          : prev);
+      } else {
+        setTexPopup(prev => prev?.rawPath === rawPath
+          ? { ...prev, resolvedPath: resolved, error: `Preview not supported for ${ext} files`, imageDataUrl: null }
+          : prev);
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      setTexPopup(prev =>
-        prev?.rawPath === rawPath
-          ? { ...prev, error: msg, resolvedPath: null }
-          : prev
-      );
+      setTexPopup(prev => prev?.rawPath === rawPath
+        ? { ...prev, error: msg, resolvedPath: null }
+        : prev);
     }
   }, []);
 
@@ -1942,6 +2007,8 @@ function App() {
       });
     }
 
+
+
     // Update caret position on cursor change - DEBOUNCED to prevent re-render spam
     const caretUpdateTimeoutRef = { current: null as ReturnType<typeof setTimeout> | null };
     const cursorDisposable = editor.onDidChangeCursorPosition((e) => {
@@ -1970,16 +2037,45 @@ function App() {
     editorDisposablesRef.current.push(contextMenuDisposable);
 
     // â”€â”€ Texture path hover detection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    const texMoveHideTimeout = { current: null as ReturnType<typeof setTimeout> | null };
+    let texDwellTimeout: ReturnType<typeof setTimeout> | null = null;
+    let texDismissTimeout: ReturnType<typeof setTimeout> | null = null;
     let lastTexPath = '';
+
+    /** Compute fixed popup position anchored below (or above) the editor line */
+    const computeAnchorPos = (lineNumber: number, column: number) => {
+      const editorDom = editor.getDomNode();
+      if (!editorDom) return null;
+      const pos = editor.getScrolledVisiblePosition({ lineNumber, column });
+      if (!pos) return null;
+      const editorRect = editorDom.getBoundingClientRect();
+      // pos.left is relative to the content area (after line numbers/gutter)
+      const left = editorRect.left + editor.getLayoutInfo().contentLeft + pos.left;
+      const lineBottom = editorRect.top + pos.top + pos.height;
+      const lineTop = editorRect.top + pos.top;
+      const POPUP_H = 320;
+      const spaceBelow = window.innerHeight - lineBottom;
+      const above = spaceBelow < POPUP_H + 8 && lineTop > POPUP_H + 8;
+      const top = above ? lineTop : lineBottom;
+      return { top, left, above };
+    };
+
+    const clearDwell = () => { if (texDwellTimeout) { clearTimeout(texDwellTimeout); texDwellTimeout = null; } };
+    const clearDismiss = () => { if (texDismissTimeout) { clearTimeout(texDismissTimeout); texDismissTimeout = null; } };
+
+    const scheduleDismiss = () => {
+      clearDwell();
+      clearDismiss();
+      texDismissTimeout = setTimeout(() => {
+        if (!isMouseOverPopupRef.current) {
+          setTexPopup(null);
+          lastTexPath = '';
+        }
+      }, 200);
+    };
 
     const mouseMoveDisposable = editor.onMouseMove((e) => {
       if (!e.target.position) {
-        // Mouse left the editor text area - schedule hide
-        if (texMoveHideTimeout.current) clearTimeout(texMoveHideTimeout.current);
-        texMoveHideTimeout.current = setTimeout(() => {
-          if (!isMouseOverPopupRef.current) setTexPopup(null);
-        }, 280);
+        scheduleDismiss();
         return;
       }
 
@@ -1987,57 +2083,90 @@ function App() {
       if (!model) return;
 
       const line = model.getLineContent(e.target.position.lineNumber);
-      const texPath = extractTexPathAtColumn(line, e.target.position.column);
+      const imgMatch = extractImagePathAtColumn(line, e.target.position.column);
 
-      if (texPath) {
-        if (texMoveHideTimeout.current) clearTimeout(texMoveHideTimeout.current);
+      if (imgMatch) {
+        clearDismiss();
 
-        if (texPath !== lastTexPath) {
-          lastTexPath = texPath;
-          // Get the base file path from the currently active tab
-          const baseFile = activeTabRef.current?.filePath ?? null;
-          setTexPopup({
-            x: e.event.posx,
-            y: e.event.posy,
-            rawPath: texPath,
-            resolvedPath: null,
-            imageDataUrl: null,
-            texWidth: 0,
-            texHeight: 0,
-            formatStr: '',
-            formatNum: 0,
-            error: null,
-          });
-          // Kick off async load
-          loadTextureForPopup(texPath, baseFile);
-        } else {
-          // Same path - just update position
-          setTexPopup(prev => prev ? { ...prev, x: e.event.posx, y: e.event.posy } : prev);
+        if (imgMatch.path !== lastTexPath) {
+          // New path — clear any previous dwell and start fresh
+          clearDwell();
+          lastTexPath = imgMatch.path;
+          const anchorLine = e.target.position.lineNumber;
+          const anchorCol = imgMatch.startCol;
+
+          texDwellTimeout = setTimeout(() => {
+            texDwellTimeout = null;
+            const anchor = computeAnchorPos(anchorLine, anchorCol);
+            if (!anchor) return;
+            const baseFile = activeTabRef.current?.filePath ?? null;
+            setTexPopup({
+              top: anchor.top,
+              left: anchor.left,
+              above: anchor.above,
+              rawPath: imgMatch.path,
+              resolvedPath: null,
+              imageDataUrl: null,
+              texWidth: 0,
+              texHeight: 0,
+              formatStr: '',
+              formatNum: 0,
+              error: null,
+            });
+            loadTextureForPopup(imgMatch.path, baseFile);
+          }, 400);
         }
+        // Same path — popup is already anchored, do nothing (static position)
       } else {
-        lastTexPath = '';
-        if (texMoveHideTimeout.current) clearTimeout(texMoveHideTimeout.current);
-        texMoveHideTimeout.current = setTimeout(() => {
-          if (!isMouseOverPopupRef.current) setTexPopup(null);
-        }, 280);
+        scheduleDismiss();
       }
     });
     editorDisposablesRef.current.push(mouseMoveDisposable);
-    editorDisposablesRef.current.push({
-      dispose: () => {
-        if (texMoveHideTimeout.current) clearTimeout(texMoveHideTimeout.current);
-      }
-    });
 
     const mouseLeaveDisposable = editor.onMouseLeave(() => {
-      lastTexPath = '';
-      if (texMoveHideTimeout.current) clearTimeout(texMoveHideTimeout.current);
-      texMoveHideTimeout.current = setTimeout(() => {
-        if (!isMouseOverPopupRef.current) setTexPopup(null);
-      }, 280);
+      scheduleDismiss();
     });
     editorDisposablesRef.current.push(mouseLeaveDisposable);
+
+    // Dismiss on scroll so it doesn't float detached from the text
+    const scrollDisposable = editor.onDidScrollChange(() => {
+      if (texPopupRef.current && !isMouseOverPopupRef.current) {
+        clearDwell();
+        setTexPopup(null);
+        lastTexPath = '';
+      }
+    });
+    editorDisposablesRef.current.push(scrollDisposable);
+
+    editorDisposablesRef.current.push({
+      dispose: () => { clearDwell(); clearDismiss(); }
+    });
     // â”€â”€ End texture hover detection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+    // â”€â”€ Image path pointer-cursor decorations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    let imgPathDecorations: string[] = [];
+    let imgDecDebounce: ReturnType<typeof setTimeout> | null = null;
+    const refreshImagePathDecorations = () => {
+      const model = editor.getModel();
+      if (!model) return;
+      imgPathDecorations = editor.deltaDecorations(imgPathDecorations, findAllImagePaths(model));
+    };
+    const debouncedRefreshImagePathDecorations = () => {
+      if (imgDecDebounce) clearTimeout(imgDecDebounce);
+      imgDecDebounce = setTimeout(refreshImagePathDecorations, 300);
+    };
+    // Apply on mount and debounce on content changes
+    refreshImagePathDecorations();
+    const imgDecContentDisposable = editor.onDidChangeModelContent(() => { debouncedRefreshImagePathDecorations(); });
+    const imgDecModelDisposable = editor.onDidChangeModel(() => { refreshImagePathDecorations(); });
+    editorDisposablesRef.current.push(imgDecContentDisposable, imgDecModelDisposable);
+    editorDisposablesRef.current.push({ dispose: () => { if (imgDecDebounce) clearTimeout(imgDecDebounce); editor.deltaDecorations(imgPathDecorations, []); } });
+    // â”€â”€ End image path decorations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+    // â”€â”€ Refocus editor on window focus (so hover works after alt-tab) â”€â”€â”€
+    const onWindowFocus = () => { editor.focus(); };
+    window.addEventListener('focus', onWindowFocus);
+    editorDisposablesRef.current.push({ dispose: () => { window.removeEventListener('focus', onWindowFocus); } });
 
     // Restore view state for active tab (model-switching effect will handle this on tab changes)
     // On initial mount, trigger model setup for the first tab
@@ -3260,8 +3389,9 @@ function App() {
       {/* Texture hover popup */}
       {texPopup && (
         <TexHoverPopup
-          x={texPopup.x}
-          y={texPopup.y}
+          top={texPopup.top}
+          left={texPopup.left}
+          above={texPopup.above}
           rawPath={texPopup.rawPath}
           resolvedPath={texPopup.resolvedPath}
           imageDataUrl={texPopup.imageDataUrl}

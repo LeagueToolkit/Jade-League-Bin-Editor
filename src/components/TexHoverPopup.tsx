@@ -2,9 +2,12 @@ import { useEffect, useRef } from 'react';
 import './TexHoverPopup.css';
 
 export interface TexHoverPopupProps {
-  /** Pixel coords (fixed/page) where the popup should anchor */
-  x: number;
-  y: number;
+  /** Pixel Y where the popup anchors (line top or bottom edge) */
+  top: number;
+  /** Pixel X for the popup (line start) */
+  left: number;
+  /** If true, popup opens above the line instead of below */
+  above: boolean;
   /** Raw path string extracted from the editor */
   rawPath: string;
   /** Resolved absolute path, null while resolving */
@@ -27,7 +30,7 @@ export interface TexHoverPopupProps {
 }
 
 export default function TexHoverPopup({
-  x, y,
+  top, left, above,
   rawPath,
   resolvedPath,
   imageDataUrl,
@@ -42,19 +45,21 @@ export default function TexHoverPopup({
 }: TexHoverPopupProps) {
   const popupRef = useRef<HTMLDivElement>(null);
 
-  // Clamp popup so it never goes off-screen
+  // Position: anchored below or above the line, clamped to viewport
   const POPUP_W = 260;
-  const POPUP_H = 320;
-  const MARGIN = 12;
+  const GAP = 4;
   const vw = window.innerWidth;
-  const vh = window.innerHeight;
 
-  let left = x + MARGIN;
-  let top = y + MARGIN;
-  if (left + POPUP_W > vw) left = x - POPUP_W - MARGIN;
-  if (top + POPUP_H > vh) top = y - POPUP_H - MARGIN;
-  left = Math.max(MARGIN, left);
-  top = Math.max(MARGIN, top);
+  let finalLeft = left;
+  if (finalLeft + POPUP_W > vw - 8) finalLeft = vw - POPUP_W - 8;
+  if (finalLeft < 8) finalLeft = 8;
+
+  const style: React.CSSProperties = {
+    left: finalLeft,
+    ...(above
+      ? { bottom: window.innerHeight - top + GAP }
+      : { top: top + GAP }),
+  };
 
   const fileName = rawPath.replace(/\\/g, '/').split('/').pop() || rawPath;
 
@@ -79,7 +84,7 @@ export default function TexHoverPopup({
     <div
       ref={popupRef}
       className="tex-hover-popup"
-      style={{ left, top }}
+      style={style}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onDismiss}
     >

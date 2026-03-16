@@ -314,15 +314,15 @@ export function createMonacoTheme(monaco: Monaco, themeId: string, syntaxThemeId
             'editor.selectionBackground': '#264F78',
             'editor.inactiveSelectionBackground': '#3A3D41',
 
-            // Find/Replace Widget
+            // Find/Replace Widget & Color Picker
             'editorWidget.background': theme?.editorBg || '#252526',
-            'editorWidget.border': '#454545',
-            'editorWidget.resizeBorder': '#454545',
+            'editorWidget.border': theme?.selectedTab || '#454545',
+            'editorWidget.resizeBorder': theme?.selectedTab || '#454545',
 
             // Input fields in widgets
             'input.background': theme?.tabBg || '#3C3C3C',
             'input.foreground': textColor,
-            'input.border': '#3C3C3C',
+            'input.border': theme?.tabBg || '#3C3C3C',
 
             // Buttons
             'button.background': '#0E639C',
