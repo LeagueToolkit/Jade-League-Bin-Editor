@@ -1701,6 +1701,12 @@ function App() {
             editorMtimeRef.current.set(tab.id, mtime);
           } else if (mtime !== last) {
             editorMtimeRef.current.set(tab.id, mtime);
+            // Skip auto-reload when Quartz session is active — let Quartz diff handle it
+            const quartzSession = quartzSessionsRef.current.get(tab.filePath.toLowerCase());
+            if (quartzSession) {
+              console.log('[AutoReload] Skipping reload (Quartz session active):', tab.filePath);
+              continue;
+            }
             // File changed on disk — reload the bin content
             console.log('[AutoReload] File changed externally:', tab.filePath);
             try {
@@ -2438,10 +2444,23 @@ function App() {
         } catch (interopErr) {
           console.warn('[QuartzInterop][Jade] notify_quartz_bin_updated failed on save:', interopErr);
         }
-        // Update mtime so auto-reload poller doesn't trigger on our own save
-        invoke<number>('get_file_mtime', { path: activeTab.filePath })
-          .then(mtime => editorMtimeRef.current.set(activeTab.id, mtime))
-          .catch(() => {});
+        // Update mtime so auto-reload poller and Quartz poller don't trigger on our own save
+        // Must await to prevent race with the 2s poll interval
+        try {
+          const savedMtime = await invoke<number>('get_file_mtime', { path: activeTab.filePath });
+          editorMtimeRef.current.set(activeTab.id, savedMtime);
+          // Also update Quartz session mtime + snapshot so its poller skips this change
+          const quartzKey = activeTab.filePath.toLowerCase();
+          const quartzSession = quartzSessionsRef.current.get(quartzKey);
+          if (quartzSession) {
+            quartzSessionsRef.current.set(quartzKey, {
+              ...quartzSession,
+              lastSeenMtime: savedMtime,
+              snapshotContent: content,
+              forceContentCheck: false,
+            });
+          }
+        } catch { /* ignore */ }
         setTabs(prevTabs =>
           prevTabs.map(t =>
             t.id === activeTabId ? { ...t, content, isModified: false } : t
@@ -2492,6 +2511,21 @@ function App() {
         } catch (interopErr) {
           console.warn('[QuartzInterop][Jade] notify_quartz_bin_updated failed on save-as:', interopErr);
         }
+        // Update mtime so pollers don't trigger on our own save
+        try {
+          const savedMtime = await invoke<number>('get_file_mtime', { path: newPath });
+          editorMtimeRef.current.set(activeTab.id, savedMtime);
+          const quartzKey = newPath.toLowerCase();
+          const quartzSession = quartzSessionsRef.current.get(quartzKey);
+          if (quartzSession) {
+            quartzSessionsRef.current.set(quartzKey, {
+              ...quartzSession,
+              lastSeenMtime: savedMtime,
+              snapshotContent: content,
+              forceContentCheck: false,
+            });
+          }
+        } catch { /* ignore */ }
         setTabs(prevTabs =>
           prevTabs.map(t =>
             t.id === activeTabId ? {
