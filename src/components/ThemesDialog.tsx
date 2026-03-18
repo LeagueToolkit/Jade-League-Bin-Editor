@@ -56,7 +56,12 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
     const [customBackgroundSaturation, setCustomBackgroundSaturation] = useState(100);
     const [customBackgroundOpacity, setCustomBackgroundOpacity] = useState(100);
     const [customBackgroundVignette, setCustomBackgroundVignette] = useState(0);
+    const [customBackgroundPosX, setCustomBackgroundPosX] = useState(50);
+    const [customBackgroundPosY, setCustomBackgroundPosY] = useState(50);
+    const [customBackgroundZoom, setCustomBackgroundZoom] = useState(1);
+    const [bgImageSize, setBgImageSize] = useState<{ w: number; h: number } | null>(null);
     const backgroundInputRef = useRef<HTMLInputElement | null>(null);
+    const viewportPickerRef = useRef<HTMLDivElement | null>(null);
     const uiPreviewRef = useRef<HTMLIFrameElement | null>(null);
     const uiPreviewContainerRef = useRef<HTMLDivElement | null>(null);
 
@@ -141,6 +146,21 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
         if (isOpen) loadPreferences();
     }, [isOpen]);
 
+    // Non-passive wheel listener so we can preventDefault (React onWheel is passive)
+    useEffect(() => {
+        const el = viewportPickerRef.current;
+        if (!el) return;
+        const handler = (e: WheelEvent) => {
+            e.preventDefault();
+            const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+            setCustomBackgroundZoom(prev =>
+                Math.round(Math.min(5, Math.max(1, prev * factor)) * 100) / 100
+            );
+        };
+        el.addEventListener('wheel', handler, { passive: false });
+        return () => el.removeEventListener('wheel', handler);
+    });
+
     const clampBlur = (value: number): number => Math.min(40, Math.max(0, value));
 
     const handleBackgroundFileSelected = (event: ChangeEvent<HTMLInputElement>) => {
@@ -183,6 +203,10 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
         setCustomBackgroundSaturation(100);
         setCustomBackgroundOpacity(100);
         setCustomBackgroundVignette(0);
+        setCustomBackgroundPosX(50);
+        setCustomBackgroundPosY(50);
+        setCustomBackgroundZoom(1);
+        setBgImageSize(null);
     };
 
     const loadPreferences = async () => {
@@ -202,6 +226,9 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
             const backgroundSaturationRaw = await invoke<string>('get_preference', { key: 'CustomBackgroundSaturation', defaultValue: '100' });
             const backgroundOpacityRaw = await invoke<string>('get_preference', { key: 'CustomBackgroundOpacity', defaultValue: '100' });
             const backgroundVignetteRaw = await invoke<string>('get_preference', { key: 'CustomBackgroundVignette', defaultValue: '0' });
+            const backgroundPosXRaw = await invoke<string>('get_preference', { key: 'CustomBackgroundPositionX', defaultValue: '50' });
+            const backgroundPosYRaw = await invoke<string>('get_preference', { key: 'CustomBackgroundPositionY', defaultValue: '50' });
+            const backgroundZoomRaw = await invoke<string>('get_preference', { key: 'CustomBackgroundZoom', defaultValue: '1' });
 
             setSelectedTheme(theme);
             setSelectedSyntaxTheme(syntaxTheme);
@@ -233,6 +260,18 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
             {
                 const v = Number.parseInt(backgroundVignetteRaw, 10);
                 setCustomBackgroundVignette(Number.isFinite(v) ? Math.min(100, Math.max(0, v)) : 0);
+            }
+            {
+                const px = Number.parseFloat(backgroundPosXRaw);
+                setCustomBackgroundPosX(Number.isFinite(px) ? px : 50);
+            }
+            {
+                const py = Number.parseFloat(backgroundPosYRaw);
+                setCustomBackgroundPosY(Number.isFinite(py) ? py : 50);
+            }
+            {
+                const z = Number.parseFloat(backgroundZoomRaw);
+                setCustomBackgroundZoom(Number.isFinite(z) && z >= 1 ? z : 1);
             }
 
             if (useCustom === 'true') {
@@ -310,6 +349,9 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
             await invoke('set_preference', { key: 'CustomBackgroundSaturation', value: String(customBackgroundSaturation) });
             await invoke('set_preference', { key: 'CustomBackgroundOpacity', value: String(customBackgroundOpacity) });
             await invoke('set_preference', { key: 'CustomBackgroundVignette', value: String(customBackgroundVignette) });
+            await invoke('set_preference', { key: 'CustomBackgroundPositionX', value: String(customBackgroundPosX) });
+            await invoke('set_preference', { key: 'CustomBackgroundPositionY', value: String(customBackgroundPosY) });
+            await invoke('set_preference', { key: 'CustomBackgroundZoom', value: String(customBackgroundZoom) });
 
             applyRoundedCorners(roundedCorners);
             applyModernUI(modernUI);
@@ -321,14 +363,15 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
                 saturation: customBackgroundSaturation / 100,
                 opacity: customBackgroundOpacity / 100,
                 vignette: customBackgroundVignette / 100,
+                positionX: customBackgroundPosX,
+                positionY: customBackgroundPosY,
+                zoom: customBackgroundZoom,
             });
             window.dispatchEvent(new CustomEvent('cigarette-mode-changed', { detail: cigaretteMode }));
 
             onThemeApplied?.(useCustomTheme ? 'Custom' : selectedTheme);
-            alert('Theme applied successfully!');
         } catch (error) {
             console.error('Failed to save theme preferences:', error);
-            alert('Failed to apply theme. Please try again.');
         }
     };
 
@@ -675,33 +718,123 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
                     </div>
                 </div>
 
-                <div className="background-preview">
+                <div
+                    className="background-viewport-picker"
+                    ref={viewportPickerRef}
+                >
                     {customBackgroundImage ? (
                         <>
                             <img
                                 src={customBackgroundImage}
-                                className="background-preview-sizer"
+                                className="viewport-picker-image"
                                 alt=""
-                            />
-                            <div
-                                className="background-preview-image"
-                                style={{
-                                    backgroundImage: `url(${customBackgroundImage})`,
-                                    filter: `blur(${customBackgroundBlur}px) brightness(${customBackgroundBrightness / 100}) saturate(${customBackgroundSaturation / 100})`,
-                                    opacity: customBackgroundOpacity / 100,
+                                draggable={false}
+                                onLoad={e => {
+                                    const img = e.currentTarget;
+                                    setBgImageSize({ w: img.naturalWidth, h: img.naturalHeight });
                                 }}
                             />
-                            {customBackgroundVignette > 0 && (
-                                <div
-                                    className="background-preview-vignette"
-                                    style={{
-                                        background: `radial-gradient(ellipse at center, transparent 40%, rgba(0, 0, 0, ${customBackgroundVignette / 100}))`,
-                                    }}
-                                />
-                            )}
+                            {bgImageSize && (() => {
+                                const picker = viewportPickerRef.current;
+                                if (!picker) return null;
+                                const pickerW = picker.clientWidth;
+                                const pickerH = picker.clientHeight;
+                                const imgW = bgImageSize.w;
+                                const imgH = bgImageSize.h;
+                                const imgAspect = imgW / imgH;
+                                const pickerAspect = pickerW / pickerH;
+
+                                let displayW: number, displayH: number, offsetX: number, offsetY: number;
+                                if (imgAspect > pickerAspect) {
+                                    displayW = pickerW;
+                                    displayH = pickerW / imgAspect;
+                                    offsetX = 0;
+                                    offsetY = (pickerH - displayH) / 2;
+                                } else {
+                                    displayH = pickerH;
+                                    displayW = pickerH * imgAspect;
+                                    offsetX = (pickerW - displayW) / 2;
+                                    offsetY = 0;
+                                }
+
+                                const appAspect = window.innerWidth / window.innerHeight;
+                                let coverVisW: number, coverVisH: number;
+                                if (appAspect > imgAspect) {
+                                    coverVisW = imgW;
+                                    coverVisH = imgW / appAspect;
+                                } else {
+                                    coverVisH = imgH;
+                                    coverVisW = imgH * appAspect;
+                                }
+
+                                const visW = coverVisW / customBackgroundZoom;
+                                const visH = coverVisH / customBackgroundZoom;
+                                const imageScale = displayW / imgW;
+                                const boxW = visW * imageScale;
+                                const boxH = visH * imageScale;
+                                const panRangeW = (imgW - visW) * imageScale;
+                                const panRangeH = (imgH - visH) * imageScale;
+                                const boxX = offsetX + panRangeW * customBackgroundPosX / 100;
+                                const boxY = offsetY + panRangeH * customBackgroundPosY / 100;
+
+                                return (
+                                    <div
+                                        className="viewport-picker-box"
+                                        style={{
+                                            left: boxX,
+                                            top: boxY,
+                                            width: Math.max(boxW, 8),
+                                            height: Math.max(boxH, 8),
+                                        }}
+                                        onMouseDown={e => {
+                                            e.preventDefault();
+                                            const startX = e.clientX;
+                                            const startY = e.clientY;
+                                            const startPosX = customBackgroundPosX;
+                                            const startPosY = customBackgroundPosY;
+
+                                            const onMove = (ev: MouseEvent) => {
+                                                const dx = ev.clientX - startX;
+                                                const dy = ev.clientY - startY;
+                                                if (panRangeW > 0) {
+                                                    setCustomBackgroundPosX(
+                                                        Math.min(100, Math.max(0, startPosX + (dx / panRangeW) * 100))
+                                                    );
+                                                }
+                                                if (panRangeH > 0) {
+                                                    setCustomBackgroundPosY(
+                                                        Math.min(100, Math.max(0, startPosY + (dy / panRangeH) * 100))
+                                                    );
+                                                }
+                                            };
+                                            const onUp = () => {
+                                                document.removeEventListener('mousemove', onMove);
+                                                document.removeEventListener('mouseup', onUp);
+                                            };
+                                            document.addEventListener('mousemove', onMove);
+                                            document.addEventListener('mouseup', onUp);
+                                        }}
+                                    />
+                                );
+                            })()}
+                            <div className="viewport-picker-hud">
+                                <span className="viewport-picker-zoom">{customBackgroundZoom.toFixed(1)}x</span>
+                                {customBackgroundZoom > 1 && (
+                                    <button
+                                        className="viewport-picker-reset"
+                                        onClick={() => {
+                                            setCustomBackgroundZoom(1);
+                                            setCustomBackgroundPosX(50);
+                                            setCustomBackgroundPosY(50);
+                                        }}
+                                    >
+                                        Reset
+                                    </button>
+                                )}
+                            </div>
                         </>
                     ) : (
-                        <div className="background-preview-empty">Image preview</div>
+                        <div className="background-preview-empty">Scroll to zoom, drag to position</div>
                     )}
                 </div>
             </div>

@@ -99,11 +99,11 @@ body {
   inset: -2%;
   background-image: var(--custom-bg-image);
   background-size: cover;
-  background-position: center;
+  background-position: var(--custom-bg-position, center);
   background-repeat: no-repeat;
   filter: blur(var(--custom-bg-blur)) brightness(var(--custom-bg-brightness)) saturate(var(--custom-bg-saturation));
   transform: scale(var(--custom-bg-scale));
-  transform-origin: center;
+  transform-origin: var(--custom-bg-origin, center);
   pointer-events: none;
   opacity: 0;
   transition: opacity 0.2s ease;
@@ -119,6 +119,27 @@ body {
   transition: opacity 0.2s ease;
   z-index: -1;
   background: radial-gradient(ellipse at center, transparent 40%, rgba(0, 0, 0, var(--custom-bg-vignette)));
+}
+
+[data-custom-background='true'] .app-container {
+  background: transparent !important;
+}
+
+[data-custom-background='true'] .editor-container {
+  background: transparent !important;
+}
+
+[data-custom-background='true'] .welcome-screen {
+  background: transparent !important;
+}
+
+[data-custom-background='true'] .monaco-editor,
+[data-custom-background='true'] .monaco-editor .overflow-guard,
+[data-custom-background='true'] .monaco-editor .monaco-editor-background,
+[data-custom-background='true'] .monaco-editor .lines-content,
+[data-custom-background='true'] .monaco-editor .margin {
+  background: transparent !important;
+  background-color: transparent !important;
 }
 
 [data-custom-background='true'] .app-container::before {

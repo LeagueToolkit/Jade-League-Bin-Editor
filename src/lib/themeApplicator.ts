@@ -28,6 +28,9 @@ interface CustomBackgroundOptions {
     saturation?: number;
     opacity?: number;
     vignette?: number;
+    positionX?: number;
+    positionY?: number;
+    zoom?: number;
 }
 
 /**
@@ -170,7 +173,8 @@ export function applyTheme(themeId: string, customColors?: CustomThemeColors) {
  */
 function updateMonacoBackground(bgColor: string) {
     const isModern = document.documentElement.getAttribute('data-ui-mode') === 'modern';
-    const bg = isModern ? 'transparent' : bgColor;
+    const hasCustomBg = document.documentElement.getAttribute('data-custom-background') === 'true';
+    const bg = (isModern || hasCustomBg) ? 'transparent' : bgColor;
 
     const selectors = [
         '.monaco-editor',
@@ -238,27 +242,43 @@ export function applyCustomBackground(options: CustomBackgroundOptions) {
         root.style.removeProperty('--custom-bg-saturation');
         root.style.removeProperty('--custom-bg-opacity');
         root.style.removeProperty('--custom-bg-vignette');
+        root.style.removeProperty('--custom-bg-position');
+        root.style.removeProperty('--custom-bg-origin');
+        // Refresh Monaco so it reverts to its solid editor background.
+        const editorBg =
+            root.style.getPropertyValue('--editor-bg') ||
+            getComputedStyle(root).getPropertyValue('--editor-bg').trim() ||
+            '#1E1E1E';
+        updateMonacoBackground(editorBg);
         return;
     }
 
     const parsedBlur = Number.isFinite(options.blur) ? Number(options.blur) : 8;
     const blur = Math.min(40, Math.max(0, parsedBlur));
-    const scale = (1 + (blur / 100)).toFixed(2);
+    const userZoom = Math.min(5, Math.max(1, options.zoom ?? 1));
+    const totalScale = ((1 + blur / 100) * userZoom).toFixed(2);
     const escapedUrl = imageDataUrl.replace(/"/g, '\\"');
 
     const brightness = Math.min(1, Math.max(0, options.brightness ?? 1));
     const saturation = Math.min(1, Math.max(0, options.saturation ?? 1));
     const opacity = Math.min(1, Math.max(0, options.opacity ?? 1));
     const vignette = Math.min(1, Math.max(0, options.vignette ?? 0));
+    const posX = Math.min(100, Math.max(0, options.positionX ?? 50));
+    const posY = Math.min(100, Math.max(0, options.positionY ?? 50));
 
     root.setAttribute('data-custom-background', 'true');
     root.style.setProperty('--custom-bg-image', `url("${escapedUrl}")`);
     root.style.setProperty('--custom-bg-blur', `${blur}px`);
-    root.style.setProperty('--custom-bg-scale', scale);
+    root.style.setProperty('--custom-bg-scale', totalScale);
     root.style.setProperty('--custom-bg-brightness', brightness.toFixed(2));
     root.style.setProperty('--custom-bg-saturation', saturation.toFixed(2));
     root.style.setProperty('--custom-bg-opacity', opacity.toFixed(2));
     root.style.setProperty('--custom-bg-vignette', vignette.toFixed(2));
+    root.style.setProperty('--custom-bg-position', `${posX}% ${posY}%`);
+    root.style.setProperty('--custom-bg-origin', `${posX}% ${posY}%`);
+
+    // Make Monaco transparent so the background image shows through.
+    updateMonacoBackground('transparent');
 }
 
 /**
@@ -408,6 +428,9 @@ export async function loadSavedTheme(
         const customBackgroundSaturationRaw = await invoke('get_preference', { key: 'CustomBackgroundSaturation', defaultValue: '100' }) as string;
         const customBackgroundOpacityRaw = await invoke('get_preference', { key: 'CustomBackgroundOpacity', defaultValue: '100' }) as string;
         const customBackgroundVignetteRaw = await invoke('get_preference', { key: 'CustomBackgroundVignette', defaultValue: '0' }) as string;
+        const customBackgroundPosXRaw = await invoke('get_preference', { key: 'CustomBackgroundPositionX', defaultValue: '50' }) as string;
+        const customBackgroundPosYRaw = await invoke('get_preference', { key: 'CustomBackgroundPositionY', defaultValue: '50' }) as string;
+        const customBackgroundZoomRaw = await invoke('get_preference', { key: 'CustomBackgroundZoom', defaultValue: '1' }) as string;
 
         // Apply rounded corners (default to true/ON)
         applyRoundedCorners(roundedCorners === 'true');
@@ -459,6 +482,9 @@ export async function loadSavedTheme(
             saturation: parsePercent(customBackgroundSaturationRaw, 1),
             opacity: parsePercent(customBackgroundOpacityRaw, 1),
             vignette: parsePercent(customBackgroundVignetteRaw, 0),
+            positionX: Number.isFinite(Number.parseFloat(customBackgroundPosXRaw)) ? Number.parseFloat(customBackgroundPosXRaw) : 50,
+            positionY: Number.isFinite(Number.parseFloat(customBackgroundPosYRaw)) ? Number.parseFloat(customBackgroundPosYRaw) : 50,
+            zoom: Number.isFinite(Number.parseFloat(customBackgroundZoomRaw)) ? Math.max(1, Number.parseFloat(customBackgroundZoomRaw)) : 1,
         });
 
         // Load custom syntax theme if enabled
