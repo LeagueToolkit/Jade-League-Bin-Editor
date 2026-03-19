@@ -324,7 +324,7 @@ pub fn update_window_icon(app: &tauri::AppHandle, icon_path: &str) -> Result<(),
 
     // Update all windows
     if let Some(window) = app.get_webview_window("main") {
-        window.set_icon(icon)
+        window.set_icon(icon.clone())
             .map_err(|e| format!("Failed to set window icon: {}", e))?;
 
         // Also set the icon via Win32 API and refresh the taskbar
@@ -334,6 +334,11 @@ pub fn update_window_icon(app: &tauri::AppHandle, icon_path: &str) -> Result<(),
                 eprintln!("[Icon] Failed to set native taskbar icon: {}", e);
             }
         }
+    }
+
+    // Update tray icon
+    if let Some(tray) = app.tray_by_id("main") {
+        let _ = tray.set_icon(Some(icon));
     }
 
     Ok(())
@@ -642,17 +647,22 @@ pub async fn clear_custom_icon(app: tauri::AppHandle) -> Result<(), String> {
     }
 
     // Restore default window icon + taskbar refresh
-    if let Some(window) = app.get_webview_window("main") {
-        if let Some(icon) = app.default_window_icon().cloned() {
-            window.set_icon(icon)
+    if let Some(icon) = app.default_window_icon().cloned() {
+        if let Some(window) = app.get_webview_window("main") {
+            window.set_icon(icon.clone())
                 .map_err(|e| format!("Failed to restore default icon: {}", e))?;
+
+            #[cfg(target_os = "windows")]
+            {
+                if let Err(e) = restore_native_default_icon(&window, &app) {
+                    eprintln!("[Icon] Failed to restore native taskbar icon: {}", e);
+                }
+            }
         }
 
-        #[cfg(target_os = "windows")]
-        {
-            if let Err(e) = restore_native_default_icon(&window, &app) {
-                eprintln!("[Icon] Failed to restore native taskbar icon: {}", e);
-            }
+        // Restore tray icon to default
+        if let Some(tray) = app.tray_by_id("main") {
+            let _ = tray.set_icon(Some(icon));
         }
     }
 

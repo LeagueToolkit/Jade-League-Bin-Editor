@@ -236,12 +236,10 @@ fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .item(&quit_item)
         .build()?;
 
-    // Load tray icon from app's default window icon
-    let icon = app.default_window_icon()
-        .cloned()
-        .ok_or("No default window icon found")?;
+    // Use custom icon if one was saved, otherwise fall back to default
+    let icon = load_tray_icon(app);
 
-    let _tray = TrayIconBuilder::new()
+    let _tray = TrayIconBuilder::with_id("main")
         .icon(icon)
         .menu(&menu)
         .tooltip("Jade - League Bin Editor")
@@ -280,6 +278,26 @@ fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Load the best available icon for the tray: custom if saved, otherwise default.
+fn load_tray_icon(app: &tauri::App) -> tauri::image::Image<'static> {
+    // Try to load the saved custom icon synchronously
+    let custom = tauri::async_runtime::block_on(async {
+        app_commands::get_custom_icon_path(app.handle().clone()).await
+    });
+    if let Ok(Some(ref path)) = custom {
+        if std::path::Path::new(path).exists() {
+            if let Ok(img) = image::open(path) {
+                let rgba = img.to_rgba8();
+                let (w, h) = rgba.dimensions();
+                return tauri::image::Image::new_owned(rgba.into_raw(), w, h);
+            }
+        }
+    }
+    // Fallback to default — copy data into an owned Image to satisfy 'static
+    let default = app.default_window_icon().expect("No default window icon found");
+    tauri::image::Image::new_owned(default.rgba().to_vec(), default.width(), default.height())
+}
+
 /// Apply a saved icon to the window on startup
 fn apply_saved_icon(app: &tauri::AppHandle, icon_path: &str) -> Result<(), String> {
     if !std::path::Path::new(icon_path).exists() {
@@ -296,7 +314,7 @@ fn apply_saved_icon(app: &tauri::AppHandle, icon_path: &str) -> Result<(), Strin
     let icon = tauri::image::Image::new_owned(rgba_data, width, height);
 
     if let Some(window) = app.get_webview_window("main") {
-        window.set_icon(icon)
+        window.set_icon(icon.clone())
             .map_err(|e| format!("Failed to set window icon: {}", e))?;
 
         // Also set via Win32 API to update taskbar icon in release builds
@@ -306,6 +324,11 @@ fn apply_saved_icon(app: &tauri::AppHandle, icon_path: &str) -> Result<(), Strin
                 eprintln!("[Icon] Failed to set native taskbar icon on startup: {}", e);
             }
         }
+    }
+
+    // Update tray icon too
+    if let Some(tray) = app.tray_by_id("main") {
+        let _ = tray.set_icon(Some(icon));
     }
 
     Ok(())
