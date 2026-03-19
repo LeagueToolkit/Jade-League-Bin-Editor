@@ -3,13 +3,20 @@ import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import './AboutDialog.css';
 
+const BUILTIN_ICONS = [
+    { name: 'jade', path: '/media/jade.ico', label: 'Jade' },
+    { name: 'jadejade', path: '/media/jadejade.ico', label: 'JadeJade' },
+    { name: 'noBrain', path: '/media/noBrain.ico', label: 'No Brain' },
+];
+
 interface AboutDialogProps {
     isOpen: boolean;
     onClose: () => void;
 }
 
 export default function AboutDialog({ isOpen, onClose }: AboutDialogProps) {
-    const [appIcon, setAppIcon] = useState<string>('/jade.ico');
+    const [appIcon, setAppIcon] = useState<string>('/media/jade.ico');
+    const [selectedBuiltin, setSelectedBuiltin] = useState<string | null>('jade');
     const [version, setVersion] = useState<string>('1.0.0');
 
     useEffect(() => {
@@ -21,12 +28,29 @@ export default function AboutDialog({ isOpen, onClose }: AboutDialogProps) {
 
     const loadAppIcon = async () => {
         try {
+            // Check if a builtin icon is selected
+            const builtinName = await invoke<string | null>('get_builtin_icon_name');
+            setSelectedBuiltin(builtinName);
+
+            if (builtinName) {
+                // Using a builtin icon
+                const icon = BUILTIN_ICONS.find(i => i.name === builtinName);
+                if (icon) {
+                    setAppIcon(icon.path);
+                    return;
+                }
+            }
+
+            // Check for custom icon
             const iconData = await invoke<string | null>('get_custom_icon_data');
             if (iconData) {
                 setAppIcon(iconData);
+            } else {
+                setAppIcon('/media/jade.ico');
+                setSelectedBuiltin('jade');
             }
         } catch (error) {
-            console.error('Failed to load custom icon:', error);
+            console.error('Failed to load icon:', error);
         }
     };
 
@@ -39,7 +63,31 @@ export default function AboutDialog({ isOpen, onClose }: AboutDialogProps) {
         }
     };
 
-    const handleIconClick = async () => {
+    const handleBuiltinIconSelect = async (iconName: string) => {
+        try {
+            if (iconName === 'jade') {
+                // Jade is the default — just clear any custom/builtin override
+                await invoke('clear_custom_icon');
+                setAppIcon('/media/jade.ico');
+                setSelectedBuiltin('jade');
+                window.dispatchEvent(new CustomEvent('icon-changed', { detail: null }));
+            } else {
+                await invoke('set_builtin_icon', { name: iconName });
+                const icon = BUILTIN_ICONS.find(i => i.name === iconName);
+                if (icon) {
+                    setAppIcon(icon.path);
+                }
+                setSelectedBuiltin(iconName);
+                // Get the icon as base64 for the title bar
+                const iconData = await invoke<string | null>('get_custom_icon_data');
+                window.dispatchEvent(new CustomEvent('icon-changed', { detail: iconData }));
+            }
+        } catch (error) {
+            console.error('Failed to set builtin icon:', error);
+        }
+    };
+
+    const handleCustomIconClick = async () => {
         try {
             const filePath = await open({
                 filters: [{
@@ -51,11 +99,10 @@ export default function AboutDialog({ isOpen, onClose }: AboutDialogProps) {
 
             if (filePath) {
                 await invoke('set_custom_icon', { iconPath: filePath });
-                // Get the icon as base64 data URL
                 const iconData = await invoke<string | null>('get_custom_icon_data');
                 if (iconData) {
                     setAppIcon(iconData);
-                    // Notify parent to update title bar icon
+                    setSelectedBuiltin(null);
                     window.dispatchEvent(new CustomEvent('icon-changed', { detail: iconData }));
                 }
             }
@@ -67,7 +114,8 @@ export default function AboutDialog({ isOpen, onClose }: AboutDialogProps) {
     const handleClearIcon = async () => {
         try {
             await invoke('clear_custom_icon');
-            setAppIcon('/jade.ico');
+            setAppIcon('/media/jade.ico');
+            setSelectedBuiltin('jade');
             window.dispatchEvent(new CustomEvent('icon-changed', { detail: null }));
         } catch (error) {
             console.error('Failed to clear icon:', error);
@@ -104,22 +152,53 @@ export default function AboutDialog({ isOpen, onClose }: AboutDialogProps) {
                     {/* Left Column: App Info */}
                     <div className="about-column">
                         <div className="about-app-info">
-                            <div className="about-icon-wrapper">
-                                <button
-                                    className="about-icon-button"
-                                    onClick={handleIconClick}
-                                    title="Click to change application icon"
-                                >
-                                    <img src={appIcon} alt="Jade" className="about-app-icon" />
-                                    <div className="about-icon-edit-badge about-icon-badge-left">✎</div>
-                                </button>
-                                {appIcon !== '/jade.ico' && (
-                                    <button
-                                        className="about-icon-clear-badge"
-                                        onClick={handleClearIcon}
-                                        title="Reset to default icon"
-                                    />
-                                )}
+                            <div className="about-icon-row">
+                                {(() => {
+                                    // Put the active icon in the center, others on the sides
+                                    const activeBuiltin = selectedBuiltin ?? 'jade';
+                                    const activeIdx = BUILTIN_ICONS.findIndex(i => i.name === activeBuiltin);
+                                    const sideIcons = BUILTIN_ICONS.filter((_, i) => i !== activeIdx);
+
+                                    return (
+                                        <>
+                                            {sideIcons[0] && (
+                                                <button
+                                                    className="about-icon-button about-icon-side"
+                                                    onClick={() => handleBuiltinIconSelect(sideIcons[0].name)}
+                                                    title={sideIcons[0].label}
+                                                >
+                                                    <img src={sideIcons[0].path} alt={sideIcons[0].label} className="about-app-icon" />
+                                                </button>
+                                            )}
+                                            <div className="about-icon-wrapper">
+                                                <button
+                                                    className="about-icon-button active"
+                                                    onClick={handleCustomIconClick}
+                                                    title="Click to change application icon"
+                                                >
+                                                    <img src={appIcon} alt="Jade" className="about-app-icon" />
+                                                    <div className="about-icon-edit-badge">✎</div>
+                                                </button>
+                                                {selectedBuiltin === null && (
+                                                    <button
+                                                        className="about-icon-clear-badge"
+                                                        onClick={handleClearIcon}
+                                                        title="Reset to default icon"
+                                                    />
+                                                )}
+                                            </div>
+                                            {sideIcons[1] && (
+                                                <button
+                                                    className="about-icon-button about-icon-side"
+                                                    onClick={() => handleBuiltinIconSelect(sideIcons[1].name)}
+                                                    title={sideIcons[1].label}
+                                                >
+                                                    <img src={sideIcons[1].path} alt={sideIcons[1].label} className="about-app-icon" />
+                                                </button>
+                                            )}
+                                        </>
+                                    );
+                                })()}
                             </div>
                             <h1 className="about-app-name">Jade</h1>
                             <p className="about-app-subtitle">BIN Editor for League of Legends</p>

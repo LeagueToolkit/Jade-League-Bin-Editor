@@ -102,7 +102,7 @@ function App() {
   const [hashSyncToast, setHashSyncToast] = useState<HashSyncToastState | null>(null);
   const [, setHashSyncBusy] = useState(true);
   const [hashesReady, setHashesReady] = useState(false);
-  const [appIcon, setAppIcon] = useState<string>("/jade.ico");
+  const [appIcon, setAppIcon] = useState<string>("/media/jade.ico");
   const [findWidgetOpen, setFindWidgetOpen] = useState(false);
   const [replaceWidgetOpen, setReplaceWidgetOpen] = useState(false);
   const [generalEditPanelOpen, setGeneralEditPanelOpen] = useState(false);
@@ -329,7 +329,7 @@ function App() {
 
     const handleIconChange = (event: Event) => {
       const customEvent = event as CustomEvent;
-      setAppIcon(customEvent.detail || '/jade.ico');
+      setAppIcon(customEvent.detail || '/media/jade.ico');
     };
 
     window.addEventListener('icon-changed', handleIconChange);

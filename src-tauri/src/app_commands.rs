@@ -5,9 +5,108 @@ use std::env;
 use tauri::Manager;
 
 const ICON_PREF_KEY: &str = "custom_icon_path";
+const BUILTIN_ICON_KEY: &str = "builtin_icon";
+
+const BUILTIN_ICON_JADE: &[u8] = include_bytes!("../../public/media/jade.ico");
+const BUILTIN_ICON_JADEJADE: &[u8] = include_bytes!("../../public/media/jadejade.ico");
+const BUILTIN_ICON_NOBRAIN: &[u8] = include_bytes!("../../public/media/noBrain.ico");
+
+// Default tile PNGs for restoring when icon is cleared
+const DEFAULT_SQUARE150: &[u8] = include_bytes!("../icons/Square150x150Logo.png");
+const DEFAULT_SQUARE71: &[u8] = include_bytes!("../icons/Square71x71Logo.png");
+
+fn get_builtin_icon_data(name: &str) -> Option<&'static [u8]> {
+    match name {
+        "jade" => Some(BUILTIN_ICON_JADE),
+        "jadejade" => Some(BUILTIN_ICON_JADEJADE),
+        "noBrain" => Some(BUILTIN_ICON_NOBRAIN),
+        _ => None,
+    }
+}
+
+/// Update the Start Menu tile PNGs next to the exe so the VisualElementsManifest
+/// reflects the current icon. Call this whenever the app icon changes.
+#[cfg(target_os = "windows")]
+fn update_tile_pngs(icon_path: &str) -> Result<(), String> {
+    let exe_dir = std::env::current_exe()
+        .map_err(|e| format!("Failed to get exe path: {}", e))?
+        .parent()
+        .ok_or("Failed to get exe directory")?
+        .to_path_buf();
+
+    let img = image::open(icon_path)
+        .map_err(|e| format!("Failed to open icon for tile: {}", e))?;
+
+    // Check if the current icon is noBrain — it gets minimal padding
+    let padding = if let Ok(config_dir) = get_config_dir() {
+        let pref_file = config_dir.join("preferences.json");
+        pref_file.exists()
+            && fs::read_to_string(&pref_file).ok()
+                .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+                .and_then(|p| p.get(BUILTIN_ICON_KEY)?.as_str().map(|s| s.to_string()))
+                .as_deref() == Some("noBrain")
+    } else {
+        false
+    };
+
+    // noBrain: 7px padding, others: ~27px padding on the 150 tile
+    let (icon150, icon71) = if padding {
+        (150 - 14, 71 - 14)  // 7px padding on each side
+    } else {
+        (96, 48)             // default: ~64% of tile
+    };
+
+    // Resize the icon smaller than the tile and center it on a transparent background
+    let save_tile = |tile_size: u32, icon_size: u32, path: std::path::PathBuf| -> Result<(), String> {
+        let resized = img.resize_exact(icon_size, icon_size, image::imageops::FilterType::Lanczos3);
+        let mut canvas = image::RgbaImage::new(tile_size, tile_size);
+        let offset = (tile_size - icon_size) / 2;
+        image::imageops::overlay(&mut canvas, &resized.to_rgba8(), offset as i64, offset as i64);
+        canvas.save(&path).map_err(|e| format!("Failed to save tile {:?}: {}", path, e))
+    };
+
+    save_tile(150, icon150, exe_dir.join("Square150x150Logo.png"))?;
+    save_tile(71, icon71, exe_dir.join("Square71x71Logo.png"))?;
+
+    println!("[Icon] Updated Start Menu tile PNGs");
+    Ok(())
+}
+
+/// Restore the default tile PNGs by rendering the embedded default icon
+/// with the same padding as update_tile_pngs uses.
+#[cfg(target_os = "windows")]
+fn restore_default_tile_pngs() {
+    let exe_dir = match std::env::current_exe().map(|p| p.parent().unwrap_or(Path::new(".")).to_path_buf()) {
+        Ok(d) => d,
+        Err(_) => return,
+    };
+
+    // Load the default jade icon from embedded data
+    let img = match image::load_from_memory(BUILTIN_ICON_JADE) {
+        Ok(i) => i,
+        Err(_) => {
+            // Fallback: write the original embedded PNGs
+            let _ = fs::write(exe_dir.join("Square150x150Logo.png"), DEFAULT_SQUARE150);
+            let _ = fs::write(exe_dir.join("Square71x71Logo.png"), DEFAULT_SQUARE71);
+            return;
+        }
+    };
+
+    let save_tile = |tile_size: u32, icon_size: u32, path: std::path::PathBuf| {
+        let resized = img.resize_exact(icon_size, icon_size, image::imageops::FilterType::Lanczos3);
+        let mut canvas = image::RgbaImage::new(tile_size, tile_size);
+        let offset = (tile_size - icon_size) / 2;
+        image::imageops::overlay(&mut canvas, &resized.to_rgba8(), offset as i64, offset as i64);
+        let _ = canvas.save(&path);
+    };
+
+    save_tile(150, 96, exe_dir.join("Square150x150Logo.png"));
+    save_tile(71, 48, exe_dir.join("Square71x71Logo.png"));
+    println!("[Icon] Restored default Start Menu tile PNGs");
+}
 
 /// Get the custom config directory: AppData\Roaming\LeagueToolkit\Jade
-fn get_config_dir() -> Result<PathBuf, String> {
+pub fn get_config_dir() -> Result<PathBuf, String> {
     let appdata = env::var("APPDATA").map_err(|e| format!("Failed to get APPDATA: {}", e))?;
     let path = PathBuf::from(appdata).join("LeagueToolkit").join("Jade");
     
@@ -285,19 +384,24 @@ pub async fn set_custom_icon(app: tauri::AppHandle, icon_path: String) -> Result
         serde_json::json!({})
     };
     
-    // Update icon path
+    // Update icon path and remove builtin selection
     prefs[ICON_PREF_KEY] = serde_json::Value::String(icon_path.clone());
-    
+    prefs.as_object_mut().map(|obj| obj.remove(BUILTIN_ICON_KEY));
+
     // Write back atomically
     let content = serde_json::to_string_pretty(&prefs)
         .map_err(|e| format!("Failed to serialize preferences: {}", e))?;
-    
+
     write_file_atomic(&pref_file, &content)
         .map_err(|e| format!("Failed to write preferences: {}", e))?;
-    
+
     // Update window icon immediately
     update_window_icon(&app, &icon_path)?;
-    
+
+    // Update file association icon if registered
+    #[cfg(windows)]
+    crate::extra_commands::update_association_icon();
+
     Ok(())
 }
 
@@ -319,6 +423,9 @@ pub fn update_window_icon(app: &tauri::AppHandle, icon_path: &str) -> Result<(),
     {
         if let Err(e) = update_shortcut_icon(Some(icon_path)) {
             eprintln!("[Icon] Failed to update shortcut icon: {}", e);
+        }
+        if let Err(e) = update_tile_pngs(icon_path) {
+            eprintln!("[Icon] Failed to update tile PNGs: {}", e);
         }
     }
 
@@ -631,19 +738,26 @@ pub async fn clear_custom_icon(app: tauri::AppHandle) -> Result<(), String> {
         let content = fs::read_to_string(&pref_file)
             .map_err(|e| format!("Failed to read preferences: {}", e))?;
         let mut prefs: serde_json::Value = serde_json::from_str(&content).unwrap_or(serde_json::json!({}));
-        prefs.as_object_mut().map(|obj| obj.remove(ICON_PREF_KEY));
+        prefs.as_object_mut().map(|obj| {
+            obj.remove(ICON_PREF_KEY);
+            obj.remove(BUILTIN_ICON_KEY);
+        });
         let content = serde_json::to_string_pretty(&prefs)
             .map_err(|e| format!("Failed to serialize preferences: {}", e))?;
         write_file_atomic(&pref_file, &content)
             .map_err(|e| format!("Failed to write preferences: {}", e))?;
     }
 
-    // Restore the Start Menu shortcut icon FIRST so the taskbar picks it up on refresh
+    // Clean up custom/builtin icon .ico files from config dir
+    let _ = fs::remove_file(config_dir.join("custom_icon.ico"));
+
+    // Restore the Start Menu shortcut icon and tile PNGs
     #[cfg(target_os = "windows")]
     {
         if let Err(e) = update_shortcut_icon(None) {
             eprintln!("[Icon] Failed to restore shortcut icon: {}", e);
         }
+        restore_default_tile_pngs();
     }
 
     // Restore default window icon + taskbar refresh
@@ -666,7 +780,84 @@ pub async fn clear_custom_icon(app: tauri::AppHandle) -> Result<(), String> {
         }
     }
 
+    // Update file association icon if registered
+    #[cfg(windows)]
+    crate::extra_commands::update_association_icon();
+
     Ok(())
+}
+
+#[tauri::command]
+pub async fn set_builtin_icon(app: tauri::AppHandle, name: String) -> Result<(), String> {
+    let icon_data = get_builtin_icon_data(&name)
+        .ok_or_else(|| format!("Unknown builtin icon: {}", name))?;
+
+    // Write the embedded icon to the config directory
+    let config_dir = get_config_dir()?;
+    let icon_path = config_dir.join(format!("builtin_{}.ico", name));
+    fs::write(&icon_path, icon_data)
+        .map_err(|e| format!("Failed to write builtin icon: {}", e))?;
+
+    let icon_path_str = icon_path.to_string_lossy().to_string();
+
+    // Update preferences: set both custom_icon_path (so the icon system picks it up)
+    // and builtin_icon (so the frontend knows which builtin is selected)
+    let pref_file = config_dir.join("preferences.json");
+    let mut prefs: serde_json::Value = if pref_file.exists() {
+        let content = fs::read_to_string(&pref_file)
+            .map_err(|e| format!("Failed to read preferences: {}", e))?;
+        serde_json::from_str(&content).unwrap_or(serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+
+    prefs[ICON_PREF_KEY] = serde_json::Value::String(icon_path_str.clone());
+    prefs[BUILTIN_ICON_KEY] = serde_json::Value::String(name);
+
+    let content = serde_json::to_string_pretty(&prefs)
+        .map_err(|e| format!("Failed to serialize preferences: {}", e))?;
+    write_file_atomic(&pref_file, &content)
+        .map_err(|e| format!("Failed to write preferences: {}", e))?;
+
+    // Apply the icon
+    update_window_icon(&app, &icon_path_str)?;
+
+    // Update file association icon if registered
+    #[cfg(windows)]
+    crate::extra_commands::update_association_icon();
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_builtin_icon_name(_app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let config_dir = get_config_dir()?;
+    let pref_file = config_dir.join("preferences.json");
+
+    if !pref_file.exists() {
+        // No preferences at all — default is jade
+        return Ok(Some("jade".to_string()));
+    }
+
+    let content = fs::read_to_string(&pref_file)
+        .map_err(|e| format!("Failed to read preferences: {}", e))?;
+    let prefs: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(parsed) => parsed,
+        Err(_) => return Ok(Some("jade".to_string())),
+    };
+
+    // If there's a custom icon path but no builtin_icon key, it's a custom icon
+    if prefs.get(ICON_PREF_KEY).is_some() && prefs.get(BUILTIN_ICON_KEY).is_none() {
+        return Ok(None);
+    }
+
+    // Return the builtin icon name, defaulting to "jade"
+    Ok(Some(
+        prefs.get(BUILTIN_ICON_KEY)
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "jade".to_string())
+    ))
 }
 
 #[tauri::command]

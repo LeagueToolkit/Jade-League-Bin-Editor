@@ -31,6 +31,69 @@ fn notify_shell_change() {
     }
 }
 
+/// Resolve the icon value for the file association DefaultIcon registry key.
+/// If a custom or builtin icon .ico exists in the config dir, use that;
+/// otherwise fall back to the exe's embedded icon.
+#[cfg(windows)]
+fn resolve_association_icon() -> Result<String, String> {
+    let exe_path = get_exe_path()?;
+
+    // Check if there's a custom icon .ico in the config dir
+    let config_dir = crate::app_commands::get_config_dir()?;
+    let custom_ico = config_dir.join("custom_icon.ico");
+    if custom_ico.exists() {
+        return Ok(custom_ico.to_string_lossy().to_string());
+    }
+
+    // Check for builtin icon .ico files
+    let prefs_path = config_dir.join("preferences.json");
+    if prefs_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&prefs_path) {
+            if let Ok(prefs) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(builtin_name) = prefs.get("builtin_icon").and_then(|v| v.as_str()) {
+                    let builtin_ico = config_dir.join(format!("builtin_{}.ico", builtin_name));
+                    if builtin_ico.exists() {
+                        return Ok(builtin_ico.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    // Default: use the exe's embedded icon
+    Ok(format!("{},0", exe_path))
+}
+
+/// Update the DefaultIcon registry value for .bin file association.
+/// Called whenever the app icon changes so registered files reflect the new icon.
+#[cfg(windows)]
+pub fn update_association_icon() {
+    use winreg::enums::*;
+    use winreg::RegKey;
+
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+
+    // Only update if the association is registered
+    if let Ok(ext_key) = hkcu.open_subkey(r"Software\Classes\.bin") {
+        let val: Result<String, _> = ext_key.get_value("");
+        if val.ok().as_deref() != Some("JadeBinFile") {
+            return;
+        }
+    } else {
+        return;
+    }
+
+    if let Ok(icon_value) = resolve_association_icon() {
+        if let Ok(class_key) = hkcu.open_subkey(r"Software\Classes\JadeBinFile") {
+            if let Ok((icon_key, _)) = class_key.create_subkey("DefaultIcon") {
+                let _ = icon_key.set_value("", &icon_value);
+                notify_shell_change();
+                println!("[FileAssoc] Updated DefaultIcon to: {}", icon_value);
+            }
+        }
+    }
+}
+
 /// Register .bin file association in Windows registry (HKCU, no admin needed)
 #[tauri::command]
 pub async fn register_bin_association() -> Result<(), String> {
@@ -40,6 +103,7 @@ pub async fn register_bin_association() -> Result<(), String> {
         use winreg::RegKey;
 
         let exe_path = get_exe_path()?;
+        let icon_value = resolve_association_icon()?;
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
 
         let (class_key, _) = hkcu
@@ -51,7 +115,7 @@ pub async fn register_bin_association() -> Result<(), String> {
         let (icon_key, _) = class_key
             .create_subkey("DefaultIcon")
             .map_err(|e| format!("Failed to create icon key: {}", e))?;
-        icon_key.set_value("", &format!("{},0", exe_path))
+        icon_key.set_value("", &icon_value)
             .map_err(|e| format!("Failed to set icon: {}", e))?;
 
         let (cmd_key, _) = class_key
@@ -67,7 +131,7 @@ pub async fn register_bin_association() -> Result<(), String> {
             .map_err(|e| format!("Failed to set .bin default: {}", e))?;
 
         notify_shell_change();
-        println!("[FileAssoc] Registered .bin association for: {}", exe_path);
+        println!("[FileAssoc] Registered .bin association with icon: {}", icon_value);
         Ok(())
     }
     #[cfg(not(windows))]

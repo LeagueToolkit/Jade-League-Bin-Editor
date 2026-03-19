@@ -172,6 +172,8 @@ pub fn run() {
             app_commands::get_custom_icon_data,
             app_commands::set_custom_icon,
             app_commands::clear_custom_icon,
+            app_commands::set_builtin_icon,
+            app_commands::get_builtin_icon_name,
             app_commands::open_url,
             app_commands::save_window_state,
             app_commands::get_window_state,

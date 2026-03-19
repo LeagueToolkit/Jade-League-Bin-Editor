@@ -17,7 +17,7 @@ interface TitleBarProps {
 }
 
 export default function TitleBar({
-    appIcon = '/jade.ico',
+    appIcon = '/media/jade.ico',
     isMaximized = false,
     onThemes,
     onPreferences,
