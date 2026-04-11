@@ -1573,7 +1573,11 @@ function App() {
               endLineNumber: ln, endColumn: qEnd + 2,
             },
             options: {
-              glyphMarginClassName: 'image-path-swatch-glyph',
+              before: {
+                content: '\u00A0',
+                inlineClassName: 'image-path-swatch',
+                inlineClassNameAffectsLetterSpacing: true,
+              },
             },
           });
         }
@@ -2062,28 +2066,25 @@ function App() {
       return { top, left, above };
     };
 
-    /** Given a line number, find the first image path on that line */
-    const findImagePathOnLine = (lineNumber: number) => {
+    /** Given a swatch DOM element, find the image path on its line */
+    const findImagePathFromSwatch = (swatchEl: HTMLElement) => {
       const model = editor.getModel();
       if (!model) return null;
-      const line = model.getLineContent(lineNumber);
-      // Scan for quoted image paths on this line
-      let i = 0;
-      while (i < line.length) {
-        const qStart = line.indexOf('"', i);
-        if (qStart === -1) break;
-        const qEnd = line.indexOf('"', qStart + 1);
-        if (qEnd === -1) break;
-        const imgMatch = extractImagePathAtColumn(line, qStart + 2);
-        if (imgMatch) return { ...imgMatch, lineNumber };
-        i = qEnd + 1;
-      }
-      return null;
+      const rect = swatchEl.getBoundingClientRect();
+      // Offset past the swatch itself to hit actual text content
+      const probeX = rect.right + 4;
+      const probeY = rect.top + rect.height / 2;
+      const pos = editor.getTargetAtClientPoint(probeX, probeY);
+      if (!pos?.position) return null;
+      const line = model.getLineContent(pos.position.lineNumber);
+      const imgMatch = extractImagePathAtColumn(line, pos.position.column);
+      if (!imgMatch) return null;
+      return { ...imgMatch, lineNumber: pos.position.lineNumber };
     };
 
-    /** Open the texture popup for a glyph swatch element on a given line */
-    const openPopupFromSwatch = (swatchEl: HTMLElement, lineNumber: number) => {
-      const match = findImagePathOnLine(lineNumber);
+    /** Open the texture popup for a given swatch */
+    const openPopupFromSwatch = (swatchEl: HTMLElement) => {
+      const match = findImagePathFromSwatch(swatchEl);
       if (!match) return;
 
       // Toggle off if same path
@@ -2111,15 +2112,13 @@ function App() {
       loadTextureForPopup(match.path, baseFile);
     };
 
-    // Click on glyph swatch to open popup
+    // Click on swatch to open popup
     const mouseDownDisposable = editor.onMouseDown((e) => {
       const browserTarget = e.event.browserEvent.target as HTMLElement | null;
-      if (!browserTarget?.classList.contains('image-path-swatch-glyph')) return;
-      const lineNumber = e.target.position?.lineNumber;
-      if (!lineNumber) return;
+      if (!browserTarget?.classList.contains('image-path-swatch')) return;
       e.event.preventDefault();
       e.event.stopPropagation();
-      openPopupFromSwatch(browserTarget, lineNumber);
+      openPopupFromSwatch(browserTarget);
     });
     editorDisposablesRef.current.push(mouseDownDisposable);
 
@@ -2142,7 +2141,7 @@ function App() {
     };
     const mouseMoveDisposable = editor.onMouseMove((e) => {
       const browserTarget = e.event.browserEvent.target as HTMLElement | null;
-      if (!browserTarget?.classList.contains('image-path-swatch-glyph')) {
+      if (!browserTarget?.classList.contains('image-path-swatch')) {
         if (hoveredSwatchEl) {
           clearSwatchHover();
           // Mouse left the swatch — schedule dismiss (popup's own mouseenter will cancel via its own logic)
@@ -2155,11 +2154,10 @@ function App() {
       if (browserTarget === hoveredSwatchEl) return;
       clearSwatchHover();
       hoveredSwatchEl = browserTarget;
-      const hoverLineNumber = e.target.position?.lineNumber;
       swatchHoverTimeout = setTimeout(() => {
         swatchHoverTimeout = null;
-        if (hoveredSwatchEl === browserTarget && !texPopupRef.current && hoverLineNumber) {
-          openPopupFromSwatch(browserTarget, hoverLineNumber);
+        if (hoveredSwatchEl === browserTarget && !texPopupRef.current) {
+          openPopupFromSwatch(browserTarget);
         }
       }, 400);
     });
