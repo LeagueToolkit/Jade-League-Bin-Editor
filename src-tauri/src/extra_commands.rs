@@ -475,27 +475,23 @@ pub async fn run_installer(silent: bool, app: tauri::AppHandle) -> Result<(), St
 
     let bat_content = format!(
 "@echo off\r
+setlocal enabledelayedexpansion\r
 echo [%date% %time%] Update script started > \"{log}\"\r
 set /a tries=0\r
 :wait\r
 tasklist /FI \"IMAGENAME eq jade-rust.exe\" 2>NUL | find /I \"jade-rust.exe\" >NUL\r
 if not errorlevel 1 (\r
     set /a tries+=1\r
-    if %tries% GEQ 30 (\r
+    if !tries! GEQ 30 (\r
         echo [%date% %time%] Timed out waiting for Jade to exit >> \"{log}\"\r
         goto :eof\r
     )\r
-    echo [%date% %time%] Waiting for Jade to exit... >> \"{log}\"\r
     timeout /t 1 /nobreak >nul\r
     goto wait\r
 )\r
 echo [%date% %time%] Jade exited, running installer >> \"{log}\"\r
 {cmd}\r
-echo [%date% %time%] Installer finished with errorlevel %errorlevel% >> \"{log}\"\r
-if %errorlevel% NEQ 0 (\r
-    echo [%date% %time%] ERROR: Installer failed >> \"{log}\"\r
-    goto :eof\r
-)\r
+echo [%date% %time%] Installer finished >> \"{log}\"\r
 {relaunch}del \"%~f0\"\r
 ",
         log = log_path.display(),
@@ -506,9 +502,9 @@ if %errorlevel% NEQ 0 (\r
     std::fs::write(&bat_path, &bat_content)
         .map_err(|e| format!("Failed to write update script: {}", e))?;
 
-    // CREATE_NEW_PROCESS_GROUP (0x200) | DETACHED_PROCESS (0x08)
-    // This ensures the batch script survives when Jade exits.
-    const DETACH_FLAGS: u32 = 0x00000200 | 0x00000008;
+    // CREATE_NEW_PROCESS_GROUP (0x200) | CREATE_NO_WINDOW (0x08000000)
+    // Script survives Jade exiting and runs without a visible console.
+    const DETACH_FLAGS: u32 = 0x00000200 | 0x08000000;
 
     std::process::Command::new("cmd")
         .args(["/C", &bat_path.to_string_lossy()])
