@@ -741,6 +741,246 @@ export default function GeneralEditPanel({
     setShowMaterialDialog(false);
   };
 
+  // Handle material dialog submit when a library material was paired.
+  // Inserts BOTH the override entry and the full StaticMaterialDef snippet,
+  // and runs SKN-based user slot resolution to fill in placeholder paths.
+  const handleMaterialDialogSubmitWithLibrary = async (
+    _overridePath: string, // ignored — the library material's name is used instead
+    submesh: string,
+    library: { materialId: string; materialPath: string; materialName: string }
+  ) => {
+    setShowMaterialDialog(false);
+    setMaterialOverrideStatus(`Inserting ${library.materialName}…`);
+
+    try {
+      // 1. Load the cached snippet (with ritobin text)
+      type UserSlot = { name: string; kind: string; description: string };
+      type MaterialSnippet = {
+        id: string;
+        name: string;
+        materialName: string;
+        userSlots: UserSlot[];
+        snippet: string;
+      };
+      const snippet = await invoke<MaterialSnippet | null>(
+        'library_get_cached_material',
+        { path: library.materialPath }
+      );
+      if (!snippet) {
+        setMaterialOverrideStatus(`Library material ${library.materialPath} not cached`);
+        return;
+      }
+
+      // 2. Auto-increment material name if jadelib_<id> already exists in the bin
+      const baseName = snippet.materialName;
+      const escapedBase = baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const existingRe = new RegExp(`"${escapedBase}(?:_\\d+)?"\\s*=`, 'g');
+      const existingNames = new Set<string>();
+      let m: RegExpExecArray | null;
+      while ((m = existingRe.exec(editorContent)) !== null) {
+        // Pull the actual matched name out of the leading quote
+        const nameMatch = m[0].match(/"([^"]+)"/);
+        if (nameMatch) existingNames.add(nameMatch[1]);
+      }
+      let finalName = baseName;
+      if (existingNames.has(finalName)) {
+        let suffix = 2;
+        while (existingNames.has(`${baseName}_${suffix}`)) suffix++;
+        finalName = `${baseName}_${suffix}`;
+      }
+
+      // 3. Build the snippet text with the (possibly incremented) name
+      let snippetText = snippet.snippet;
+      if (finalName !== baseName) {
+        const escBase = baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        snippetText = snippetText.replace(
+          new RegExp(`"${escBase}"`, 'g'),
+          `"${finalName}"`
+        );
+      }
+
+      // 4. SKN-based user slot resolution -- replace YOURCHAMP/SKINID
+      // placeholder paths with real texture paths matched from the SKN.
+      if (filePath) {
+        const simpleSkinPath = extractSimpleSkinPath();
+        const texturePath = extractTexturePath();
+        if (simpleSkinPath && texturePath) {
+          try {
+            const matchModeStr = await invoke<string>('get_preference', {
+              key: 'MaterialMatchMode',
+              defaultValue: '3',
+            });
+            const matchMode = parseInt(matchModeStr) || 3;
+            const result = await invoke<AutoMaterialResult>('auto_material_override', {
+              binFilePath: filePath,
+              simpleSkinPath,
+              texturePath,
+              matchMode,
+            });
+
+            // Find the texture path matched to the chosen submesh
+            const submeshLower = submesh.toLowerCase();
+            const matched = result.matches.find(
+              (mm) => mm.material.toLowerCase() === submeshLower
+            );
+
+            if (matched && matched.texture) {
+              // For each user slot, rewrite the placeholder line in the snippet.
+              // We look for any line containing "ASSETS/.../YOURCHAMP/..." and
+              // replace it with the matched texture path. This handles single-slot
+              // materials cleanly; multi-slot materials with different `kind`s
+              // would need separate textures per slot which the SKN matcher
+              // doesn't currently provide -- those slots stay as placeholders.
+              const placeholderRe = /(texturePath:\s*string\s*=\s*")[^"]*YOURCHAMP[^"]*(")/g;
+              snippetText = snippetText.replace(
+                placeholderRe,
+                `$1${matched.texture}$2`
+              );
+            }
+          } catch (e) {
+            console.warn('SKN auto-resolve failed:', e);
+            // Continue with placeholders left in
+          }
+        }
+      }
+
+      // 5. Build the final content with BOTH the override entry and the
+      // StaticMaterialDef in a single update so Ctrl+Z collapses them as
+      // one undo step.
+      let content = editorContent;
+      content = applyOverrideEntry(content, finalName, submesh, 'material');
+      content = injectMaterialDefSnippet(content, snippetText);
+
+      onContentChange(content);
+      setMaterialOverrideStatus(`Inserted ${finalName}`);
+      setMaterialOverrideExists(true);
+    } catch (e) {
+      console.error('Library insert failed:', e);
+      setMaterialOverrideStatus(`Error: ${e}`);
+    }
+  };
+
+  // Pure helper: insert a SkinMeshDataProperties_MaterialOverride entry into
+  // the materialOverride list and return the new content. Mirrors
+  // addMaterialOverrideEntry's logic but works on a parameter instead of
+  // calling onContentChange.
+  const applyOverrideEntry = (
+    content: string,
+    path: string,
+    submesh: string,
+    entryType: 'texture' | 'material'
+  ): string => {
+    let lines = content.split('\n');
+
+    // Ensure materialOverride structure exists
+    if (!content.includes('materialOverride:')) {
+      const newLines: string[] = [];
+      let added = false;
+      for (let i = 0; i < lines.length; i++) {
+        newLines.push(lines[i]);
+        if (
+          !added &&
+          lines[i].includes('skinMeshProperties:') &&
+          lines[i].includes('embed') &&
+          lines[i].includes('SkinMeshDataProperties')
+        ) {
+          let indent = '        ';
+          if (i + 1 < lines.length) {
+            const m2 = lines[i + 1].match(/^(\s*)/);
+            if (m2) indent = m2[1];
+          }
+          newLines.push(`${indent}materialOverride: list[embed] = {`);
+          newLines.push(`${indent}}`);
+          added = true;
+        }
+      }
+      lines = newLines;
+    }
+
+    let matIdx = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].includes('materialOverride:') && lines[i].includes('list[embed]')) {
+        matIdx = i;
+        break;
+      }
+    }
+    if (matIdx === -1) return content;
+
+    let braceDepth = 0;
+    let insertIdx = -1;
+    for (let j = matIdx; j < lines.length; j++) {
+      for (const c of lines[j]) {
+        if (c === '{') braceDepth++;
+        else if (c === '}') braceDepth--;
+      }
+      if (braceDepth === 0 && j > matIdx) {
+        insertIdx = j;
+        break;
+      }
+    }
+    if (insertIdx === -1) return content;
+
+    let indent = '            ';
+    if (matIdx + 1 < lines.length && lines[matIdx + 1].trim()) {
+      const m2 = lines[matIdx + 1].match(/^(\s*)/);
+      if (m2) indent = m2[1];
+    }
+
+    const propType = entryType === 'texture' ? 'string' : 'link';
+    const propName = entryType === 'texture' ? 'texture' : 'material';
+    const entryLines = [
+      `${indent}SkinMeshDataProperties_MaterialOverride {`,
+      `${indent}    ${propName}: ${propType} = "${path}"`,
+      `${indent}    Submesh: string = "${submesh}"`,
+      `${indent}}`,
+    ];
+
+    const out: string[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      if (i === insertIdx) out.push(...entryLines);
+      out.push(lines[i]);
+    }
+    return out.join('\n');
+  };
+
+  // Inject a StaticMaterialDef snippet text into the top-level entries map.
+  // Strategy: find the line matching `entries: map[hash,pointer] = {` and
+  // insert the snippet right after it (or before the first existing entry).
+  const injectMaterialDefSnippet = (content: string, snippetText: string): string => {
+    const lines = content.split('\n');
+    let entriesIdx = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (/entries\s*:\s*map\s*\[\s*hash\s*,\s*pointer\s*\]\s*=\s*\{/.test(lines[i])) {
+        entriesIdx = i;
+        break;
+      }
+    }
+    if (entriesIdx === -1) {
+      // Fallback: append to end
+      return content + '\n' + snippetText + '\n';
+    }
+
+    // Indent the snippet to match the column of the line after entries:
+    let indent = '    ';
+    for (let i = entriesIdx + 1; i < lines.length; i++) {
+      if (lines[i].trim()) {
+        const m2 = lines[i].match(/^(\s*)/);
+        if (m2) indent = m2[1];
+        break;
+      }
+    }
+    const indentedSnippet = snippetText
+      .split('\n')
+      .map((l) => (l.length > 0 ? indent + l : l))
+      .join('\n');
+
+    return [
+      ...lines.slice(0, entriesIdx + 1),
+      indentedSnippet,
+      ...lines.slice(entriesIdx + 1),
+    ].join('\n');
+  };
+
   if (!isRendered) return null;
 
   return (
@@ -889,6 +1129,7 @@ export default function GeneralEditPanel({
           type={materialDialogType}
           defaultPath={defaultTexturePath}
           onSubmit={handleMaterialDialogSubmit}
+          onSubmitWithLibrary={handleMaterialDialogSubmitWithLibrary}
           onCancel={() => setShowMaterialDialog(false)}
           suggestions={dialogSuggestions}
         />

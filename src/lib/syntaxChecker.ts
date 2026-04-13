@@ -1,19 +1,32 @@
 /**
  * Custom syntax checker for Ritobin text format.
  *
- * Checks:
+ * Two severity levels:
+ *  - 'error'   (red)    -- broken syntax, file will NOT convert
+ *  - 'warning' (yellow) -- valid syntax but won't work as intended in-game
+ *
+ * Error checks:
  *  - Bracket matching with indent-aware blame
  *  - Type name validation (25 valid types, case-insensitive)
  *  - Container type syntax: list[T], list2[T], option[T], map[K,V]
  *  - Entry/field structure: name: type = value
  *  - String literal syntax (unterminated strings)
+ *
+ * Warning checks (semantic pass):
+ *  - Raw texture + material override on the same submesh (game skips the material)
+ *  - Duplicate sampler TextureName inside a StaticMaterialDef (second one ignored)
+ *  - Duplicate top-level entry names (unexpected behavior)
+ *  - Material override link pointing to a non-existent material in the file
  */
+
+export type SyntaxSeverity = 'error' | 'warning';
 
 export interface SyntaxError {
   line: number;      // 1-based
   column: number;    // 1-based
   length: number;    // how many characters to underline
   message: string;
+  severity?: SyntaxSeverity;  // defaults to 'error' when omitted
 }
 
 interface BracketEntry {
@@ -199,6 +212,15 @@ export function checkSyntax(text: string): SyntaxError[] {
 
     // Update brace depth for next line's context
     updateBraceDepth(line, i);
+  }
+
+  // ── Pass 3: Semantic warnings (yellow) ──
+  // Only run these if there are no bracket errors — unbalanced braces would
+  // give the semantic pass garbage context and produce false positives.
+  const hasBracketErrors = bracketErrors.length > 0;
+  if (!hasBracketErrors) {
+    const warnings = checkSemanticWarnings(lines);
+    errors.push(...warnings);
   }
 
   return errors;
@@ -655,4 +677,333 @@ export function checkBrackets(text: string): SyntaxError[] {
   }
 
   return errors;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Semantic warning pass
+//
+// Walks the full document once, collects structural facts (top-level entry
+// names, StaticMaterialDef sampler names per entry, per-submesh texture/override
+// assignments), then emits yellow warnings for things the game will silently
+// mishandle even though the file converts fine.
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface SemanticEntryInfo {
+  name: string;
+  line: number;
+  column: number;
+  length: number;
+  classType: string;
+}
+
+function checkSemanticWarnings(lines: string[]): SyntaxError[] {
+  const warnings: SyntaxError[] = [];
+
+  // 1. Collect top-level entry names and watch for duplicates
+  //    Match lines like: "entry_name" = ClassType {  OR  0xABCDEF12 = ClassType {
+  const entryRe = /^\s*("([^"]+)"|0x[0-9a-fA-F]+)\s*=\s*(\w+)\s*\{/;
+  const entriesByName = new Map<string, SemanticEntryInfo[]>();
+
+  for (let idx = 0; idx < lines.length; idx++) {
+    const line = lines[idx];
+    const m = entryRe.exec(line);
+    if (!m) continue;
+    // Skip if we're inside a nested struct — only top-level entries matter
+    // Top-level entries in ritobin always start at zero indent (the root `entries` map)
+    // but can also be nested under "entries: map[hash,pointer] = {" so we check for
+    // the pattern anywhere; duplicate detection still holds even in nested contexts.
+    const name = m[2] ?? m[1]; // quoted name or hex hash
+    const classType = m[3];
+    const colIdx = line.indexOf(m[1]);
+    const info: SemanticEntryInfo = {
+      name,
+      line: idx + 1,
+      column: colIdx + 1,
+      length: m[1].length,
+      classType,
+    };
+    const existing = entriesByName.get(name);
+    if (existing) {
+      existing.push(info);
+    } else {
+      entriesByName.set(name, [info]);
+    }
+  }
+
+  // Duplicate entry name warnings — flag every occurrence after the first
+  for (const [name, infos] of entriesByName.entries()) {
+    if (infos.length < 2) continue;
+    for (let i = 1; i < infos.length; i++) {
+      warnings.push({
+        line: infos[i].line,
+        column: infos[i].column,
+        length: infos[i].length,
+        message: `Duplicate entry name "${name}" — may cause unexpected behavior`,
+        severity: 'warning',
+      });
+    }
+  }
+
+  // 2. Collect material definition names (for override link validation)
+  const materialDefNames = new Set<string>();
+  for (const [name, infos] of entriesByName.entries()) {
+    for (const info of infos) {
+      if (info.classType === 'StaticMaterialDef') {
+        materialDefNames.add(name);
+        break;
+      }
+    }
+  }
+
+  // 3. Walk StaticMaterialDef blocks and collect duplicate samplers
+  //    A StaticMaterialDef contains SamplerValues: list2[embed] = { ... }
+  //    Inside, each StaticMaterialShaderSamplerDef has TextureName: string = "..."
+  let inMaterialDef = false;
+  let inSamplerList = false;
+  let sampleDefDepth = 0;
+  let currentMaterialName = '';
+  let seenSamplerNames = new Map<string, number>(); // name -> first-seen line
+
+  for (let idx = 0; idx < lines.length; idx++) {
+    const line = lines[idx];
+    const trimmed = line.trim();
+
+    // Enter a StaticMaterialDef
+    if (!inMaterialDef) {
+      const entryMatch = entryRe.exec(line);
+      if (entryMatch && entryMatch[3] === 'StaticMaterialDef') {
+        inMaterialDef = true;
+        currentMaterialName = entryMatch[2] ?? entryMatch[1];
+        inSamplerList = false;
+        sampleDefDepth = 0;
+        seenSamplerNames = new Map();
+        continue;
+      }
+    } else {
+      // Detect sampler list start
+      if (/SamplerValues\s*:\s*list2?\s*\[\s*embed\s*\]\s*=\s*\{/.test(trimmed)) {
+        inSamplerList = true;
+        continue;
+      }
+
+      // Inside the sampler list, look for TextureName assignments
+      if (inSamplerList) {
+        // Leave the sampler list when we see a top-level close brace for it
+        // (heuristic: a closing brace at the outer depth ends the list)
+        if (trimmed === '}' && sampleDefDepth === 0) {
+          inSamplerList = false;
+          continue;
+        }
+        if (trimmed.endsWith('{')) {
+          sampleDefDepth++;
+        }
+        if (trimmed === '}' || trimmed.startsWith('}')) {
+          if (sampleDefDepth > 0) sampleDefDepth--;
+        }
+
+        const texNameMatch = /TextureName\s*:\s*string\s*=\s*"([^"]+)"/.exec(trimmed);
+        if (texNameMatch) {
+          const samplerName = texNameMatch[1];
+          if (seenSamplerNames.has(samplerName)) {
+            const colIdx = line.indexOf(samplerName);
+            warnings.push({
+              line: idx + 1,
+              column: colIdx + 1,
+              length: samplerName.length,
+              message: `Duplicate sampler "${samplerName}" in ${currentMaterialName || 'material'} — only the first entry will be used`,
+              severity: 'warning',
+            });
+          } else {
+            seenSamplerNames.set(samplerName, idx + 1);
+          }
+        }
+      }
+
+      // Leaving the material entirely (heuristic: a line that's just `}` and
+      // we're not inside a sampler list and at zero local depth)
+      if (!inSamplerList && trimmed === '}') {
+        // Simple exit — real brace tracking would be complex; we'll just
+        // look for the NEXT top-level entry to reset, which is handled above.
+        // For duplicate-sampler purposes, the seen map resets per material.
+      }
+    }
+  }
+
+  // 4. Cross-reference: raw texture + material override on same submesh
+  //    Collect all SkinMeshDataProperties_MaterialOverride entries and any
+  //    raw texture/material pairs on SkinMeshDataProperties entries, then
+  //    flag submeshes that appear in both.
+  //
+  //    Format for overrides:
+  //      SkinMeshDataProperties_MaterialOverride {
+  //        material: link = "<name>"
+  //        submesh: string = "<submesh>"
+  //      }
+  //
+  //    Format for raw textures (typically a sibling texture field on the
+  //    same properties struct): texture: string = "..."
+  //    These don't have a per-submesh binding the way overrides do — they
+  //    apply to the whole SKL mesh — so we flag a conflict when both a
+  //    raw `texture:` and at least one materialOverride exist inside the
+  //    same SkinMeshDataProperties block.
+  const conflicts = findTextureOverrideConflicts(lines);
+  warnings.push(...conflicts);
+
+  // 5. Material override link pointing to a non-existent material
+  //    Walk overrides and check if the link target exists in materialDefNames
+  //    OR if the link has the form 0x<hex> (we can't resolve hashes so skip).
+  for (let idx = 0; idx < lines.length; idx++) {
+    const line = lines[idx];
+    const m = /material\s*:\s*link\s*=\s*"([^"]+)"/.exec(line);
+    if (!m) continue;
+    const target = m[1];
+    // Skip hex hash links — we can't resolve them without the hash tables
+    if (/^0x[0-9a-fA-F]+$/.test(target)) continue;
+    if (!materialDefNames.has(target)) {
+      const colIdx = line.indexOf(target);
+      warnings.push({
+        line: idx + 1,
+        column: colIdx + 1,
+        length: target.length,
+        message: `Material "${target}" not found in this file`,
+        severity: 'warning',
+      });
+    }
+  }
+
+  return warnings;
+}
+
+/**
+ * Walk SkinMeshDataProperties blocks and find ones that contain BOTH a
+ * `texture: string = "..."` line AND one or more `materialOverride` entries.
+ * When both are present, the game ignores the material override.
+ *
+ * Returns warnings on both the raw texture line and each override's material link.
+ */
+function findTextureOverrideConflicts(lines: string[]): SyntaxError[] {
+  const out: SyntaxError[] = [];
+
+  // Simple state machine walking the text. We track when we're inside a
+  // SkinMeshDataProperties block (after its opening `{`) and collect any
+  // raw-texture lines and override blocks within it. On close, if both exist,
+  // emit warnings.
+  let inProps = false;
+  let propsDepth = 0;
+  let rawTextureLine: { line: number; column: number; length: number } | null = null;
+  let overrideLinks: Array<{ line: number; column: number; length: number; submesh?: string }> = [];
+
+  // Track the current override block being parsed inside the props
+  let inOverride = false;
+  let overrideDepth = 0;
+  let pendingLinkLine = -1;
+  let pendingLinkCol = -1;
+  let pendingLinkLen = 0;
+
+  for (let idx = 0; idx < lines.length; idx++) {
+    const line = lines[idx];
+    const trimmed = line.trim();
+
+    if (!inProps) {
+      // Enter a SkinMeshDataProperties block
+      if (/SkinMeshDataProperties\b[^_]/.test(trimmed) && trimmed.endsWith('{')) {
+        inProps = true;
+        propsDepth = 1;
+        rawTextureLine = null;
+        overrideLinks = [];
+        continue;
+      }
+      // Also handle pattern where the class is on its own token — simpler match
+      if (/^\s*SkinMeshDataProperties\s*\{/.test(line)) {
+        inProps = true;
+        propsDepth = 1;
+        rawTextureLine = null;
+        overrideLinks = [];
+        continue;
+      }
+      continue;
+    }
+
+    // Track brace depth inside the props block
+    let localOpen = 0;
+    let localClose = 0;
+    for (let ci = 0; ci < line.length; ci++) {
+      const ch = line[ci];
+      if (ch === '#') break;
+      if (ch === '{') localOpen++;
+      else if (ch === '}') localClose++;
+    }
+    propsDepth += localOpen - localClose;
+
+    // Detect raw texture field
+    const texMatch = /^(\s*)texture\s*:\s*string\s*=\s*"([^"]*)"/.exec(line);
+    if (texMatch) {
+      const col = line.indexOf('texture');
+      rawTextureLine = { line: idx + 1, column: col + 1, length: 'texture'.length };
+    }
+
+    // Enter an override block
+    if (/SkinMeshDataProperties_MaterialOverride\s*\{/.test(trimmed)) {
+      inOverride = true;
+      overrideDepth = 1;
+      pendingLinkLine = -1;
+    } else if (inOverride) {
+      // Track the override's material link line
+      const linkMatch = /material\s*:\s*link\s*=\s*"([^"]+)"/.exec(line);
+      if (linkMatch) {
+        pendingLinkLine = idx + 1;
+        pendingLinkCol = line.indexOf(linkMatch[1]) + 1;
+        pendingLinkLen = linkMatch[1].length;
+      }
+      // Track override block depth
+      for (let ci = 0; ci < line.length; ci++) {
+        const ch = line[ci];
+        if (ch === '#') break;
+        if (ch === '{') overrideDepth++;
+        else if (ch === '}') {
+          overrideDepth--;
+          if (overrideDepth <= 0) {
+            if (pendingLinkLine > 0) {
+              overrideLinks.push({
+                line: pendingLinkLine,
+                column: pendingLinkCol,
+                length: pendingLinkLen,
+              });
+            }
+            inOverride = false;
+            break;
+          }
+        }
+      }
+    }
+
+    // Leaving the SkinMeshDataProperties block
+    if (propsDepth <= 0) {
+      if (rawTextureLine && overrideLinks.length > 0) {
+        out.push({
+          line: rawTextureLine.line,
+          column: rawTextureLine.column,
+          length: rawTextureLine.length,
+          message: `This mesh has both a raw texture and material override(s) — game will skip the material(s)`,
+          severity: 'warning',
+        });
+        for (const link of overrideLinks) {
+          out.push({
+            line: link.line,
+            column: link.column,
+            length: link.length,
+            message: `Material override ignored — raw texture on the same mesh takes priority`,
+            severity: 'warning',
+          });
+        }
+      }
+      inProps = false;
+      propsDepth = 0;
+      inOverride = false;
+      rawTextureLine = null;
+      overrideLinks = [];
+    }
+  }
+
+  return out;
 }

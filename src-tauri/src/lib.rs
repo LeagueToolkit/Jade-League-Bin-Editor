@@ -2,6 +2,7 @@ mod bin_commands;
 mod app_commands;
 mod hash_commands;
 mod extra_commands;
+mod library_commands;
 mod core;
 mod error;
 
@@ -235,6 +236,25 @@ pub fn run() {
             app_commands::send_bin_to_quartz,
             app_commands::get_quartz_install_status,
             app_commands::notify_quartz_bin_updated,
+            // Material Library
+            library_commands::library_fetch_index,
+            library_commands::library_get_cached_index,
+            library_commands::library_fetch_material,
+            library_commands::library_get_cached_material,
+            library_commands::library_list_downloaded,
+            library_commands::library_list_outdated,
+            library_commands::library_update_material,
+            library_commands::library_update_all_outdated,
+            library_commands::library_delete_material,
+            library_commands::library_get_preview,
+            library_commands::library_get_champion_map,
+            library_commands::library_clear_all,
+            library_commands::library_open_folder,
+            library_commands::library_detect_mod_folder,
+            library_commands::library_get_update_mode,
+            library_commands::library_set_update_mode,
+            library_commands::library_get_status,
+            library_commands::library_trigger_background_update,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

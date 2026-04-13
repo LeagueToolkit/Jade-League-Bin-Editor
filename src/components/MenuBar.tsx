@@ -26,6 +26,7 @@ interface MenuBarProps {
     onThemes: () => void;
     onSettings: () => void;
     onAbout: () => void;
+    onMaterialLibrary: () => void;
     recentFiles?: string[];
     onOpenRecentFile?: (path: string) => void;
     openFileDisabled?: boolean;
@@ -55,6 +56,7 @@ export default function MenuBar({
     onThemes,
     onSettings,
     onAbout,
+    onMaterialLibrary,
     recentFiles = [],
     onOpenRecentFile,
     openFileDisabled = false,
@@ -206,6 +208,10 @@ export default function MenuBar({
                         <button className="menu-option" onClick={() => handleMenuClick(onParticlePanel)}>
                             <span>Particle Editing...</span>
                             <span className="shortcut">Ctrl+P</span>
+                        </button>
+                        <div className="menu-separator" />
+                        <button className="menu-option" onClick={() => handleMenuClick(onMaterialLibrary)}>
+                            <span>Material Library...</span>
                         </button>
                         <div className="menu-separator" />
                         <button className="menu-option" onClick={() => handleMenuClick(onThemes)}>

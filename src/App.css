@@ -161,12 +161,27 @@ body {
   background: var(--editor-bg);
 }
 
-/* Syntax checker — error line highlight & glyph dot */
+/* Syntax checker — error line highlight & glyph dot (red) */
 .syntax-error-line {
   background: rgba(255, 0, 0, 0.10) !important;
 }
 .syntax-error-glyph {
   background: #ff3333;
+  border-radius: 50%;
+  width: 8px !important;
+  height: 8px !important;
+  margin-left: 4px;
+  margin-top: 6px;
+}
+
+/* Syntax checker — warning line highlight & glyph dot (yellow).
+   Used for things that will convert but won't work as intended in-game
+   (duplicate samplers, raw texture + material override on same mesh, etc.) */
+.syntax-warning-line {
+  background: rgba(255, 200, 0, 0.10) !important;
+}
+.syntax-warning-glyph {
+  background: #e6b800;
   border-radius: 50%;
   width: 8px !important;
   height: 8px !important;

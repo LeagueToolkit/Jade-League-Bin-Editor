@@ -17,6 +17,7 @@ import StatusBar from "./components/StatusBar";
 import WelcomeScreen from "./components/WelcomeScreen";
 import AboutDialog from "./components/AboutDialog";
 import ThemesDialog from "./components/ThemesDialog";
+import MaterialLibraryBrowser from "./components/MaterialLibraryBrowser";
 import SettingsDialog from "./components/SettingsDialog";
 import PreferencesDialog from "./components/PreferencesDialog";
 import GeneralEditPanel from "./components/GeneralEditPanel";
@@ -95,6 +96,7 @@ function App() {
   const [statusMessage, setStatusMessage] = useState("Ready");
   const [showAboutDialog, setShowAboutDialog] = useState(false);
   const [showThemesDialog, setShowThemesDialog] = useState(false);
+  const [showMaterialLibrary, setShowMaterialLibrary] = useState(false);
   const [showPreferencesDialog, setShowPreferencesDialog] = useState(false);
   const [showSettingsDialog, setShowSettingsDialog] = useState(false);
   const [showQuartzInstallModal, setShowQuartzInstallModal] = useState(false);
@@ -1944,9 +1946,13 @@ function App() {
     const text = model.getValue();
     const errors = checkSyntax(text);
 
-    // Markers give the squiggly underline + problems list
+    // Markers give the squiggly underline + problems list.
+    // Errors (red) are for broken syntax, warnings (yellow) are for things
+    // that will convert but won't work as intended in-game.
     const markers: MonacoType.editor.IMarkerData[] = errors.map(err => ({
-      severity: monaco.MarkerSeverity.Error,
+      severity: err.severity === 'warning'
+        ? monaco.MarkerSeverity.Warning
+        : monaco.MarkerSeverity.Error,
       message: err.message,
       startLineNumber: err.line,
       startColumn: err.column,
@@ -1955,24 +1961,31 @@ function App() {
     }));
     monaco.editor.setModelMarkers(model, 'syntax-checker', markers);
 
-    // Decorations give the red line highlight + red minimap dot
-    const seenLines = new Set<number>();
-    const decorations: MonacoType.editor.IModelDeltaDecoration[] = [];
+    // Decorations give the line highlight + glyph dot + minimap indicator.
+    // Errors win over warnings — if a line has both, show red.
+    const lineSeverity = new Map<number, 'error' | 'warning'>();
     for (const err of errors) {
-      if (seenLines.has(err.line)) continue;
-      seenLines.add(err.line);
+      const prev = lineSeverity.get(err.line);
+      const sev = err.severity === 'warning' ? 'warning' : 'error';
+      if (prev === 'error') continue;
+      lineSeverity.set(err.line, sev);
+    }
+
+    const decorations: MonacoType.editor.IModelDeltaDecoration[] = [];
+    for (const [lineNum, sev] of lineSeverity.entries()) {
+      const isWarn = sev === 'warning';
       decorations.push({
-        range: new monaco.Range(err.line, 1, err.line, 1),
+        range: new monaco.Range(lineNum, 1, lineNum, 1),
         options: {
           isWholeLine: true,
-          className: 'syntax-error-line',
-          glyphMarginClassName: 'syntax-error-glyph',
+          className: isWarn ? 'syntax-warning-line' : 'syntax-error-line',
+          glyphMarginClassName: isWarn ? 'syntax-warning-glyph' : 'syntax-error-glyph',
           minimap: {
-            color: '#ff3333',
+            color: isWarn ? '#e6b800' : '#ff3333',
             position: monaco.editor.MinimapPosition.Inline,
           },
           overviewRuler: {
-            color: '#ff3333',
+            color: isWarn ? '#e6b800' : '#ff3333',
             position: monaco.editor.OverviewRulerLane.Full,
           },
         },
@@ -2779,6 +2792,7 @@ function App() {
 
   // Tool Operations
   const handleThemes = () => setShowThemesDialog(true);
+  const handleMaterialLibrary = () => setShowMaterialLibrary(true);
   const handlePreferences = () => setShowPreferencesDialog(true);
   const handleSettings = () => setShowSettingsDialog(true);
   const handleAbout = () => setShowAboutDialog(true);
@@ -3290,6 +3304,7 @@ function App() {
         onMaximize={handleMaximize}
         onClose={handleClose}
         onParticleEditor={handleParticleEditor}
+        onMaterialLibrary={handleMaterialLibrary}
         onQuartzAction={handleSendToQuartz}
       />
 
@@ -3317,6 +3332,7 @@ function App() {
         onThemes={handleThemes}
         onSettings={handleSettings}
         onAbout={handleAbout}
+        onMaterialLibrary={handleMaterialLibrary}
         recentFiles={recentFiles}
         onOpenRecentFile={openFileFromPath}
         openFileDisabled={openFileDisabled}
@@ -3333,7 +3349,7 @@ function App() {
         />
       )}
 
-      {tabs.length === 0 && <WelcomeScreen onOpenFile={handleOpen} openFileDisabled={openFileDisabled} recentFiles={recentFiles} onOpenRecentFile={openFileFromPath} />}
+      {tabs.length === 0 && <WelcomeScreen onOpenFile={handleOpen} openFileDisabled={openFileDisabled} recentFiles={recentFiles} onOpenRecentFile={openFileFromPath} onMaterialLibrary={handleMaterialLibrary} appIcon={appIcon} />}
 
       {/* Keep the editor container (and Monaco) always mounted.
           Unmounting Monaco while a requestAnimationFrame render is in-flight
@@ -3491,6 +3507,12 @@ function App() {
         onClose={() => setShowThemesDialog(false)}
         onThemeApplied={handleThemeApplied}
       />
+
+      {showMaterialLibrary && (
+        <MaterialLibraryBrowser
+          onClose={() => setShowMaterialLibrary(false)}
+        />
+      )}
 
       <SettingsDialog
         isOpen={showSettingsDialog}
