@@ -502,9 +502,11 @@ echo [%date% %time%] Installer finished >> \"{log}\"\r
     std::fs::write(&bat_path, &bat_content)
         .map_err(|e| format!("Failed to write update script: {}", e))?;
 
-    // CREATE_NEW_PROCESS_GROUP (0x200) | CREATE_NO_WINDOW (0x08000000)
-    // Script survives Jade exiting and runs without a visible console.
-    const DETACH_FLAGS: u32 = 0x00000200 | 0x08000000;
+    // CREATE_NEW_PROCESS_GROUP (0x200) | DETACHED_PROCESS (0x08)
+    // Script survives Jade exiting. A console window briefly flashes —
+    // using CREATE_NO_WINDOW instead triggers Windows Defender heuristics
+    // (hidden cmd + self-deleting bat = "dropper" pattern).
+    const DETACH_FLAGS: u32 = 0x00000200 | 0x00000008;
 
     std::process::Command::new("cmd")
         .args(["/C", &bat_path.to_string_lossy()])
