@@ -597,14 +597,11 @@ fn read_skn_materials(skn_path: &std::path::Path) -> Result<Vec<String>, String>
             .to_string();
 
         // Skip rest of submesh header: startVertex(u32) + vertexCount(u32) + startIndex(u32) + indexCount(u32) = 16 bytes
+        // Total per-submesh size is 80 bytes (64 name + 16 fields) for all
+        // versions. The bin_hash that appears in .skn.json dumps is computed
+        // from the name at parse time — it isn't stored in the binary.
         cur.seek(SeekFrom::Current(16))
             .map_err(|_| "Failed to skip submesh header fields")?;
-
-        // Version >= 4 has an extra u32 field (unique flag / startFace)
-        if major >= 4 || (major == 2 && minor == 1) {
-            cur.seek(SeekFrom::Current(4))
-                .map_err(|_| "Failed to skip extra submesh field")?;
-        }
 
         if !name.is_empty() {
             materials.push(name);
@@ -625,6 +622,10 @@ pub struct AutoMaterialResult {
     pub matches: Vec<MaterialMatch>,
     pub skn_path: String,
     pub unmatched: Vec<String>,
+    /// Every texture file found in the skin's texture folder, as game
+    /// asset-relative paths. Used by the dialog's "manual match" mode so
+    /// the user can pick any detected texture, not just the auto-matched one.
+    pub textures: Vec<String>,
 }
 
 /// Given the bin file path and the simpleSkin asset path, resolve the SKN,
@@ -739,10 +740,18 @@ pub async fn auto_material_override(
         unmatched.push(mat.clone());
     }
 
+    // All detected textures as asset-relative paths, sorted for stable UI.
+    let mut all_textures: Vec<String> = tex_files
+        .values()
+        .map(|p| extract_asset_relative(p))
+        .collect();
+    all_textures.sort();
+
     Ok(AutoMaterialResult {
         matches,
         skn_path: skn_resolved,
         unmatched,
+        textures: all_textures,
     })
 }
 
