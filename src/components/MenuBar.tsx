@@ -247,14 +247,14 @@ export default function MenuBar({
                 <ReplaceIcon size={16} />
             </button>
             <button
-                className={`menu-icon-btn ${generalEditActive ? 'active panel-active' : ''}`}
+                className={`menu-icon-btn ${generalEditActive ? 'active' : ''}`}
                 title="General Editing (Ctrl+O)"
                 onClick={onGeneralEdit}
             >
                 <EditIcon size={16} />
             </button>
             <button
-                className={`menu-icon-btn ${particlePanelActive ? 'active panel-active' : ''}`}
+                className={`menu-icon-btn ${particlePanelActive ? 'active' : ''}`}
                 title="Particle Editing (Ctrl+P)"
                 onClick={onParticlePanel}
             >
