@@ -1554,6 +1554,93 @@ function App() {
     return null;
   }
 
+  /**
+   * Find material links and StaticMaterialDef entries, and decorate each
+   * with a clickable arrow that jumps between them.
+   *
+   *   material: link = "name"        → ↗ jumps down to the StaticMaterialDef
+   *   "name" = StaticMaterialDef {   → ↖ jumps up to the first override
+   *
+   * The target line is encoded in a CSS class suffix (`jade-jump-to-<line>`)
+   * so the click handler doesn't need to re-scan the document.
+   */
+  function findMaterialJumpDecorations(model: MonacoType.editor.ITextModel): MonacoType.editor.IModelDeltaDecoration[] {
+    const decorations: MonacoType.editor.IModelDeltaDecoration[] = [];
+    const lineCount = model.getLineCount();
+
+    // First pass: index every StaticMaterialDef name → its line.
+    //             And every material link → its line.
+    // Case-insensitive because field names in bin files are usually
+    // capitalised (Material:, SamplerValues:, TextureName:, etc.).
+    const defByName = new Map<string, number>();
+    const linksByName = new Map<string, number[]>();
+    const defLineRe = /^\s*"([^"]+)"\s*=\s*StaticMaterialDef\s*\{/i;
+    const linkLineRe = /material\s*:\s*link\s*=\s*"([^"]+)"/i;
+
+    for (let ln = 1; ln <= lineCount; ln++) {
+      const line = model.getLineContent(ln);
+      const dm = defLineRe.exec(line);
+      if (dm) {
+        defByName.set(dm[1], ln);
+        continue;
+      }
+      const lm = linkLineRe.exec(line);
+      if (lm) {
+        const arr = linksByName.get(lm[1]) ?? [];
+        arr.push(ln);
+        linksByName.set(lm[1], arr);
+      }
+    }
+
+    // Second pass: emit decorations for every link that has a matching def,
+    // and every def that has at least one link.
+    for (let ln = 1; ln <= lineCount; ln++) {
+      const line = model.getLineContent(ln);
+
+      const lm = linkLineRe.exec(line);
+      if (lm) {
+        const name = lm[1];
+        const targetLine = defByName.get(name);
+        if (targetLine !== undefined) {
+          const col = line.length + 1;
+          decorations.push({
+            range: { startLineNumber: ln, startColumn: Math.max(1, col - 1), endLineNumber: ln, endColumn: col },
+            options: {
+              description: 'jade-material-jump-down',
+              after: {
+                content: '\u00A0',
+                inlineClassName: `jade-jump-arrow jade-jump-down jade-jump-to-${targetLine}`,
+                inlineClassNameAffectsLetterSpacing: true,
+              },
+            },
+          });
+        }
+      }
+
+      const dm = defLineRe.exec(line);
+      if (dm) {
+        const name = dm[1];
+        const targets = linksByName.get(name);
+        if (targets && targets.length > 0) {
+          const col = line.length + 1;
+          decorations.push({
+            range: { startLineNumber: ln, startColumn: Math.max(1, col - 1), endLineNumber: ln, endColumn: col },
+            options: {
+              description: 'jade-material-jump-up',
+              after: {
+                content: '\u00A0',
+                inlineClassName: `jade-jump-arrow jade-jump-up jade-jump-to-${targets[0]}`,
+                inlineClassNameAffectsLetterSpacing: true,
+              },
+            },
+          });
+        }
+      }
+    }
+
+    return decorations;
+  }
+
   /** Find all image paths in the model, for decorations (pointer cursor + inline swatch box) */
   function findAllImagePaths(model: MonacoType.editor.ITextModel): MonacoType.editor.IModelDeltaDecoration[] {
     const decorations: MonacoType.editor.IModelDeltaDecoration[] = [];
@@ -1832,6 +1919,10 @@ function App() {
     if (!popup?.resolvedPath) return;
     setTexPopup(null);
 
+    // Save the current code tab's scroll/cursor position so it's
+    // restored when the user switches back.
+    saveCurrentViewState();
+
     // Check if already open
     const existing = tabs.find(t => t.filePath === popup.resolvedPath && t.tabType === 'texture-preview');
     if (existing) {
@@ -1845,7 +1936,7 @@ function App() {
 
     // Load texture data into the new tab
     loadTextureIntoTab(newTab.id, popup.resolvedPath);
-  }, [tabs, loadTextureIntoTab]);
+  }, [tabs, loadTextureIntoTab, saveCurrentViewState]);
 
   /** Open the file in the configured image editor (or OS default) */
   const handleTexEditImage = useCallback(async (resolvedPath: string | null | undefined) => {
@@ -2211,6 +2302,41 @@ function App() {
     editorDisposablesRef.current.push(imgDecContentDisposable, imgDecModelDisposable);
     editorDisposablesRef.current.push({ dispose: () => { if (imgDecDebounce) clearTimeout(imgDecDebounce); editor.deltaDecorations(imgPathDecorations, []); } });
     // â”€â”€ End image path decorations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+    // Material jump arrows (link <-> StaticMaterialDef)
+    let matJumpDecorations: string[] = [];
+    let matJumpDebounce: ReturnType<typeof setTimeout> | null = null;
+    const refreshMatJumpDecorations = () => {
+      const model = editor.getModel();
+      if (!model) return;
+      matJumpDecorations = editor.deltaDecorations(matJumpDecorations, findMaterialJumpDecorations(model));
+    };
+    const debouncedRefreshMatJumpDecorations = () => {
+      if (matJumpDebounce) clearTimeout(matJumpDebounce);
+      matJumpDebounce = setTimeout(refreshMatJumpDecorations, 300);
+    };
+    refreshMatJumpDecorations();
+    const matJumpContentDisposable = editor.onDidChangeModelContent(() => { debouncedRefreshMatJumpDecorations(); });
+    const matJumpModelDisposable = editor.onDidChangeModel(() => { refreshMatJumpDecorations(); });
+    editorDisposablesRef.current.push(matJumpContentDisposable, matJumpModelDisposable);
+    editorDisposablesRef.current.push({ dispose: () => { if (matJumpDebounce) clearTimeout(matJumpDebounce); editor.deltaDecorations(matJumpDecorations, []); } });
+
+    // Click handler for the jump arrows — parse the target line from the
+    // class name suffix and reveal it centered.
+    const matJumpClickDisposable = editor.onMouseDown((e) => {
+      const target = e.event.browserEvent.target as HTMLElement | null;
+      if (!target || !target.classList.contains('jade-jump-arrow')) return;
+      const match = Array.from(target.classList).find((c) => c.startsWith('jade-jump-to-'));
+      if (!match) return;
+      const targetLine = parseInt(match.slice('jade-jump-to-'.length), 10);
+      if (!Number.isFinite(targetLine)) return;
+      e.event.preventDefault();
+      e.event.stopPropagation();
+      editor.revealLineInCenter(targetLine, 0);
+      editor.setPosition({ lineNumber: targetLine, column: 1 });
+      editor.focus();
+    });
+    editorDisposablesRef.current.push(matJumpClickDisposable);
 
     // â”€â”€ Refocus editor on window focus (so hover works after alt-tab) â”€â”€â”€
     const onWindowFocus = () => { editor.focus(); };
