@@ -595,6 +595,8 @@ export default function MaterialLibraryBrowser({ onClose, onInsert }: MaterialLi
   const [selectedChampion, setSelectedChampion] = useState<string>(ALL_CHAMPIONS);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedMaterial, setSelectedMaterial] = useState<LibraryIndexEntry | null>(null);
+  const scrollPosRef = useRef(0);
+  const contentRef = useRef<HTMLDivElement>(null);
   const [busyPath, setBusyPath] = useState<string | null>(null);
   const [progress, setProgress] = useState<LibraryProgressEvent | null>(null);
   const [previewCache, setPreviewCache] = useState<Record<string, string | null>>({});
@@ -793,9 +795,9 @@ export default function MaterialLibraryBrowser({ onClose, onInsert }: MaterialLi
     });
   }, [index, selectedCategory, selectedChampion, searchQuery, downloadedPaths]);
 
-  // Lazy-load preview URLs for every currently visible material. Results
-  // are cached by path so switching filters is fast and the backend isn't
-  // spammed. `null` means "no preview available — don't try again".
+  // Lazy-load preview URLs in batches of 30. Results are cached by path
+  // so switching filters is fast and the backend isn't spammed.
+  // `null` means "no preview available — don't try again".
   useEffect(() => {
     const toFetch = filteredMaterials
       .map((m) => m.path)
@@ -803,16 +805,23 @@ export default function MaterialLibraryBrowser({ onClose, onInsert }: MaterialLi
     if (toFetch.length === 0) return;
 
     let cancelled = false;
+    const BATCH = 30;
     (async () => {
-      for (const p of toFetch) {
-        try {
-          const url = await invoke<string | null>('library_get_preview', { path: p });
-          if (cancelled) return;
-          setPreviewCache((prev) => ({ ...prev, [p]: url ?? null }));
-        } catch (e) {
-          if (cancelled) return;
-          setPreviewCache((prev) => ({ ...prev, [p]: null }));
-        }
+      for (let i = 0; i < toFetch.length; i += BATCH) {
+        if (cancelled) return;
+        const batch = toFetch.slice(i, i + BATCH);
+        const results = await Promise.allSettled(
+          batch.map((p) => invoke<string | null>('library_get_preview', { path: p }).then((url) => ({ p, url })))
+        );
+        if (cancelled) return;
+        setPreviewCache((prev) => {
+          const next = { ...prev };
+          for (const r of results) {
+            if (r.status === 'fulfilled') next[r.value.p] = r.value.url ?? null;
+            else next[(r as any).reason?.p ?? ''] = null;
+          }
+          return next;
+        });
       }
     })();
     return () => {
@@ -980,7 +989,7 @@ export default function MaterialLibraryBrowser({ onClose, onInsert }: MaterialLi
           </div>
 
           {/* Content — grid view or detail view depending on selection */}
-          <div className="mlb-content">
+          <div className="mlb-content" ref={contentRef}>
             {selectedMaterial ? (
               <MaterialDetail
                 material={selectedMaterial}
@@ -990,7 +999,12 @@ export default function MaterialLibraryBrowser({ onClose, onInsert }: MaterialLi
                 outdatedInfo={outdatedMap.get(selectedMaterial.path) ?? null}
                 isBusy={busyPath === selectedMaterial.path}
                 progressMessage={progress?.message ?? null}
-                onBack={() => setSelectedMaterial(null)}
+                onBack={() => {
+                  setSelectedMaterial(null);
+                  requestAnimationFrame(() => {
+                    if (contentRef.current) contentRef.current.scrollTop = scrollPosRef.current;
+                  });
+                }}
                 onDownload={() => handleDownload(selectedMaterial.path)}
                 onUpdate={() => handleUpdate(selectedMaterial.path)}
                 onDelete={async () => {
@@ -1059,6 +1073,7 @@ export default function MaterialLibraryBrowser({ onClose, onInsert }: MaterialLi
                       // only open the detail view when the user clicks the
                       // card background / preview / body.
                       if ((e.target as HTMLElement).closest('button')) return;
+                      scrollPosRef.current = contentRef.current?.scrollTop ?? 0;
                       setSelectedMaterial(material);
                     }}
                   >
