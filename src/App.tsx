@@ -1645,7 +1645,6 @@ function App() {
           decorations.push({
             range: { startLineNumber: ln, startColumn: Math.max(1, col - 1), endLineNumber: ln, endColumn: col },
             options: {
-              description: 'jade-material-jump-down',
               after: {
                 content: '\u00A0',
                 inlineClassName: `jade-jump-arrow jade-jump-down jade-jump-to-${targetLine}`,
@@ -1665,7 +1664,6 @@ function App() {
           decorations.push({
             range: { startLineNumber: ln, startColumn: Math.max(1, col - 1), endLineNumber: ln, endColumn: col },
             options: {
-              description: 'jade-material-jump-up',
               after: {
                 content: '\u00A0',
                 inlineClassName: `jade-jump-arrow jade-jump-up jade-jump-to-${targets[0]}`,

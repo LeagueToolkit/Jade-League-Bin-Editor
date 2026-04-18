@@ -568,7 +568,7 @@ fn read_skn_materials(skn_path: &std::path::Path) -> Result<Vec<String>, String>
 
     let major = cur.read_u16::<LittleEndian>()
         .map_err(|_| "SKN too short: no version")?;
-    let minor = cur.read_u16::<LittleEndian>()
+    let _minor = cur.read_u16::<LittleEndian>()
         .map_err(|_| "SKN too short: no minor version")?;
 
     if major == 0 {

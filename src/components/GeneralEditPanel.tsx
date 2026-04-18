@@ -756,7 +756,7 @@ export default function GeneralEditPanel({
   const handleMaterialDialogSubmitWithLibrary = async (
     _overridePath: string, // ignored — the library material's name is used instead
     submesh: string,
-    library: { materialId: string; materialPath: string; materialName: string }
+    library: { materialId: string; materialPath: string; materialName: string; texture?: string }
   ) => {
     setShowMaterialDialog(false);
     setMaterialOverrideStatus(`Inserting ${library.materialName}…`);
