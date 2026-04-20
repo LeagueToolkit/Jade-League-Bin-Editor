@@ -994,91 +994,83 @@ export default function GeneralEditPanel({
   const injectMaterialDefSnippet = (content: string, snippetText: string): string => {
     const lines = content.split('\n');
 
-    // Find the closing brace of skinMeshProperties and insert after it.
-    // Track brace depth starting from the skinMeshProperties line.
-    let smpStart = -1;
-    for (let i = 0; i < lines.length; i++) {
-      if (/skinMeshProperties\s*:/.test(lines[i]) && lines[i].includes('{')) {
-        smpStart = i;
-        break;
-      }
-    }
+    // A top-level entry line looks like:
+    //   "path/or/name" = ClassName {
+    //   0xABCDEF12 = ClassName {
+    // Capture class name so we can target SkinCharacterDataProperties /
+    // ResourceResolver specifically.
+    const entryRe = /^(\s*)("[^"]+"|0x[0-9a-fA-F]+)\s*=\s*(\w+)\s*\{/;
 
-    let insertIdx = -1;
-    if (smpStart !== -1) {
+    // Walk the whole file collecting every top-level entry with its
+    // open/close line indices and class name. Top-level means the entry
+    // opens at indent 0 inside the outer wrapper — but ritobin files
+    // usually indent top-level entries by 4 spaces under an `entries: map`
+    // block. We tolerate either by just matching the regex at any indent
+    // and tracking brace depth from the match line.
+    type Entry = { start: number; end: number; indent: string; className: string };
+    const entries: Entry[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      const m = entryRe.exec(lines[i]);
+      if (!m) continue;
+      // Walk to this entry's closing brace via depth tracking.
       let depth = 0;
-      for (let i = smpStart; i < lines.length; i++) {
-        for (const ch of lines[i]) {
+      let end = -1;
+      for (let j = i; j < lines.length; j++) {
+        for (const ch of lines[j]) {
           if (ch === '{') depth++;
           else if (ch === '}') depth--;
         }
-        if (depth <= 0) {
-          insertIdx = i + 1;
-          break;
-        }
+        if (depth <= 0) { end = j; break; }
       }
+      if (end === -1) continue;
+      entries.push({ start: i, end, indent: m[1], className: m[3] });
+      // Skip past the entry so nested things don't get picked up as
+      // top-level entries.
+      i = end;
     }
 
-    // If there are already jadelib_* StaticMaterialDef entries in the file,
-    // append this new one AFTER the last one so newer inserts stack below.
-    // Otherwise fall back to inserting right after skinMeshProperties.
-    if (insertIdx !== -1) {
-      const jadelibStart = /^\s*"jadelib_[^"]*"\s*=\s*StaticMaterialDef\s*\{/;
-      let lastJadelibEnd = -1;
-      let i = insertIdx;
-      while (i < lines.length) {
-        if (jadelibStart.test(lines[i])) {
-          // Walk to this block's closing brace
-          let depth = 0;
-          for (let j = i; j < lines.length; j++) {
-            for (const ch of lines[j]) {
-              if (ch === '{') depth++;
-              else if (ch === '}') depth--;
-            }
-            if (depth <= 0) {
-              lastJadelibEnd = j + 1;
-              i = j + 1;
-              break;
-            }
-          }
-          if (lastJadelibEnd === -1) break; // malformed — bail
-        } else {
-          i++;
-        }
-      }
-      if (lastJadelibEnd !== -1) insertIdx = lastJadelibEnd;
-    }
+    // Primary target: last line of the first SkinCharacterDataProperties
+    // block. Insert AFTER its closing brace.
+    //
+    // Backup target: first ResourceResolver block. Insert BEFORE it.
+    //
+    // Stacking: if any existing jadelib_* StaticMaterialDef entries sit
+    // after the primary anchor, skip past the last one so new inserts
+    // stack below previous ones in author order.
+    let insertIdx = -1;
+    let anchorIndent = '    ';
 
-    if (insertIdx === -1) {
-      // Fallback: try inserting after entries: map[hash,pointer] = {
-      for (let i = 0; i < lines.length; i++) {
-        if (/entries\s*:\s*map\s*\[\s*hash\s*,\s*pointer\s*\]\s*=\s*\{/.test(lines[i])) {
-          insertIdx = i + 1;
-          break;
-        }
+    const skinChar = entries.find(e => e.className === 'SkinCharacterDataProperties');
+    if (skinChar) {
+      insertIdx = skinChar.end + 1;
+      anchorIndent = skinChar.indent;
+
+      // Walk forward past any jadelib_* StaticMaterialDef entries so
+      // subsequent inserts append below the last one.
+      for (const e of entries) {
+        if (e.start < insertIdx) continue;
+        if (e.className !== 'StaticMaterialDef') break;
+        const nameMatch = lines[e.start].match(/"(jadelib_[^"]+)"/);
+        if (!nameMatch) break;
+        insertIdx = e.end + 1;
+      }
+    } else {
+      // Backup: insert above the first ResourceResolver entry.
+      const res = entries.find(e => e.className === 'ResourceResolver');
+      if (res) {
+        insertIdx = res.start;
+        anchorIndent = res.indent;
       }
     }
 
     if (insertIdx === -1) {
+      // Last-resort fallback: append at the end of the file.
       return content + '\n' + snippetText + '\n';
-    }
-
-    // Match indent of the entries around skinMeshProperties (top-level entry indent)
-    let indent = '    ';
-    if (smpStart !== -1) {
-      // Use the indent of the line containing skinMeshProperties' parent entry
-      for (let i = smpStart - 1; i >= 0; i--) {
-        if (/^\s*("([^"]+)"|0x[0-9a-fA-F]+)\s*=\s*\w+\s*\{/.test(lines[i])) {
-          const m2 = lines[i].match(/^(\s*)/);
-          if (m2) indent = m2[1];
-          break;
-        }
-      }
     }
 
     const indentedSnippet = snippetText
       .split('\n')
-      .map((l) => (l.length > 0 ? indent + l : l))
+      .map((l) => (l.length > 0 ? anchorIndent + l : l))
       .join('\n');
 
     return [
