@@ -309,11 +309,17 @@ pub fn get_cached_bin_hashes() -> &'static RwLock<HashMapProvider> {
 }
 
 /// Reload the existing cached BIN hashes from disk and return total loaded count.
+///
+/// Loads from disk *before* acquiring the write lock so concurrent readers
+/// (e.g. an in-progress file open via tree_to_text_cached) only block during
+/// the brief swap, not for the multi-second disk read.
 pub fn reload_cached_bin_hashes() -> usize {
+    let new_hashes = load_bin_hashes();
+    let count = new_hashes.total_count();
     let cache = get_cached_bin_hashes();
     let mut guard = cache.write();
-    *guard = load_bin_hashes();
-    guard.total_count()
+    *guard = new_hashes;
+    count
 }
 
 /// Convert a Bin to ritobin text format using the cached hash provider

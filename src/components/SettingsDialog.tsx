@@ -117,6 +117,8 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose }) => {
     const unlistenRef = useRef<(() => void) | null>(null);
     const [preloadHash, setPreloadHash] = useState(false);
     const [binaryFormat, setBinaryFormat] = useState(false);
+    const [hashUpdateMode, setHashUpdateMode] = useState<'every_launch' | 'every_7_days' | 'never'>('every_launch');
+    const [lastHashCheckAt, setLastHashCheckAt] = useState<number>(0);
     const [minimizeToTray, setMinimizeToTray] = useState(false);
     const [runAtStartup, setRunAtStartup] = useState(false);
     const [communicateWithQuartz, setCommunicateWithQuartz] = useState(true);
@@ -173,6 +175,10 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose }) => {
         try {
             setPreloadHash((await invoke<string>('get_preference', { key: 'PreloadHashes', defaultValue: 'False' })) === 'True');
             setBinaryFormat((await invoke<string>('get_preference', { key: 'UseBinaryHashFormat', defaultValue: 'False' })) === 'True');
+            const mode = await invoke<string>('get_preference', { key: 'HashUpdateMode', defaultValue: 'every_launch' });
+            setHashUpdateMode(mode === 'every_7_days' || mode === 'never' ? mode : 'every_launch');
+            const lastCheckedStr = await invoke<string>('get_preference', { key: 'LastHashCheckAt', defaultValue: '0' });
+            setLastHashCheckAt(parseInt(lastCheckedStr, 10) || 0);
             setMinimizeToTray((await invoke<string>('get_preference', { key: 'MinimizeToTray', defaultValue: 'False' })) === 'True');
             setRunAtStartup(await invoke<boolean>('get_autostart_status'));
             setCommunicateWithQuartz((await invoke<string>('get_preference', { key: 'CommunicateWithQuartz', defaultValue: 'True' })) === 'True');
@@ -227,6 +233,12 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose }) => {
                 setPreloadStatus({ loaded: false, loading: false, fnv_count: 0, xxh_count: 0, memory_bytes: 0 });
             } catch (e) { console.error(e); }
         }
+    };
+
+    const handleHashUpdateModeChange = async (mode: 'every_launch' | 'every_7_days' | 'never') => {
+        setHashUpdateMode(mode);
+        try { await invoke('set_preference', { key: 'HashUpdateMode', value: mode }); }
+        catch (e) { console.error(e); }
     };
 
     const toggleBinaryFormat = async () => {
@@ -400,6 +412,44 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose }) => {
                 checked={binaryFormat}
                 onChange={toggleBinaryFormat}
             />
+
+            <div className="settings-divider" />
+
+            <h3 className="settings-section-title" style={{ fontSize: 16 }}>Update Schedule</h3>
+            <p className="settings-section-subtitle">When should Jade check for hash file updates? Updates always run in the background and never block opening files.</p>
+
+            <div className="engine-switcher">
+                <button
+                    className={`engine-option${hashUpdateMode === 'every_launch' ? ' active' : ''}`}
+                    onClick={() => handleHashUpdateModeChange('every_launch')}
+                >
+                    Every launch
+                </button>
+                <button
+                    className={`engine-option${hashUpdateMode === 'every_7_days' ? ' active' : ''}`}
+                    onClick={() => handleHashUpdateModeChange('every_7_days')}
+                >
+                    Every 7 days
+                </button>
+                <button
+                    className={`engine-option${hashUpdateMode === 'never' ? ' active' : ''}`}
+                    onClick={() => handleHashUpdateModeChange('never')}
+                >
+                    Never
+                </button>
+            </div>
+
+            <p className="settings-match-mode-desc">
+                {hashUpdateMode === 'every_launch' && 'Check and update hashes silently each time Jade starts.'}
+                {hashUpdateMode === 'every_7_days' && 'Only check once a week. Less network traffic.'}
+                {hashUpdateMode === 'never' && 'Don’t auto-update. Use the Download Hashes button above when you want fresh hashes.'}
+            </p>
+
+            {lastHashCheckAt > 0 && (
+                <p className="location-text" style={{ marginTop: 8 }}>
+                    Last checked: {new Date(lastHashCheckAt).toLocaleString()}
+                </p>
+            )}
         </>
     );
 

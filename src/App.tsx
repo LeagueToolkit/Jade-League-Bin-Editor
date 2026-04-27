@@ -103,7 +103,6 @@ function App() {
   const [updateToastVersion, setUpdateToastVersion] = useState<string | null>(null);
   const [hashSyncToast, setHashSyncToast] = useState<HashSyncToastState | null>(null);
   const [, setHashSyncBusy] = useState(true);
-  const [hashesReady, setHashesReady] = useState(false);
   const [appIcon, setAppIcon] = useState<string>("/media/jade.ico");
   const [findWidgetOpen, setFindWidgetOpen] = useState(false);
   const [replaceWidgetOpen, setReplaceWidgetOpen] = useState(false);
@@ -214,6 +213,14 @@ function App() {
   const statusMessageRef = useRef<string>("Ready");
   const allowHashStatusUpdateRef = useRef<boolean>(true);
   const hashToastHideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Latches when the user dismisses the hash sync toast so subsequent
+  // progress events from the backend don't keep reopening it. Reset at
+  // the start of each new check session.
+  const hashToastDismissedRef = useRef<boolean>(false);
+  const showHashToast = useCallback((state: HashSyncToastState) => {
+    if (hashToastDismissedRef.current) return;
+    setHashSyncToast(state);
+  }, []);
 
   // Load custom icon and window state on mount
   useEffect(() => {
@@ -283,25 +290,25 @@ function App() {
 
       const skipped = Number(payload.skipped || 0);
       if (phase === 'checking') {
-        setHashSyncToast({
+        showHashToast({
           visible: true,
           status: 'checking',
           message: payload.message || 'Checking hash updates...'
         });
       } else if (phase === 'downloading') {
-        setHashSyncToast({
+        showHashToast({
           visible: true,
           status: 'downloading',
           message: `Checked ${current}/${total} - Updated ${downloaded}${payload.file ? ` - ${payload.file}` : ''}`
         });
       } else if (phase === 'success') {
-        setHashSyncToast({
+        showHashToast({
           visible: true,
           status: 'success',
           message: payload.message || `Done - Updated ${downloaded}, Skipped ${skipped}`
         });
       } else if (phase === 'error') {
-        setHashSyncToast({
+        showHashToast({
           visible: true,
           status: 'error',
           message: payload.message || 'Hash update failed'
@@ -715,21 +722,48 @@ function App() {
     }
   };
 
-  // Always auto-download/update hashes on startup.
+  // Auto-download/update hashes on startup, gated by the user's chosen
+  // schedule (every launch / every 7 days / never). The whole flow is
+  // background work — file opening is never blocked by this.
   const autoDownloadHashesOnStartup = async () => {
+    // Reset the toast dismissed latch for this new session.
+    hashToastDismissedRef.current = false;
     try {
-      // If hash files are already present, allow opening bins immediately.
       const preStatus = await invoke<{ all_present: boolean }>('check_hashes').catch(() => ({ all_present: false }));
-      if (preStatus?.all_present) {
-        setHashesReady(true);
+
+      const mode = await invoke<string>('get_preference', {
+        key: 'HashUpdateMode',
+        defaultValue: 'every_launch'
+      }).catch(() => 'every_launch');
+
+      // "never" — skip the network entirely.
+      if (mode === 'never') {
+        setHashSyncBusy(false);
+        return;
       }
+
+      // "every_7_days" — skip if we've checked within the past week and
+      // hashes are present on disk.
+      if (mode === 'every_7_days') {
+        const lastCheckedStr = await invoke<string>('get_preference', {
+          key: 'LastHashCheckAt',
+          defaultValue: '0'
+        }).catch(() => '0');
+        const lastChecked = parseInt(lastCheckedStr, 10) || 0;
+        const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+        if (preStatus?.all_present && (Date.now() - lastChecked) < sevenDaysMs) {
+          setHashSyncBusy(false);
+          return;
+        }
+      }
+
       setHashSyncBusy(true);
       const useBinaryFormat = await invoke<string>('get_preference', {
         key: 'UseBinaryHashFormat',
         defaultValue: 'False'
       }) === 'True';
 
-      setHashSyncToast({
+      showHashToast({
         visible: true,
         status: 'checking',
         message: 'Checking hash updates...'
@@ -739,7 +773,7 @@ function App() {
       setStatusMessage('Auto-downloading latest hash files...');
       statusMessageRef.current = 'Auto-downloading latest hash files...';
       try {
-        setHashSyncToast({
+        showHashToast({
           visible: true,
           status: 'downloading',
           message: 'Updating hash files...'
@@ -748,7 +782,7 @@ function App() {
         const downloaded = await invoke<string[]>('download_hashes', { useBinary: useBinaryFormat });
         const downloadedCount = Array.isArray(downloaded) ? downloaded.length : 0;
 
-        setHashSyncToast({
+        showHashToast({
           visible: true,
           status: 'success',
           message: downloadedCount > 0
@@ -765,22 +799,19 @@ function App() {
 
         setStatusMessage('Latest hash files downloaded');
         statusMessageRef.current = 'Latest hash files downloaded';
-        const hashStatus = await invoke<{ all_present: boolean }>('check_hashes').catch(() => ({ all_present: false }));
-        setHashesReady(Boolean(hashStatus?.all_present));
         setHashSyncBusy(false);
+        await invoke('set_preference', { key: 'LastHashCheckAt', value: String(Date.now()) }).catch(() => {});
         // Re-enable hash status updates after a short delay
         setTimeout(() => {
           allowHashStatusUpdateRef.current = true;
         }, 500);
       } catch (error) {
         console.error('[App] Failed to auto-download hashes:', error);
-        setHashSyncToast({
+        showHashToast({
           visible: true,
           status: 'error',
           message: `Hash update failed: ${String(error)}`
         });
-        const hashStatus = await invoke<{ all_present: boolean }>('check_hashes').catch(() => ({ all_present: false }));
-        setHashesReady(Boolean(hashStatus?.all_present));
         setHashSyncBusy(false);
         setStatusMessage('Ready');
         statusMessageRef.current = 'Ready';
@@ -788,13 +819,11 @@ function App() {
       }
     } catch (error) {
       console.error('[App] Failed to auto-download hashes:', error);
-      setHashSyncToast({
+      showHashToast({
         visible: true,
         status: 'error',
         message: `Hash update failed: ${String(error)}`
       });
-      const hashStatus = await invoke<{ all_present: boolean }>('check_hashes').catch(() => ({ all_present: false }));
-      setHashesReady(Boolean(hashStatus?.all_present));
       setHashSyncBusy(false);
       allowHashStatusUpdateRef.current = true;
     }
@@ -1105,10 +1134,6 @@ function App() {
   }, []);
 
   const openFileFromPath = async (filePath: string) => {
-    if (!hashesReady) {
-      setStatusMessage('Hashes are not installed yet. Please wait.');
-      return;
-    }
     // Prevent duplicate concurrent opens (e.g. Tauri drag-drop firing twice,
     // or rapid re-drops of the same file before the first open completes).
     const normalizedPath = filePath.toLowerCase();
@@ -2546,10 +2571,6 @@ function App() {
 
   // File Operations
   const handleOpen = async () => {
-    if (!hashesReady) {
-      setStatusMessage('Hashes are not installed yet. Please wait.');
-      return;
-    }
     try {
       // Block hash status updates while opening file
       allowHashStatusUpdateRef.current = false;
@@ -3447,9 +3468,10 @@ function App() {
 
   // Build status message
   const statusText = `${statusMessage}${activeTab?.isModified ? ' (Modified)' : ''}`;
-  // Only block opening bins when hashes are actually unavailable.
-  // Background check/update must not lock the Open action once hashes exist.
-  const openFileDisabled = !hashesReady;
+  // Hash updates run in the background and never gate file opening.
+  // Bins still parse without hashes — fields just display as hex IDs
+  // until the hash files land on disk.
+  const openFileDisabled = false;
   const activeDiffEntries = activeTab?.tabType === 'quartz-diff' && activeTab.diffSourceFilePath
     ? getQuartzEntriesForFile(activeTab.diffSourceFilePath)
     : [];
@@ -3716,7 +3738,10 @@ function App() {
               clearTimeout(hashToastHideTimeoutRef.current);
               hashToastHideTimeoutRef.current = null;
             }
-            setHashSyncToast((prev) => prev ? { ...prev, visible: false } : prev);
+            // Latch dismissal so progress events from the backend don't
+            // re-open the toast for the rest of this check session.
+            hashToastDismissedRef.current = true;
+            setHashSyncToast(null);
           }}
         />
       )}
