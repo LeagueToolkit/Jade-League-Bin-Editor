@@ -2,16 +2,22 @@ import { useState, useEffect, useRef, useCallback, type ChangeEvent } from 'reac
 import { invoke } from '@tauri-apps/api/core';
 import {
     THEMES,
+    PRESET_FONTS,
     SYNTAX_THEME_OPTIONS,
     getTheme,
     getSyntaxColors,
     getBracketColors,
     type ThemeColors,
     type SyntaxColors,
-    type BracketColors
+    type BracketColors,
+    type FontLibraryEntry,
 } from '../lib/themes';
-import { applyTheme, applyRoundedCorners, applyModernUI, applyCustomBackground } from '../lib/themeApplicator';
-import { PaletteIcon, SparklesIcon, ImageIcon, SettingsIcon } from './Icons';
+import {
+    applyTheme, applyRoundedCorners, applyModernUI, applyCustomBackground,
+    applyUIFont, injectFontFaces, fontFileNameToFamily,
+    ensurePresetFontLoaded, preloadBundledFonts,
+} from '../lib/themeApplicator';
+import { PaletteIcon, SparklesIcon, ImageIcon, SettingsIcon, TypeIcon, FontSourceWindowsIcon, FontSourceBundledIcon, FontSourceImportedIcon } from './Icons';
 import './ThemesDialog.css';
 
 interface ThemesDialogProps {
@@ -30,14 +36,16 @@ interface CustomTheme {
     selectedTab: string;
 }
 
-type NavSection = 'ui' | 'syntax' | 'background' | 'options';
+type NavSection = 'ui' | 'syntax' | 'background' | 'options' | 'fonts';
 
 const NAV_ITEMS: { id: NavSection; label: string; icon: React.ReactNode }[] = [
     { id: 'ui',         label: 'UI Theme',      icon: <PaletteIcon size={15} />  },
     { id: 'syntax',     label: 'Syntax Colors',  icon: <SparklesIcon size={15} /> },
     { id: 'background', label: 'Background',     icon: <ImageIcon size={15} />   },
+    { id: 'fonts',      label: 'Fonts',          icon: <TypeIcon size={15} />    },
     { id: 'options',    label: 'Options',         icon: <SettingsIcon size={15} />},
 ];
+
 
 export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: ThemesDialogProps) {
     const [activeSection, setActiveSection] = useState<NavSection>('ui');
@@ -49,6 +57,7 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
     const [modernUI, setModernUI] = useState(true);
     const [cigaretteMode, setCigaretteMode] = useState(false);
     const [useCustomBackground, setUseCustomBackground] = useState(false);
+    const [useThemeBackground, setUseThemeBackground] = useState(true);
     const [customBackgroundImage, setCustomBackgroundImage] = useState('');
     const [customBackgroundName, setCustomBackgroundName] = useState('');
     const [customBackgroundBlur, setCustomBackgroundBlur] = useState(8);
@@ -74,6 +83,13 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
         tabBg: '#1E1E1E',
         selectedTab: '#007ACC'
     });
+
+    // Font state
+    const [fontLibrary, setFontLibrary] = useState<FontLibraryEntry[]>([]);
+    const [uiFont, setUiFont] = useState('');
+    const [editorFont, setEditorFont] = useState('');
+    const [fontsReady, setFontsReady] = useState(false);
+    const fontFileInputRef = useRef<HTMLInputElement | null>(null);
 
     const [useCustomSyntaxTheme, setUseCustomSyntaxTheme] = useState(false);
     const [customSyntax, setCustomSyntax] = useState<SyntaxColors>({
@@ -124,6 +140,51 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
         root.style.setProperty('--text-color', theme.text);
         root.style.setProperty('--tab-bg', theme.tabBg);
         root.style.setProperty('--selected-tab-bg', theme.selectedTab);
+
+        // Sync syntax colors from the selected theme
+        const syntaxColors = getSyntaxColors(!useCustomTheme ? selectedTheme : 'Default');
+        root.style.setProperty('--syntax-keyword-color',  syntaxColors.keyword);
+        root.style.setProperty('--syntax-comment-color',  syntaxColors.comment);
+        root.style.setProperty('--syntax-string-color',   syntaxColors.stringColor);
+        root.style.setProperty('--syntax-number-color',   syntaxColors.number);
+        root.style.setProperty('--syntax-property-color', syntaxColors.propertyColor);
+
+        // Sync gradient and background image from the selected preset theme
+        const fullTheme = !useCustomTheme ? getTheme(selectedTheme) : null;
+
+        // Sync theme font
+        if (fullTheme?.font) {
+            root.style.setProperty('--ui-font', `"${fullTheme.font}", sans-serif`);
+        } else {
+            root.style.removeProperty('--ui-font');
+        }
+
+        if (fullTheme?.windowGradient) {
+            root.style.setProperty('--window-gradient', fullTheme.windowGradient);
+            root.setAttribute('data-theme-gradient', 'true');
+        } else {
+            root.style.removeProperty('--window-gradient');
+            root.removeAttribute('data-theme-gradient');
+        }
+
+        if (fullTheme?.defaultBackground) {
+            root.style.setProperty('--custom-bg-image', `url("${fullTheme.defaultBackground}")`);
+            root.style.setProperty('--custom-bg-blur', '0px');
+            root.style.setProperty('--custom-bg-scale', '1');
+            root.style.setProperty('--custom-bg-brightness', '1');
+            root.style.setProperty('--custom-bg-saturation', '1');
+            root.style.setProperty('--custom-bg-opacity', '1');
+            root.style.setProperty('--custom-bg-vignette', '0');
+            root.style.setProperty('--custom-bg-position', `${fullTheme.themeBackgroundPositionX ?? 50}% ${fullTheme.themeBackgroundPositionY ?? 50}%`);
+            root.style.setProperty('--custom-bg-origin', `${fullTheme.themeBackgroundPositionX ?? 50}% ${fullTheme.themeBackgroundPositionY ?? 50}%`);
+            root.style.setProperty('--custom-bg-size', fullTheme.themeBackgroundSize ?? 'auto');
+            root.style.setProperty('--custom-bg-color', fullTheme.windowGradient ? 'transparent' : (fullTheme.windowBg ?? '#000000'));
+            root.setAttribute('data-custom-background', 'true');
+        } else {
+            root.style.removeProperty('--custom-bg-image');
+            root.style.removeProperty('--custom-bg-opacity');
+            root.removeAttribute('data-custom-background');
+        }
     }, [useCustomTheme, customTheme, selectedTheme]);
 
     useEffect(() => {
@@ -143,8 +204,13 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
     }, [isOpen, activeSection]);
 
     useEffect(() => {
-        if (isOpen) loadPreferences();
+        if (isOpen) {
+            setFontsReady(false);
+            loadPreferences();
+            preloadBundledFonts().then(() => setFontsReady(true));
+        }
     }, [isOpen]);
+
 
     // Non-passive wheel listener so we can preventDefault (React onWheel is passive)
     useEffect(() => {
@@ -219,6 +285,7 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
             const modern     = await invoke<string>('get_preference', { key: 'ModernUI',        defaultValue: 'true'  });
             const cigarette  = await invoke<string>('get_preference', { key: 'CigaretteMode',   defaultValue: 'false' });
             const useBackground = await invoke<string>('get_preference', { key: 'UseCustomBackgroundImage', defaultValue: 'false' });
+            const useThemeBg = await invoke<string>('get_preference', { key: 'UseThemeBackground', defaultValue: 'true' });
             // Background image bytes are stored as a real file in the
             // config dir (not inlined into preferences.json). Read via
             // the dedicated command which returns a data URL on demand.
@@ -243,6 +310,7 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
             setCustomBackgroundImage(backgroundImage);
             setCustomBackgroundName(backgroundName);
             setUseCustomBackground(useBackground === 'true' && backgroundImage.length > 0);
+            setUseThemeBackground(useThemeBg !== 'false');
             {
                 const parsedBlur = Number.parseInt(backgroundBlurRaw, 10);
                 const blur = Number.isFinite(parsedBlur) ? clampBlur(parsedBlur) : 8;
@@ -291,6 +359,15 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
 
             const useCustomSyntaxRaw = await invoke<string>('get_preference', { key: 'UseCustomSyntaxTheme', defaultValue: 'false' });
             setUseCustomSyntaxTheme(useCustomSyntaxRaw === 'true');
+            // Font library + assignments
+            const storedFonts = await invoke<string[]>('get_stored_fonts');
+            setFontLibrary(storedFonts.map(fileName => ({
+                name: fontFileNameToFamily(fileName),
+                fileName,
+            })));
+            setUiFont(await invoke<string>('get_preference',     { key: 'UIFont',    defaultValue: '' }));
+            setEditorFont(await invoke<string>('get_preference', { key: 'EditorFont', defaultValue: '' }));
+
             if (useCustomSyntaxRaw === 'true') {
                 const csKeyword  = await invoke<string>('get_preference', { key: 'CustomSyntax_Keyword',  defaultValue: '#569CD6' });
                 const csComment  = await invoke<string>('get_preference', { key: 'CustomSyntax_Comment',  defaultValue: '#6A9955' });
@@ -305,6 +382,55 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
             }
         } catch (error) {
             console.error('Failed to load theme preferences:', error);
+        }
+    };
+
+    const handleFontFileSelected = async (event: ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        event.target.value = '';
+        if (!file) return;
+        const validExts = ['.ttf', '.otf', '.woff', '.woff2'];
+        if (!validExts.some(ext => file.name.toLowerCase().endsWith(ext))) {
+            alert('Please select a TTF, OTF, WOFF, or WOFF2 font file.');
+            return;
+        }
+        if (file.size > 10 * 1024 * 1024) {
+            alert('Font file must be smaller than 10 MB.');
+            return;
+        }
+        const reader = new FileReader();
+        reader.onload = async () => {
+            const dataUrl = reader.result as string;
+            try {
+                const storedName = await invoke<string>('store_font', { dataUrl, fileName: file.name });
+                const entry: FontLibraryEntry = { name: fontFileNameToFamily(storedName), fileName: storedName };
+                setFontLibrary(prev => {
+                    if (prev.some(f => f.fileName === storedName)) return prev;
+                    return [...prev, entry].sort((a, b) => a.name.localeCompare(b.name));
+                });
+                // Load via FontFace API so the dropdown option previews correctly
+                try {
+                    const urlForFace = await invoke<string>('get_font_data_url', { fileName: storedName });
+                    const ff = new FontFace(entry.name, `url("${urlForFace}")`);
+                    await ff.load();
+                    document.fonts.add(ff);
+                } catch { /* preview injection is non-critical */ }
+            } catch (err) {
+                alert(`Failed to import font: ${err}`);
+            }
+        };
+        reader.readAsDataURL(file);
+    };
+
+    const handleDeleteFont = async (entry: FontLibraryEntry) => {
+        try {
+            await invoke('delete_font', { fileName: entry.fileName });
+            setFontLibrary(prev => prev.filter(f => f.fileName !== entry.fileName));
+            // Clear any font assignments referencing this font
+            if (uiFont === entry.name) setUiFont('');
+            if (editorFont === entry.name) setEditorFont('');
+        } catch (err) {
+            alert(`Failed to delete font: ${err}`);
         }
     };
 
@@ -345,6 +471,7 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
             await invoke('set_preference', { key: 'ModernUI',       value: modernUI.toString()         });
             await invoke('set_preference', { key: 'CigaretteMode',  value: cigaretteMode.toString()    });
             await invoke('set_preference', { key: 'UseCustomBackgroundImage', value: (useCustomBackground && customBackgroundImage.length > 0).toString() });
+            await invoke('set_preference', { key: 'UseThemeBackground', value: useThemeBackground.toString() });
             // Background image bytes go to a real file via dedicated command;
             // we never store the data URL in preferences.json anymore.
             if (customBackgroundImage.length > 0) {
@@ -364,18 +491,81 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
 
             applyRoundedCorners(roundedCorners);
             applyModernUI(modernUI);
-            applyCustomBackground({
-                enabled: useCustomBackground && customBackgroundImage.length > 0,
-                imageDataUrl: customBackgroundImage,
-                blur: customBackgroundBlur,
-                brightness: customBackgroundBrightness / 100,
-                saturation: customBackgroundSaturation / 100,
-                opacity: customBackgroundOpacity / 100,
-                vignette: customBackgroundVignette / 100,
-                positionX: customBackgroundPosX,
-                positionY: customBackgroundPosY,
-                zoom: customBackgroundZoom,
-            });
+
+            // Background priority: custom image > theme default > none
+            {
+                const hasCustomBg = useCustomBackground && customBackgroundImage.length > 0;
+                const themeForBg = !useCustomTheme ? getTheme(selectedTheme) : undefined;
+                const hasThemeBg = useThemeBackground && !!themeForBg?.defaultBackground;
+                if (hasCustomBg) {
+                    applyCustomBackground({
+                        enabled: true,
+                        imageDataUrl: customBackgroundImage,
+                        blur: customBackgroundBlur,
+                        brightness: customBackgroundBrightness / 100,
+                        saturation: customBackgroundSaturation / 100,
+                        opacity: customBackgroundOpacity / 100,
+                        vignette: customBackgroundVignette / 100,
+                        positionX: customBackgroundPosX,
+                        positionY: customBackgroundPosY,
+                        zoom: customBackgroundZoom,
+                    });
+                } else if (hasThemeBg) {
+                    const hasGradient = !!themeForBg?.windowGradient;
+                    applyCustomBackground({
+                        enabled: true,
+                        imageDataUrl: themeForBg!.defaultBackground!,
+                        blur: 0,
+                        brightness: 1,
+                        saturation: 1,
+                        opacity: 1,
+                        vignette: 0,
+                        positionX: themeForBg?.themeBackgroundPositionX ?? 50,
+                        positionY: themeForBg?.themeBackgroundPositionY ?? 50,
+                        zoom: 1,
+                        backgroundSize: themeForBg?.themeBackgroundSize ?? (hasGradient ? 'contain' : 'auto'),
+                        backgroundColor: hasGradient ? 'transparent' : (themeForBg?.windowBg ?? '#000000'),
+                    });
+                } else {
+                    applyCustomBackground({ enabled: false, imageDataUrl: '', blur: 0 });
+                }
+            }
+            // Save font preferences
+            await invoke('set_preference', { key: 'UIFont',    value: uiFont });
+            await invoke('set_preference', { key: 'EditorFont', value: editorFont });
+
+            // Apply font changes immediately (re-inject faces + ui font + editor font event)
+            const fontData = await Promise.all(
+                fontLibrary.map(async entry => {
+                    try {
+                        const dataUrl = await invoke<string>('get_font_data_url', { fileName: entry.fileName });
+                        return { name: entry.name, dataUrl };
+                    } catch { return null; }
+                })
+            );
+            // await so all fonts are decoded before Monaco measures them
+            await injectFontFaces(fontData.filter((f): f is { name: string; dataUrl: string } => f !== null));
+            // Resolve effective font: user override → theme default → built-in stack
+            const appliedThemeObj = useCustomTheme ? null : getTheme(selectedTheme);
+            const themeFontRaw = appliedThemeObj?.font;
+            // Fuzzy-match the theme font name against the imported font library so that
+            // 'FOT-Rodin Pro DB' (theme) finds 'fot-rodin-pro-db' (stored filename), etc.
+            const normFont = (s: string) => s.toLowerCase().replace(/[-_\s]+/g, '');
+            const resolvedThemeFont = themeFontRaw
+                ? (fontLibrary.find(f => normFont(f.name) === normFont(themeFontRaw))?.name ?? themeFontRaw)
+                : undefined;
+            if (resolvedThemeFont) await ensurePresetFontLoaded(resolvedThemeFont);
+            applyUIFont(uiFont || resolvedThemeFont || '');
+            const activeFont = editorFont || resolvedThemeFont || '';
+
+            // Ensure the chosen preset font is loaded from CDN before applying
+            if (activeFont) await ensurePresetFontLoaded(activeFont);
+
+            const resolvedEditorFont = activeFont
+                ? `"${activeFont}", 'JetBrains Mono', 'Fira Code', Consolas, monospace`
+                : "'JetBrains Mono', 'Fira Code', Consolas, monospace";
+            window.dispatchEvent(new CustomEvent('jade-editor-font-changed', { detail: resolvedEditorFont }));
+
             window.dispatchEvent(new CustomEvent('cigarette-mode-changed', { detail: cigaretteMode }));
 
             onThemeApplied?.(useCustomTheme ? 'Custom' : selectedTheme);
@@ -387,6 +577,14 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
     const handleThemeSelect = (themeId: string) => {
         setSelectedTheme(themeId);
         if (!overrideSyntax) setSelectedSyntaxTheme(themeId);
+        // When switching to a theme that has its own font, clear any stale font
+        // override so the theme font takes effect on Apply. The user can still
+        // go to the Fonts tab and pick something else before applying.
+        const newTheme = getTheme(themeId);
+        if (newTheme?.font) {
+            setUiFont('');
+            setEditorFont('');
+        }
     };
 
     const handleCustomThemeToggle = (checked: boolean) => {
@@ -427,59 +625,124 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
         </div>
     );
 
-    const renderUI = () => (
-        <>
-            <div className="section-header">
-                <h4>UI Theme</h4>
-                <label className="checkbox-label">
-                    <input type="checkbox" checked={useCustomTheme}
-                        onChange={e => handleCustomThemeToggle(e.target.checked)} />
-                    Custom
-                </label>
-            </div>
+    const isLightTheme = (hex: string) => {
+        const r = parseInt(hex.slice(1, 3), 16);
+        const g = parseInt(hex.slice(3, 5), 16);
+        const b = parseInt(hex.slice(5, 7), 16);
+        return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.5;
+    };
 
-            <div className="syntax-split-layout">
-                {!useCustomTheme ? (
-                    <div className="theme-list">
-                        {THEMES.map(theme => (
-                            <div
-                                key={theme.id}
-                                className={`theme-item${selectedTheme === theme.id ? ' selected' : ''}`}
-                                onClick={() => handleThemeSelect(theme.id)}
-                            >
-                                <span>{theme.displayName}</span>
-                                <div className="theme-preview-dots">
-                                    <div className="preview-dot" style={{ backgroundColor: theme.windowBg }} />
-                                    <div className="preview-dot" style={{ backgroundColor: theme.statusBar }} />
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                ) : (
-                    <div className="custom-theme-editor compact">
-                        {([
-                            ['Window Bg',  'windowBg'],
-                            ['Editor Bg',  'editorBg'],
-                            ['Title Bar',  'titleBar'],
-                            ['Status Bar', 'statusBar'],
-                            ['Text',       'text'],
-                            ['Tab Bg',     'tabBg'],
-                            ['Selected Tab', 'selectedTab'],
-                        ] as [string, keyof CustomTheme][]).map(([label, key]) => (
-                            <div key={key} className="color-input-group">
-                                <label>{label}</label>
-                                <input type="color" value={customTheme[key]}
-                                    onChange={e => setCustomTheme({ ...customTheme, [key]: e.target.value })} />
-                                <input type="text" value={customTheme[key]}
-                                    onChange={e => setCustomTheme({ ...customTheme, [key]: e.target.value })} />
-                            </div>
-                        ))}
-                    </div>
-                )}
-                {uiPreview}
+    const renderUI = () => {
+        const currentIsLight = isLightTheme(currentTheme.windowBg);
+        const activeFont = !useCustomTheme ? getTheme(selectedTheme)?.font : undefined;
+        const editorBg   = currentTheme.editorBg;
+        const textColor  = currentTheme.text;
+
+        // Always reflect the clicked UI theme's own syntax — independent of the
+        // syntax override flag, which only applies to the editor, not this preview.
+        const previewSyntaxId = !useCustomTheme ? selectedTheme : 'Default';
+        const previewSyntax   = getSyntaxColors(previewSyntaxId);
+        const previewBrackets = getBracketColors(previewSyntaxId);
+
+        const syntaxAndFontPreview = (
+            <div
+                className="syntax-preview"
+                style={{
+                    fontFamily: activeFont ? `"${activeFont}", monospace` : undefined,
+                    backgroundColor: editorBg,
+                    color: textColor,
+                }}
+            >
+                <pre><code>
+                    <span style={{ color: previewBrackets.color1 }}>{'{'}</span>{'\n'}
+                    {'  '}<span style={{ color: previewSyntax.comment }}>{'# This is a comment'}</span>{'\n'}
+                    {'  '}<span style={{ color: previewSyntax.propertyColor }}>{'name'}</span>
+                    {': '}<span style={{ color: previewSyntax.keyword }}>{'string'}</span>
+                    {' = '}<span style={{ color: previewSyntax.stringColor }}>{'"Example"'}</span>{'\n'}
+                    {'  '}<span style={{ color: previewSyntax.propertyColor }}>{'value'}</span>
+                    {': '}<span style={{ color: previewSyntax.keyword }}>{'f32'}</span>
+                    {' = '}<span style={{ color: previewSyntax.number }}>{'3.14'}</span>{'\n'}
+                    {'  '}<span style={{ color: previewSyntax.propertyColor }}>{'enabled'}</span>
+                    {': '}<span style={{ color: previewSyntax.keyword }}>{'bool'}</span>
+                    {' = '}<span style={{ color: previewSyntax.keyword }}>{'true'}</span>{'\n'}
+                    {'  '}<span style={{ color: previewSyntax.propertyColor }}>{'data'}</span>
+                    {': '}<span style={{ color: previewSyntax.keyword }}>{'hash'}</span>
+                    {' = '}<span style={{ color: previewSyntax.number }}>{'0xDEADBEEF'}</span>{'\n'}
+                    <span style={{ color: previewBrackets.color1 }}>{'}'}</span>
+                </code></pre>
             </div>
-        </>
-    );
+        );
+
+        return (
+            <>
+                <div className="section-header">
+                    <h4>UI Theme</h4>
+                    <label className="checkbox-label">
+                        <input type="checkbox" checked={useCustomTheme}
+                            onChange={e => handleCustomThemeToggle(e.target.checked)} />
+                        Custom
+                    </label>
+                </div>
+
+                <div className="syntax-split-layout">
+                    {!useCustomTheme ? (
+                        <div className="theme-list">
+                            {THEMES.map(theme => (
+                                <div
+                                    key={theme.id}
+                                    className={`theme-item${selectedTheme === theme.id ? ' selected' : ''}`}
+                                    onClick={() => handleThemeSelect(theme.id)}
+                                >
+                                    <span>{theme.displayName}</span>
+                                    {theme.icon ? (
+                                        <img
+                                            src={theme.icon}
+                                            className={`theme-item-icon${
+                                                theme.id === 'YoRHa'
+                                                    ? (currentIsLight ? ' theme-item-icon-light' : ' theme-item-icon-invert')
+                                                    : ''
+                                            }`}
+                                            alt=""
+                                            draggable={false}
+                                        />
+                                    ) : (
+                                        <div className="theme-preview-dots">
+                                            <div className="preview-dot" style={{ backgroundColor: theme.windowBg }} />
+                                            <div className="preview-dot" style={{ backgroundColor: theme.statusBar }} />
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="custom-theme-editor compact">
+                            {([
+                                ['Window Bg',    'windowBg'],
+                                ['Editor Bg',    'editorBg'],
+                                ['Title Bar',    'titleBar'],
+                                ['Status Bar',   'statusBar'],
+                                ['Text',         'text'],
+                                ['Tab Bg',       'tabBg'],
+                                ['Selected Tab', 'selectedTab'],
+                            ] as [string, keyof CustomTheme][]).map(([label, key]) => (
+                                <div key={key} className="color-input-group">
+                                    <label>{label}</label>
+                                    <input type="color" value={customTheme[key]}
+                                        onChange={e => setCustomTheme({ ...customTheme, [key]: e.target.value })} />
+                                    <input type="text" value={customTheme[key]}
+                                        onChange={e => setCustomTheme({ ...customTheme, [key]: e.target.value })} />
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                    <div className="ui-preview-right">
+                        {syntaxAndFontPreview}
+                        {uiPreview}
+                    </div>
+                </div>
+            </>
+        );
+    };
 
     const handleCustomSyntaxToggle = (checked: boolean) => {
         setUseCustomSyntaxTheme(checked);
@@ -587,12 +850,41 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
         </>
     );
 
-    const renderBackground = () => (
+    const renderBackground = () => {
+        const themeForBg = !useCustomTheme ? getTheme(selectedTheme) : undefined;
+        const hasThemeDefaultBg = !!themeForBg?.defaultBackground;
+        const hasCustomBg = useCustomBackground && customBackgroundImage.length > 0;
+        return (
         <>
             <h2 className="themes-section-title">Background Image</h2>
             <p className="themes-section-subtitle">
                 Use your own image behind the app. When enabled, top ribbons and bars switch to neutral glass.
             </p>
+
+            {hasThemeDefaultBg && (
+                <div className="theme-bg-section">
+                    <label className="checkbox-label">
+                        <input
+                            type="checkbox"
+                            checked={useThemeBackground}
+                            onChange={e => setUseThemeBackground(e.target.checked)}
+                        />
+                        <span>
+                            <strong>Theme background</strong>
+                            <span style={{ display: 'block', fontSize: 11, opacity: 0.5, fontWeight: 400 }}>
+                                Bundled with {themeForBg!.displayName}
+                                {hasCustomBg && ' · overridden by your image'}
+                            </span>
+                        </span>
+                    </label>
+                    <img
+                        src={themeForBg!.defaultBackground}
+                        className="theme-bg-thumbnail"
+                        alt=""
+                        draggable={false}
+                    />
+                </div>
+            )}
 
             <div className="themes-options background-options">
                 <div className="background-header-row">
@@ -848,7 +1140,8 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
                 </div>
             </div>
         </>
-    );
+        );
+    };
 
     const renderOptions = () => (
         <>
@@ -887,11 +1180,206 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
         </>
     );
 
+    const WINDOWS_SYSTEM_FONTS = new Set(['Comic Sans MS', 'Consolas', 'Courier New', 'Lucida Console']);
+    const fontThemeMap = new Map(THEMES.flatMap(t => t.font ? [[t.font, t]] : []));
+
+    const FontSourceBadge = ({ name }: { name: string }) => {
+        if (WINDOWS_SYSTEM_FONTS.has(name))
+            return <span className="font-source-icon" title="Windows system font"><FontSourceWindowsIcon size={13} /></span>;
+        if (PRESET_FONTS.includes(name))
+            return <span className="font-source-icon" title="Bundled with Jade"><FontSourceBundledIcon size={13} /></span>;
+        const linkedTheme = fontThemeMap.get(name);
+        if (linkedTheme)
+            return (
+                <span className="font-source-icon font-source-theme" title={`Theme font: ${linkedTheme.displayName}`} style={{ color: linkedTheme.statusBar }}>
+                    <PaletteIcon size={13} />
+                </span>
+            );
+        return <span className="font-source-icon" title="Imported by you"><FontSourceImportedIcon size={13} /></span>;
+    };
+
+    const renderFonts = () => {
+        const activeThemeFont = ('font' in currentTheme) ? (currentTheme as ThemeColors).font : undefined;
+        const previewFont = editorFont || activeThemeFont || '';
+        const previewFontStack = previewFont
+            ? `"${previewFont}", monospace`
+            : "'JetBrains Mono', 'Fira Code', Consolas, monospace";
+
+        const themeOnlyFonts = [...new Set(
+            THEMES.filter(t => t.font && !PRESET_FONTS.includes(t.font)).map(t => t.font!)
+        )];
+
+        return (
+            <>
+                <div className="section-header">
+                    <h4>Fonts</h4>
+                </div>
+                <div className="fonts-split-layout">
+                    {/* ── Left: font list ── */}
+                    <div className="font-list-panel">
+                        <div className="font-ui-row">
+                            <span className="font-assignment-label">UI Font</span>
+                            <select
+                                className="font-select"
+                                value={uiFont}
+                                onChange={e => setUiFont(e.target.value)}
+                            >
+                                <option value="">(Default)</option>
+                                <optgroup label="Popular Fonts">
+                                    {PRESET_FONTS.map(f => <option key={f} value={f}>{f}</option>)}
+                                </optgroup>
+                                {themeOnlyFonts.length > 0 && (
+                                    <optgroup label="Theme Fonts">
+                                        {themeOnlyFonts.map(f => <option key={f} value={f}>{f}</option>)}
+                                    </optgroup>
+                                )}
+                                {fontLibrary.length > 0 && (
+                                    <optgroup label="Imported">
+                                        {fontLibrary.map(f => (
+                                            <option key={f.fileName} value={f.name}>{f.name}</option>
+                                        ))}
+                                    </optgroup>
+                                )}
+                            </select>
+                        </div>
+
+                        <div className="font-list-label">Editor Font</div>
+
+                        <div className="font-list" key={fontsReady ? 'ready' : 'loading'}>
+                            {/* Default (no override) */}
+                            <div
+                                className={`font-list-item${!editorFont ? ' selected' : ''}`}
+                                onClick={() => setEditorFont('')}
+                            >
+                                <span className="font-list-item-name">
+                                    {activeThemeFont ? `(Theme: ${activeThemeFont})` : '(Default)'}
+                                </span>
+                            </div>
+
+                            {/* Preset fonts */}
+                            {PRESET_FONTS.map(name => (
+                                <div
+                                    key={name}
+                                    className={`font-list-item${editorFont === name ? ' selected' : ''}`}
+                                    onClick={() => setEditorFont(name)}
+                                >
+                                    <span
+                                        className="font-list-item-name"
+                                        style={{ fontFamily: `"${name}", monospace` }}
+                                    >
+                                        {name}
+                                    </span>
+                                    <FontSourceBadge name={name} />
+                                </div>
+                            ))}
+
+                            {/* Theme-specific font not in preset list */}
+                            {themeOnlyFonts.length > 0 && (
+                                <>
+                                    <div className="font-list-section-header">Theme</div>
+                                    {themeOnlyFonts.map(name => (
+                                        <div
+                                            key={name}
+                                            className={`font-list-item${editorFont === name ? ' selected' : ''}`}
+                                            onClick={() => setEditorFont(name)}
+                                        >
+                                            <span
+                                                className="font-list-item-name"
+                                                style={{ fontFamily: `"${name}", monospace` }}
+                                            >
+                                                {name}
+                                            </span>
+                                            <FontSourceBadge name={name} />
+                                        </div>
+                                    ))}
+                                </>
+                            )}
+
+                            {/* Imported fonts */}
+                            {fontLibrary.length > 0 && (
+                                <>
+                                    <div className="font-list-section-header">Imported</div>
+                                    {fontLibrary.map(entry => (
+                                        <div
+                                            key={entry.fileName}
+                                            className={`font-list-item${editorFont === entry.name ? ' selected' : ''}`}
+                                            onClick={() => setEditorFont(entry.name)}
+                                        >
+                                            <span
+                                                className="font-list-item-name"
+                                                style={{ fontFamily: `"${entry.name}", monospace` }}
+                                            >
+                                                {entry.name}
+                                            </span>
+                                            <FontSourceBadge name={entry.name} />
+                                            <button
+                                                className="font-library-delete"
+                                                onClick={e => { e.stopPropagation(); handleDeleteFont(entry); }}
+                                                title={`Remove ${entry.name}`}
+                                            >×</button>
+                                        </div>
+                                    ))}
+                                </>
+                            )}
+                        </div>
+
+                        <input
+                            ref={fontFileInputRef}
+                            type="file"
+                            accept=".ttf,.otf,.woff,.woff2"
+                            onChange={handleFontFileSelected}
+                            style={{ display: 'none' }}
+                        />
+                        <button
+                            className="background-action-btn"
+                            onClick={() => fontFileInputRef.current?.click()}
+                        >
+                            + Import Font File
+                        </button>
+                    </div>
+
+                    {/* ── Right: preview ── */}
+                    <div
+                        className="font-preview-panel"
+                        style={{ backgroundColor: currentTheme.editorBg, color: currentTheme.text }}
+                    >
+                        <div
+                            className="font-preview-name"
+                            style={{ fontFamily: previewFontStack }}
+                        >
+                            {previewFont || 'Default'}
+                        </div>
+                        <div className="font-preview-chars" style={{ fontFamily: previewFontStack }}>
+                            AaBbCcDd&nbsp;&nbsp;0123456789&nbsp;&nbsp;{'{}[]()=>'}&nbsp;&nbsp;!@#$
+                        </div>
+                        <pre className="font-preview-code" style={{ fontFamily: previewFontStack }}>
+                            <code>
+                                <span style={{ color: currentBrackets.color1 }}>{'{'}</span>{'\n'}
+                                {'  '}<span style={{ color: currentSyntax.comment }}># This is a comment</span>{'\n'}
+                                {'  '}<span style={{ color: currentSyntax.propertyColor }}>skinScale</span>{': '}<span style={{ color: currentSyntax.keyword }}>f32</span>{' = '}<span style={{ color: currentSyntax.number }}>1.0</span>{'\n'}
+                                {'  '}<span style={{ color: currentSyntax.propertyColor }}>name</span>{': '}<span style={{ color: currentSyntax.keyword }}>string</span>{' = '}<span style={{ color: currentSyntax.stringColor }}>"Example"</span>{'\n'}
+                                {'  '}<span style={{ color: currentSyntax.propertyColor }}>enabled</span>{': '}<span style={{ color: currentSyntax.keyword }}>bool</span>{' = '}<span style={{ color: currentSyntax.keyword }}>true</span>{'\n'}
+                                {'  '}<span style={{ color: currentSyntax.propertyColor }}>data</span>{': '}<span style={{ color: currentSyntax.keyword }}>hash</span>{' = '}<span style={{ color: currentSyntax.number }}>0xDEADBEEF</span>{'\n'}
+                                {'  '}<span style={{ color: currentSyntax.propertyColor }}>items</span>{': '}<span style={{ color: currentSyntax.keyword }}>list</span><span style={{ color: currentBrackets.color2 }}>{'['}</span><span style={{ color: currentSyntax.keyword }}>embed</span><span style={{ color: currentBrackets.color2 }}>{']'}</span>{' = '}<span style={{ color: currentBrackets.color2 }}>{'{'}</span>{'\n'}
+                                {'    '}<span style={{ color: currentSyntax.keyword }}>EntryData</span>{' '}<span style={{ color: currentBrackets.color3 }}>{'{'}</span>{'\n'}
+                                {'      '}<span style={{ color: currentSyntax.propertyColor }}>path</span>{': '}<span style={{ color: currentSyntax.keyword }}>string</span>{' = '}<span style={{ color: currentSyntax.stringColor }}>"ASSETS/Example/File.bin"</span>{'\n'}
+                                {'    '}<span style={{ color: currentBrackets.color3 }}>{'}'}</span>{'\n'}
+                                {'  '}<span style={{ color: currentBrackets.color2 }}>{'}'}</span>{'\n'}
+                                <span style={{ color: currentBrackets.color1 }}>{'}'}</span>
+                            </code>
+                        </pre>
+                    </div>
+                </div>
+            </>
+        );
+    };
+
     const sectionContent: Record<NavSection, () => React.ReactElement> = {
-        ui:      renderUI,
-        syntax:  renderSyntax,
+        ui:         renderUI,
+        syntax:     renderSyntax,
         background: renderBackground,
-        options: renderOptions,
+        fonts:      renderFonts,
+        options:    renderOptions,
     };
 
     return (

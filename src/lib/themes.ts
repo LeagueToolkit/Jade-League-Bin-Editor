@@ -11,7 +11,33 @@ export interface ThemeColors {
     text: string;
     tabBg: string;
     selectedTab: string;
+    font?: string;
+    icon?: string;              // Optional icon path (served from public/)
+    defaultBackground?: string;   // Optional default background image path (served from public/)
+    statusBarText?: string;       // Optional override for status bar text color
+    titleBarText?: string;        // Optional override for title bar text color
+    titleBarGradient?: string;    // Optional CSS gradient overlaid on the title bar background
+    windowGradient?: string;      // Optional CSS gradient for the app window background
+    themeBackgroundSize?: string;       // CSS background-size for defaultBackground (overrides per-theme default)
+    themeBackgroundPositionX?: number; // 0–100 horizontal position for defaultBackground (default 50)
+    themeBackgroundPositionY?: number; // 0–100 vertical position for defaultBackground (default 50)
 }
+
+export const PRESET_FONTS = [
+    'Cascadia Code',
+    'Cascadia Mono',
+    'Comic Sans MS',
+    'Consolas',
+    'Courier New',
+    'Fira Code',
+    'Hack',
+    'Inconsolata',
+    'JetBrains Mono',
+    'Lucida Console',
+    'Roboto Mono',
+    'Source Code Pro',
+    'Ubuntu Mono',
+];
 
 export interface SyntaxColors {
     keyword: string;
@@ -19,12 +45,23 @@ export interface SyntaxColors {
     stringColor: string;
     number: string;
     propertyColor: string;
+    symbolColor?: string;
 }
 
 export interface BracketColors {
     color1: string;
     color2: string;
     color3: string;
+}
+
+export interface FontSettings {
+    uiFont?: string;
+    editorFont?: string;
+}
+
+export interface FontLibraryEntry {
+    name: string;      // CSS font-family name (filename without extension)
+    fileName: string;  // stored file name on disk
 }
 
 // All available themes
@@ -71,7 +108,8 @@ export const THEMES: ThemeColors[] = [
         statusBar: '#C71585',
         text: '#000000',
         tabBg: '#B482A0',
-        selectedTab: '#E696BE'
+        selectedTab: '#E696BE',
+        font: 'Comic Sans MS'
     },
     {
         id: 'PastelBlue',
@@ -149,6 +187,77 @@ export const THEMES: ThemeColors[] = [
         text: '#DCC8E6',
         tabBg: '#231928',
         selectedTab: '#50325A'
+    },
+    {
+        id: '2077',
+        displayName: '2077',
+        windowBg: '#050910',
+        editorBg: '#050910',
+        titleBar: '#ECFF40',
+        statusBar: '#ECFF40',
+        text: '#D0E0F0',
+        tabBg: '#080C14',
+        selectedTab: '#0E1520',
+        font: 'Play-Regular',
+        icon: '/theme-icons/cblogo.png',
+        defaultBackground: '/theme-icons/bg2077.png',
+        statusBarText: '#0A0A10',
+        titleBarText: '#0A0A10',
+        windowGradient: 'linear-gradient(to bottom, #071220 0%, #030508 100%)',
+        themeBackgroundSize: 'min(594px, 58%) auto',
+        themeBackgroundPositionY: 52
+    },
+    {
+        id: '2023',
+        displayName: '2023',
+        windowBg: '#090909',
+        editorBg: '#090909',
+        titleBar: '#E01010',
+        statusBar: '#E01010',
+        text: '#E8DDD0',
+        tabBg: '#0D0808',
+        selectedTab: '#1C0A0A',
+        font: 'Play-Regular',
+        icon: '/theme-icons/samurai.png',
+        defaultBackground: '/theme-icons/bg2023.png',
+        statusBarText: '#F0F0F0',
+        titleBarText: '#6BFBFC',
+        windowGradient: 'linear-gradient(to bottom, #2E0A0A 0%, #080405 100%)',
+        themeBackgroundSize: 'auto 68%',
+        themeBackgroundPositionY: 57
+    },
+    {
+        id: 'YoRHa',
+        displayName: 'YoRHa',
+        windowBg: '#D4CFBA',
+        editorBg: '#CAC5AF',
+        titleBar: '#B8B3A0',
+        statusBar: '#C8401C',
+        text: '#2A2620',
+        tabBg: '#C4BFA8',
+        selectedTab: '#3E3B35',
+        font: 'FOT-Rodin Pro DB',
+        icon: '/theme-icons/yorhalogo.png',
+        defaultBackground: '/theme-icons/yorhabg.png',
+        statusBarText: '#F0EBE0',
+        themeBackgroundSize: '91% auto',
+        themeBackgroundPositionX: 0,
+        themeBackgroundPositionY: 97,
+    },
+    {
+        id: 'LetsAllLoveLain',
+        displayName: 'letsalllovelain',
+        windowBg: '#000000',
+        editorBg: '#000000',
+        titleBar: '#D2738A',
+        statusBar: '#D2738A',
+        text: '#C1B492',
+        tabBg: '#000000',
+        selectedTab: '#2E1118',
+        font: 'Lovelt__',
+        icon: '/theme-icons/lain.png',
+        defaultBackground: '/theme-icons/bglain.png',
+        statusBarText: '#000000'
     }
 ];
 
@@ -231,6 +340,35 @@ export const SYNTAX_COLORS: Record<string, SyntaxColors> = {
         number: '#9575CD',
         propertyColor: '#B39DDB'
     },
+    LetsAllLoveLain: {
+        keyword: '#B8697A',
+        comment: '#7A5060',
+        stringColor: '#C1B492',
+        number: '#CC8A9A',
+        propertyColor: '#A89E84'
+    },
+    '2023': {
+        keyword: '#F65752',
+        comment: '#885540',
+        stringColor: '#6BFBFC',
+        number: '#F65752',
+        propertyColor: '#F65752'
+    },
+    YoRHa: {
+        keyword: '#4E4B42',
+        comment: '#4E4B42',
+        stringColor: '#4E4B42',
+        number: '#C8401C',
+        propertyColor: '#4E4B42',
+        symbolColor: '#4E4B42'
+    },
+    '2077': {
+        keyword: '#EBFA5C',
+        comment: '#3D5080',
+        stringColor: '#6BFBFC',
+        number: '#EBFA5C',
+        propertyColor: '#5269B3'
+    },
     HighContrast: {
         keyword: '#FFFF00',
         comment: '#00FF00',
@@ -267,6 +405,10 @@ export const BRACKET_COLORS: Record<string, BracketColors> = {
     VioletSorrow: { color1: '#9370DB', color2: '#8A2BE2', color3: '#BA55D3' },
     OrangeBurnout: { color1: '#FF8C00', color2: '#DAA520', color3: '#FF4500' },
     PurpleGrief: { color1: '#BE9FE1', color2: '#E1BEE7', color3: '#9575CD' },
+    LetsAllLoveLain: { color1: '#B8697A', color2: '#B07868', color3: '#C1B492' },
+    '2023': { color1: '#F65752', color2: '#6BFBFC', color3: '#F65752' },
+    YoRHa: { color1: '#4E4B42', color2: '#4E4B42', color3: '#4E4B42' },
+    '2077': { color1: '#EBFA5C', color2: '#5269B3', color3: '#6BFBFC' },
     HighContrast: { color1: '#FFFF00', color2: '#00FF00', color3: '#FF0000' },
     VSCode: { color1: '#FFD700', color2: '#DA70D6', color3: '#179FFF' },
     StandardFlint: { color1: '#FFD700', color2: '#DA70D6', color3: '#179FFF' }

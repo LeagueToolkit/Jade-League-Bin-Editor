@@ -215,6 +215,24 @@
     gap: 5px;
 }
 
+.theme-item-icon {
+    width: auto;
+    max-width: 44px;
+    height: 18px;
+    object-fit: contain;
+    border-radius: 3px;
+    flex-shrink: 0;
+    mix-blend-mode: screen;
+}
+
+.theme-item-icon-light {
+    mix-blend-mode: multiply;
+}
+
+.theme-item-icon-invert {
+    filter: invert(1) brightness(0.88);
+}
+
 .preview-dot {
     width: 14px;
     height: 14px;
@@ -334,9 +352,24 @@
 }
 
 .syntax-split-layout > .syntax-preview,
-.syntax-split-layout > .ui-preview-container {
+.syntax-split-layout > .ui-preview-container,
+.syntax-split-layout > .ui-preview-right {
     flex: 1 1 50%;
     min-width: 0;
+}
+
+.ui-preview-right {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 0;
+}
+
+.ui-preview-right .syntax-preview {
+    flex: 0 0 auto;
+    font-size: 11px;
+    line-height: 1.45;
+    padding: 10px 12px;
 }
 
 /* ── UI theme live iframe preview (camera style) ── */
@@ -385,6 +418,29 @@
     border-radius: var(--border-radius);
     max-width: 100%;
     box-sizing: border-box;
+}
+
+/* ── Theme default background row ── */
+.theme-bg-section {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    margin-bottom: 10px;
+    background: var(--tab-bg);
+    border: 1px solid #3E3E42;
+    border-radius: var(--border-radius);
+    flex-shrink: 0;
+}
+
+.theme-bg-thumbnail {
+    width: 72px;
+    height: 44px;
+    object-fit: cover;
+    border-radius: 3px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    flex-shrink: 0;
+    margin-left: auto;
 }
 
 .background-options {
@@ -612,14 +668,14 @@
 }
 
 .btn-apply {
-    background: linear-gradient(135deg, #0e639c, #1177bb);
+    background: var(--jade-accent, #0e639c);
     color: #ffffff;
-    box-shadow: 0 4px 12px rgba(14, 99, 156, 0.3);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--jade-accent, #0e639c) 40%, transparent);
 }
 
 .btn-apply:hover {
-    background: linear-gradient(135deg, #1177bb, #1485cc);
-    box-shadow: 0 6px 16px rgba(14, 99, 156, 0.4);
+    background: color-mix(in srgb, var(--jade-accent, #0e639c) 80%, white);
+    box-shadow: 0 6px 16px color-mix(in srgb, var(--jade-accent, #0e639c) 50%, transparent);
 }
 
 .btn-close {
@@ -636,34 +692,262 @@
 /* ── Scrollbars ── */
 .theme-list::-webkit-scrollbar,
 .custom-theme-editor::-webkit-scrollbar,
-.themes-content::-webkit-scrollbar {
+.themes-content::-webkit-scrollbar,
+.font-list::-webkit-scrollbar,
+.font-preview-panel::-webkit-scrollbar {
     width: 5px;
 }
 
 .theme-list::-webkit-scrollbar-track,
 .custom-theme-editor::-webkit-scrollbar-track,
-.themes-content::-webkit-scrollbar-track {
+.themes-content::-webkit-scrollbar-track,
+.font-list::-webkit-scrollbar-track,
+.font-preview-panel::-webkit-scrollbar-track {
     background: transparent;
 }
 
 .theme-list::-webkit-scrollbar-thumb,
 .custom-theme-editor::-webkit-scrollbar-thumb,
-.themes-content::-webkit-scrollbar-thumb {
+.themes-content::-webkit-scrollbar-thumb,
+.font-list::-webkit-scrollbar-thumb,
+.font-preview-panel::-webkit-scrollbar-thumb {
     background: var(--scrollbar-thumb);
     border-radius: 3px;
 }
 
 .theme-list::-webkit-scrollbar-thumb:hover,
 .custom-theme-editor::-webkit-scrollbar-thumb:hover,
-.themes-content::-webkit-scrollbar-thumb:hover {
+.themes-content::-webkit-scrollbar-thumb:hover,
+.font-list::-webkit-scrollbar-thumb:hover,
+.font-preview-panel::-webkit-scrollbar-thumb:hover {
     background: var(--scrollbar-thumb-hover);
 }
 
 .theme-list,
 .custom-theme-editor,
-.themes-content {
+.themes-content,
+.font-list,
+.font-preview-panel {
     scrollbar-width: thin;
     scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+/* ── Fonts section ── */
+.fonts-split-layout {
+    display: flex;
+    gap: 12px;
+    flex: 1;
+    min-height: 0;
+}
+
+.font-list-panel {
+    flex: 1 1 50%;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 0;
+}
+
+.font-ui-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.font-list-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-top: 2px;
+    flex-shrink: 0;
+}
+
+.font-list {
+    flex: 1;
+    overflow-y: auto;
+    background: var(--tab-bg);
+    border: 1px solid #2D2D30;
+    border-radius: 4px;
+    min-height: 0;
+}
+
+.font-list-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 5px 10px;
+    cursor: pointer;
+    border-bottom: 1px solid #2D2D30;
+    transition: background 0.12s;
+    gap: 4px;
+}
+
+.font-list-item:last-child {
+    border-bottom: none;
+}
+
+.font-list-item:hover {
+    background: var(--selected-tab-bg);
+    border-color: #3E3E42;
+}
+
+.font-list-item.selected {
+    background: var(--selected-tab-bg);
+    border-left: 2px solid var(--status-bar-bg);
+    padding-left: 8px;
+}
+
+.font-list-item-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+}
+
+.font-source-icon {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    opacity: 0.4;
+    color: var(--text-color);
+    transition: opacity 0.12s;
+    cursor: default;
+}
+
+.font-list-item:hover .font-source-icon {
+    opacity: 0.75;
+}
+
+.font-source-icon.font-source-theme {
+    opacity: 0.75;
+}
+
+.font-list-item:hover .font-source-icon.font-source-theme {
+    opacity: 1;
+}
+
+.font-list-section-header {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding: 5px 10px 3px;
+    background: rgba(0,0,0,0.15);
+    border-bottom: 1px solid #2D2D30;
+}
+
+/* Keep delete button styles for imported fonts in the list */
+.font-library-delete {
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    opacity: 0.6;
+    padding: 0;
+    line-height: 1;
+}
+
+.font-library-delete:hover {
+    background: rgba(232, 17, 35, 0.2);
+    color: #ef4444;
+    opacity: 1;
+}
+
+/* ── Font preview panel ── */
+.font-preview-panel {
+    flex: 1 1 50%;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 14px;
+    border: 1px solid #2D2D30;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.font-preview-name {
+    font-size: 22px;
+    font-weight: 400;
+    line-height: 1.2;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-shrink: 0;
+}
+
+.font-preview-chars {
+    font-size: 12px;
+    opacity: 0.55;
+    flex-shrink: 0;
+    letter-spacing: 0.03em;
+}
+
+.font-preview-code {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.6;
+    overflow: auto;
+    flex: 1;
+    min-height: 0;
+}
+
+.font-preview-code code {
+    font-family: inherit;
+}
+
+/* UI font select (small, inline) */
+.font-ui-row .font-select {
+    flex: 1;
+    min-width: 0;
+    padding: 4px 8px;
+    font-size: 12px;
+    background: var(--tab-bg);
+    color: var(--text-color);
+    border: 1px solid #3E3E42;
+    border-radius: 4px;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23999'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    padding-right: 24px;
+}
+
+.font-ui-row .font-select:focus {
+    outline: none;
+    border-color: var(--status-bar-bg);
+}
+
+.font-ui-row .font-select option {
+    background: var(--window-bg);
+    color: var(--text-color);
+}
+
+
+.font-assignment-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    min-width: 80px;
 }
 
 /* ── Responsive ── */

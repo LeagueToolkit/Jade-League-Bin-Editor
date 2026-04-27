@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef, useCallback } from "react";
+﻿import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -195,7 +195,39 @@ function App() {
   });
 
   const editorRef = useRef<MonacoType.editor.IStandaloneCodeEditor | null>(null);
+  const [editorFontFamily, setEditorFontFamily] = useState("'JetBrains Mono', 'Fira Code', Consolas, monospace");
   const editorDisposablesRef = useRef<MonacoType.IDisposable[]>([]);
+
+  // When font state changes, tell Monaco to re-measure so cursor/selection align correctly.
+  useEffect(() => {
+    if (!monacoRef.current || !editorRef.current) return;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      monacoRef.current?.editor.remeasureFonts();
+    }));
+  }, [editorFontFamily]);
+
+  const editorOptions = useMemo(() => ({
+    minimap: { enabled: true },
+    glyphMargin: true,
+    fontSize: 14,
+    scrollBeyondLastLine: false,
+    automaticLayout: true,
+    fontFamily: editorFontFamily,
+    lineNumbersMinChars: 6,
+    fixedOverflowWidgets: true,
+    contextmenu: false,
+    find: {
+      addExtraSpaceOnTop: false,
+      autoFindInSelection: 'never' as const,
+      seedSearchStringFromSelection: 'always' as const,
+    },
+    ...({
+      "bracketPairColorization.enabled": true,
+      "suggest.maxVisibleSuggestions": 5,
+      "semanticHighlighting.enabled": false,
+    } as any),
+  }), [editorFontFamily]);
+
   const emitterDecorationIds = useRef<string[]>([]);
   const emitterDecorDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const emitterHintsEnabled = useRef(true);
@@ -392,9 +424,14 @@ function App() {
       const v = (e as CustomEvent<ShellVariant>).detail;
       if (v === 'vscode' || v === 'word' || v === 'visualstudio') setShellVariant(v);
     };
+    const handleEditorFontChanged = (e: Event) => {
+      const fontFamily = (e as CustomEvent<string>).detail;
+      setEditorFontFamily(fontFamily);
+    };
     window.addEventListener('cigarette-mode-changed', handleCigaretteModeChanged);
     window.addEventListener('quartz-interop-changed', handleQuartzInteropChanged);
     window.addEventListener('shell-changed', handleShellChanged);
+    window.addEventListener('jade-editor-font-changed', handleEditorFontChanged);
 
     // Listen for open-file events from backend (file association double-click or single-instance)
     const openFileUnlisten = listen<string>('open-file', async (event) => {
@@ -795,6 +832,7 @@ function App() {
       window.removeEventListener('cigarette-mode-changed', handleCigaretteModeChanged);
       window.removeEventListener('quartz-interop-changed', handleQuartzInteropChanged);
       window.removeEventListener('shell-changed', handleShellChanged);
+      window.removeEventListener('jade-editor-font-changed', handleEditorFontChanged);
       window.removeEventListener('app-new', handleAppNew);
       window.removeEventListener('app-toggle-md-preview', handleAppToggleMdPreview);
       window.removeEventListener('app-open', handleAppOpen);

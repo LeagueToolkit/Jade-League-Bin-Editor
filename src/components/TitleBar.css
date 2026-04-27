@@ -3,7 +3,7 @@
   min-height: 30px;
   max-height: 30px;
   flex-shrink: 0;
-  background: var(--title-bar-bg);
+  background: linear-gradient(rgba(0,0,0,0.28), rgba(0,0,0,0.28)), var(--title-bar-bg);
   border-bottom: 1px solid var(--window-bg);
   display: flex;
   align-items: center;
@@ -38,7 +38,7 @@
 
 .title-text {
   font-size: 12px;
-  color: var(--text-color);
+  color: var(--title-bar-text, var(--text-color));
   font-weight: 400;
 }
 
@@ -117,18 +117,18 @@
 
 .toolbar-btn:hover {
   background: #2a2d2e;
-  border-color: #007acc;
+  border-color: var(--jade-accent, #007acc);
 }
 
 .toolbar-btn:active {
-  background: #094771;
+  background: color-mix(in srgb, var(--jade-accent, #007acc) 40%, black);
   color: white;
 }
 
 .toolbar-btn.active {
-  background: #0e639c;
+  background: var(--jade-accent, #0e639c);
   color: white;
-  border-color: #0e639c;
+  border-color: var(--jade-accent, #0e639c);
 }
 
 .toolbar-separator {

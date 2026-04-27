@@ -1242,6 +1242,100 @@ pub async fn clear_custom_background_image() -> Result<(), String> {
     Ok(())
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Font file management
+// Fonts stored in <config_dir>/fonts/ — TTF, OTF, WOFF, WOFF2 only.
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn get_fonts_dir() -> Result<PathBuf, String> {
+    let dir = get_config_dir()?.join("fonts");
+    if !dir.exists() {
+        fs::create_dir_all(&dir)
+            .map_err(|e| format!("Failed to create fonts dir: {}", e))?;
+    }
+    Ok(dir)
+}
+
+fn is_valid_font_ext(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.ends_with(".ttf") || lower.ends_with(".otf")
+        || lower.ends_with(".woff") || lower.ends_with(".woff2")
+}
+
+fn sanitize_font_filename(name: &str) -> String {
+    name.chars()
+        .filter(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_' | '.'))
+        .collect()
+}
+
+#[tauri::command]
+pub async fn store_font(data_url: String, file_name: String) -> Result<String, String> {
+    let safe_name = sanitize_font_filename(&file_name);
+    if safe_name.is_empty() || !is_valid_font_ext(&safe_name) {
+        return Err("Unsupported font format. Use TTF, OTF, WOFF, or WOFF2.".to_string());
+    }
+    let comma = data_url.find(',')
+        .ok_or_else(|| "Invalid data URL".to_string())?;
+    let b64 = &data_url[comma + 1..];
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(b64.as_bytes())
+        .map_err(|e| format!("Failed to decode font data: {}", e))?;
+    let dest = get_fonts_dir()?.join(&safe_name);
+    fs::write(&dest, &bytes)
+        .map_err(|e| format!("Failed to write font file: {}", e))?;
+    Ok(safe_name)
+}
+
+#[tauri::command]
+pub async fn get_stored_fonts() -> Result<Vec<String>, String> {
+    let dir = match get_fonts_dir() {
+        Ok(d) => d,
+        Err(_) => return Ok(vec![]),
+    };
+    let mut fonts: Vec<String> = fs::read_dir(&dir)
+        .map(|entries| {
+            entries.flatten()
+                .filter_map(|e| e.file_name().into_string().ok())
+                .filter(|n| is_valid_font_ext(n))
+                .collect()
+        })
+        .unwrap_or_default();
+    fonts.sort();
+    Ok(fonts)
+}
+
+#[tauri::command]
+pub async fn get_font_data_url(file_name: String) -> Result<String, String> {
+    if !is_valid_font_ext(&file_name) || file_name.contains('/') || file_name.contains('\\') || file_name.contains("..") {
+        return Err("Invalid font file name".to_string());
+    }
+    let path = get_fonts_dir()?.join(&file_name);
+    let bytes = fs::read(&path)
+        .map_err(|e| format!("Failed to read font: {}", e))?;
+    let lower = file_name.to_ascii_lowercase();
+    let mime = if lower.ends_with(".woff2") { "font/woff2" }
+               else if lower.ends_with(".woff") { "font/woff" }
+               else if lower.ends_with(".otf") { "font/otf" }
+               else { "font/ttf" };
+    use base64::Engine;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(format!("data:{};base64,{}", mime, encoded))
+}
+
+#[tauri::command]
+pub async fn delete_font(file_name: String) -> Result<(), String> {
+    if !is_valid_font_ext(&file_name) || file_name.contains('/') || file_name.contains('\\') || file_name.contains("..") {
+        return Err("Invalid font file name".to_string());
+    }
+    let path = get_fonts_dir()?.join(&file_name);
+    if path.exists() {
+        fs::remove_file(&path)
+            .map_err(|e| format!("Failed to delete font: {}", e))?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn set_builtin_icon(app: tauri::AppHandle, name: String) -> Result<(), String> {
     let icon_data = get_builtin_icon_data(&name)

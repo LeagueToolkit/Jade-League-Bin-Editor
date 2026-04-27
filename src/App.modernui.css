@@ -51,17 +51,17 @@
 
 /* ── App container: subtle vertical gradient (top = editor-bg, same as sticky scroll) ── */
 [data-ui-mode="modern"] .app-container {
-  background: linear-gradient(
+  background: var(--window-gradient, linear-gradient(
     to bottom,
     var(--editor-bg) 0%,
     color-mix(in srgb, var(--editor-bg) 72%, black) 100%
-  );
+  ));
   position: relative;
 }
 
 /* ── Title Bar: frosted glass ── */
 [data-ui-mode="modern"] .title-bar {
-  background: var(--modern-title-bg) !important;
+  background: linear-gradient(rgba(0,0,0,0.28), rgba(0,0,0,0.28)), var(--title-bar-bg) !important;
   backdrop-filter: var(--modern-blur);
   -webkit-backdrop-filter: var(--modern-blur);
   border-bottom: 1px solid var(--modern-glass-border) !important;
@@ -70,7 +70,7 @@
 
 /* ── Title text ── */
 [data-ui-mode="modern"] .title-text {
-  color: var(--text-color);
+  color: var(--title-bar-text, var(--text-color));
   opacity: 0.85;
   letter-spacing: 0.02em;
   font-weight: 500;
@@ -114,7 +114,7 @@
 
 /* ── Menu Bar: glass treatment ── */
 [data-ui-mode="modern"] .menu-bar {
-  background: var(--modern-title-bg) !important;
+  background: linear-gradient(rgba(0,0,0,0.45), rgba(0,0,0,0.45)), var(--title-bar-bg) !important;
   backdrop-filter: var(--modern-blur);
   -webkit-backdrop-filter: var(--modern-blur);
   border-bottom: 1px solid var(--modern-glass-border) !important;
@@ -185,12 +185,7 @@
 }
 
 [data-ui-mode="modern"] .tab.active::before {
-  background: linear-gradient(90deg,
-    transparent 0%,
-    var(--jade-accent) 20%,
-    color-mix(in srgb, var(--jade-accent) 75%, white) 50%,
-    var(--jade-accent) 80%,
-    transparent 100%) !important;
+  background: var(--jade-accent) !important;
   height: 2px !important;
   opacity: 0.9;
   box-shadow: 0 0 8px var(--jade-accent);
@@ -223,12 +218,12 @@
   box-shadow: inset 4px 0 8px var(--modern-accent-20);
 }
 
-/* ── Status Bar: deep glass strip ── */
+/* ── Status Bar: always solid so themed text color stays readable ── */
 [data-ui-mode="modern"] .status-bar {
-  background: var(--modern-status-bg) !important;
-  backdrop-filter: var(--modern-blur);
-  -webkit-backdrop-filter: var(--modern-blur);
-  border-top: 1px solid var(--modern-glass-border) !important;
+  background: var(--status-bar-bg) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border-top: 1px solid rgba(0, 0, 0, 0.3) !important;
   box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.25);
 }
 
@@ -459,6 +454,64 @@
   background: var(--modern-accent-22) !important;
   border-color: var(--modern-accent-50) !important;
   box-shadow: 0 0 14px var(--modern-accent-15) !important;
+}
+
+/* ── Font tab: glass containers ── */
+[data-ui-mode="modern"] .font-list,
+[data-ui-mode="modern"] .font-preview-panel {
+  background: rgba(255, 255, 255, 0.03) !important;
+  border: 1px solid rgba(255, 255, 255, 0.07) !important;
+  border-radius: 8px !important;
+}
+
+/* Font list items: same pattern as theme-item */
+[data-ui-mode="modern"] .font-list-item {
+  background: transparent !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+  border-radius: 0 !important;
+  transition: background 0.12s ease !important;
+}
+
+[data-ui-mode="modern"] .font-list-item:hover {
+  background: rgba(255, 255, 255, 0.05) !important;
+}
+
+[data-ui-mode="modern"] .font-list-item.selected {
+  background: var(--modern-accent-22) !important;
+  border-left-color: var(--modern-accent-75) !important;
+  box-shadow: inset 0 0 12px var(--modern-accent-07) !important;
+}
+
+/* Section headers within the list */
+[data-ui-mode="modern"] .font-list-section-header {
+  background: rgba(0, 0, 0, 0.15) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
+}
+
+/* Import button */
+[data-ui-mode="modern"] .font-list-panel > .background-action-btn {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.10) !important;
+  border-radius: 6px !important;
+  transition: background 0.15s ease, border-color 0.15s ease !important;
+}
+
+[data-ui-mode="modern"] .font-list-panel > .background-action-btn:hover {
+  background: var(--modern-accent-15) !important;
+  border-color: var(--modern-accent-40) !important;
+}
+
+/* UI font dropdown */
+[data-ui-mode="modern"] .font-ui-row .font-select {
+  background-color: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.10) !important;
+  border-radius: 6px !important;
+}
+
+[data-ui-mode="modern"] .font-ui-row .font-select:focus {
+  border-color: var(--modern-accent-75) !important;
+  box-shadow: 0 0 0 2px var(--modern-accent-15) !important;
+  outline: none !important;
 }
 
 /* ── Particle Editor Dialog ── */
@@ -1196,12 +1249,23 @@
   background: transparent !important;
 }
 
-[data-custom-background="true"] .title-bar,
-[data-custom-background="true"] .menu-bar,
 [data-custom-background="true"] .tab-bar,
-[data-custom-background="true"] .tabs-actions,
-[data-custom-background="true"] .status-bar {
+[data-custom-background="true"] .tabs-actions {
   background: var(--custom-chrome-bg) !important;
+  backdrop-filter: blur(14px) saturate(135%) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(135%) !important;
+  box-shadow: none !important;
+}
+
+[data-custom-background="true"] .menu-bar {
+  background: linear-gradient(rgba(0,0,0,0.45), rgba(0,0,0,0.45)), var(--title-bar-bg) !important;
+  backdrop-filter: blur(14px) saturate(135%) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(135%) !important;
+  box-shadow: none !important;
+}
+
+[data-custom-background="true"] .title-bar {
+  background: linear-gradient(rgba(0,0,0,0.28), rgba(0,0,0,0.28)), var(--title-bar-bg) !important;
   backdrop-filter: blur(14px) saturate(135%) !important;
   -webkit-backdrop-filter: blur(14px) saturate(135%) !important;
   box-shadow: none !important;
@@ -1214,7 +1278,10 @@
 }
 
 [data-custom-background="true"] .status-bar {
-  border-top: 1px solid var(--custom-chrome-border) !important;
+  background: var(--status-bar-bg) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border-top: 1px solid rgba(0, 0, 0, 0.3) !important;
 }
 
 [data-custom-background="true"] .toolbar-separator,
@@ -1272,13 +1339,36 @@
 }
 
 [data-custom-background="true"] .tab.active {
-  background: var(--custom-chrome-active) !important;
+  background: var(--selected-tab-bg) !important;
   box-shadow: none !important;
 }
 
 [data-custom-background="true"] .tab.active::before {
-  background: rgba(255, 255, 255, 0.78) !important;
-  box-shadow: none !important;
+  background: var(--jade-accent) !important;
+  box-shadow: 0 0 8px var(--jade-accent) !important;
 }
 
+/* ── Modern UI + custom background: higher-specificity overrides ──
+   [data-ui-mode="modern"][data-custom-background="true"] has two attribute
+   selectors so it beats either single-attribute rule above, regardless of
+   source order. Status bar stays solid/themed; active tab uses themed glass. */
+[data-ui-mode="modern"][data-custom-background="true"] .status-bar {
+  background: var(--status-bar-bg) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border-top: 1px solid rgba(0, 0, 0, 0.3) !important;
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.25) !important;
+}
+
+[data-ui-mode="modern"][data-custom-background="true"] .tab.active {
+  background: var(--modern-active-tab-bg) !important;
+}
+
+[data-ui-mode="modern"][data-custom-background="true"] .title-bar {
+  background: linear-gradient(rgba(0,0,0,0.28), rgba(0,0,0,0.28)), var(--title-bar-bg) !important;
+}
+
+[data-ui-mode="modern"][data-custom-background="true"] .menu-bar {
+  background: linear-gradient(rgba(0,0,0,0.45), rgba(0,0,0,0.45)), var(--title-bar-bg) !important;
+}
 
