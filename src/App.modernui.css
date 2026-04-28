@@ -22,6 +22,9 @@
   --modern-surface-bg:      color-mix(in srgb, var(--window-bg)      55%, transparent);
   --modern-tab-bg:          color-mix(in srgb, var(--tab-bg)         50%, transparent);
   --modern-active-tab-bg:   color-mix(in srgb, var(--selected-tab-bg) 75%, transparent);
+  /* Pre-merge formulas — subtle tinted strips. Vibrant themes (2077,
+     2023, lain) require Modern UI to render correctly anyway, so the
+     low-opacity wash is the look they were designed against. */
   --modern-status-bg:       color-mix(in srgb, var(--title-bar-bg)   60%, transparent);
   --modern-title-bg:        color-mix(in srgb, var(--title-bar-bg)   55%, transparent);
   --modern-dialog-bg:       color-mix(in srgb, var(--window-bg)      92%, transparent);
@@ -51,11 +54,11 @@
 
 /* ── App container: subtle vertical gradient (top = editor-bg, same as sticky scroll) ── */
 [data-ui-mode="modern"] .app-container {
-  background: linear-gradient(
+  background: var(--window-gradient, linear-gradient(
     to bottom,
     var(--editor-bg) 0%,
     color-mix(in srgb, var(--editor-bg) 72%, black) 100%
-  );
+  ));
   position: relative;
 }
 
@@ -70,7 +73,7 @@
 
 /* ── Title text ── */
 [data-ui-mode="modern"] .title-text {
-  color: var(--text-color);
+  color: var(--title-bar-text, var(--text-color));
   opacity: 0.85;
   letter-spacing: 0.02em;
   font-weight: 500;
@@ -185,12 +188,7 @@
 }
 
 [data-ui-mode="modern"] .tab.active::before {
-  background: linear-gradient(90deg,
-    transparent 0%,
-    var(--jade-accent) 20%,
-    color-mix(in srgb, var(--jade-accent) 75%, white) 50%,
-    var(--jade-accent) 80%,
-    transparent 100%) !important;
+  background: var(--jade-accent) !important;
   height: 2px !important;
   opacity: 0.9;
   box-shadow: 0 0 8px var(--jade-accent);
@@ -263,8 +261,11 @@
  */
 [data-ui-mode="modern"] .monaco-editor .sticky-widget,
 [data-ui-mode="modern"] .monaco-editor .stickyScrollWidget {
-  background: var(--editor-bg) !important;
-  background-color: var(--editor-bg) !important;
+  /* Match the gradient's top color when the theme has one — keeps the
+     pinned strip visually flush with the window background. Themes
+     without a gradient fall back to editor-bg so behaviour is unchanged. */
+  background: var(--gradient-top, var(--editor-bg)) !important;
+  background-color: var(--gradient-top, var(--editor-bg)) !important;
 }
 
 /*
@@ -459,6 +460,64 @@
   background: var(--modern-accent-22) !important;
   border-color: var(--modern-accent-50) !important;
   box-shadow: 0 0 14px var(--modern-accent-15) !important;
+}
+
+/* ── Font tab: glass containers ── */
+[data-ui-mode="modern"] .font-list,
+[data-ui-mode="modern"] .font-preview-panel {
+  background: rgba(255, 255, 255, 0.03) !important;
+  border: 1px solid rgba(255, 255, 255, 0.07) !important;
+  border-radius: 8px !important;
+}
+
+/* Font list items: same pattern as theme-item */
+[data-ui-mode="modern"] .font-list-item {
+  background: transparent !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+  border-radius: 0 !important;
+  transition: background 0.12s ease !important;
+}
+
+[data-ui-mode="modern"] .font-list-item:hover {
+  background: rgba(255, 255, 255, 0.05) !important;
+}
+
+[data-ui-mode="modern"] .font-list-item.selected {
+  background: var(--modern-accent-22) !important;
+  border-left-color: var(--modern-accent-75) !important;
+  box-shadow: inset 0 0 12px var(--modern-accent-07) !important;
+}
+
+/* Section headers within the list */
+[data-ui-mode="modern"] .font-list-section-header {
+  background: rgba(0, 0, 0, 0.15) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
+}
+
+/* Import button */
+[data-ui-mode="modern"] .font-list-panel > .background-action-btn {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.10) !important;
+  border-radius: 6px !important;
+  transition: background 0.15s ease, border-color 0.15s ease !important;
+}
+
+[data-ui-mode="modern"] .font-list-panel > .background-action-btn:hover {
+  background: var(--modern-accent-15) !important;
+  border-color: var(--modern-accent-40) !important;
+}
+
+/* UI font dropdown */
+[data-ui-mode="modern"] .font-ui-row .font-select {
+  background-color: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.10) !important;
+  border-radius: 6px !important;
+}
+
+[data-ui-mode="modern"] .font-ui-row .font-select:focus {
+  border-color: var(--modern-accent-75) !important;
+  box-shadow: 0 0 0 2px var(--modern-accent-15) !important;
+  outline: none !important;
 }
 
 /* ── Particle Editor Dialog ── */
@@ -1196,11 +1255,12 @@
   background: transparent !important;
 }
 
-[data-custom-background="true"] .title-bar,
-[data-custom-background="true"] .menu-bar,
+/* Tab bar / tab actions stay on the unified glass so the background
+   image shows through behind the tab strip. The title bar and menu bar
+   keep their themed color (--title-bar-bg, mixed via --modern-title-bg
+   in modern mode) so vibrant theme accents survive the override. */
 [data-custom-background="true"] .tab-bar,
-[data-custom-background="true"] .tabs-actions,
-[data-custom-background="true"] .status-bar {
+[data-custom-background="true"] .tabs-actions {
   background: var(--custom-chrome-bg) !important;
   backdrop-filter: blur(14px) saturate(135%) !important;
   -webkit-backdrop-filter: blur(14px) saturate(135%) !important;
@@ -1272,13 +1332,20 @@
 }
 
 [data-custom-background="true"] .tab.active {
-  background: var(--custom-chrome-active) !important;
+  background: var(--selected-tab-bg) !important;
   box-shadow: none !important;
 }
 
 [data-custom-background="true"] .tab.active::before {
-  background: rgba(255, 255, 255, 0.78) !important;
-  box-shadow: none !important;
+  background: var(--jade-accent) !important;
+  box-shadow: 0 0 8px var(--jade-accent) !important;
 }
 
+/* ── Modern UI + custom background ──
+   Active tab keeps the themed glass; the title and menu bars are left
+   to their normal modern-mode rules so vibrant theme accents (yellow,
+   red, pink) actually show through. */
+[data-ui-mode="modern"][data-custom-background="true"] .tab.active {
+  background: var(--modern-active-tab-bg) !important;
+}
 

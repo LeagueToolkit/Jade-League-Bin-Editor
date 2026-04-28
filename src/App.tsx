@@ -195,7 +195,26 @@ function App() {
   });
 
   const editorRef = useRef<MonacoType.editor.IStandaloneCodeEditor | null>(null);
+  // Empty default lets Monaco fall back to its own font (matches the
+  // pre-PR look). The theme system only sets a real value when the user
+  // picks a font in Themes > Fonts.
+  const [editorFontFamily, setEditorFontFamily] = useState("");
   const editorDisposablesRef = useRef<MonacoType.IDisposable[]>([]);
+
+  // When font state changes, tell Monaco to re-measure so cursor/selection align correctly.
+  useEffect(() => {
+    if (!monacoRef.current || !editorRef.current) return;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      monacoRef.current?.editor.remeasureFonts();
+    }));
+  }, [editorFontFamily]);
+
+  // PR #4 introduced an `editorOptions` memo for plumbing the font into
+  // Monaco from this file. Since the shells refactor moved Monaco into
+  // EditorPane, the memo would be unused here. We forward the font
+  // family through ShellContext instead — EditorPane reads it (TODO:
+  // wire fontFamily into shellCtx + EditorPane to actually swap fonts).
+
   const emitterDecorationIds = useRef<string[]>([]);
   const emitterDecorDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const emitterHintsEnabled = useRef(true);
@@ -392,9 +411,14 @@ function App() {
       const v = (e as CustomEvent<ShellVariant>).detail;
       if (v === 'vscode' || v === 'word' || v === 'visualstudio') setShellVariant(v);
     };
+    const handleEditorFontChanged = (e: Event) => {
+      const fontFamily = (e as CustomEvent<string>).detail;
+      setEditorFontFamily(fontFamily);
+    };
     window.addEventListener('cigarette-mode-changed', handleCigaretteModeChanged);
     window.addEventListener('quartz-interop-changed', handleQuartzInteropChanged);
     window.addEventListener('shell-changed', handleShellChanged);
+    window.addEventListener('jade-editor-font-changed', handleEditorFontChanged);
 
     // Listen for open-file events from backend (file association double-click or single-instance)
     const openFileUnlisten = listen<string>('open-file', async (event) => {
@@ -795,6 +819,7 @@ function App() {
       window.removeEventListener('cigarette-mode-changed', handleCigaretteModeChanged);
       window.removeEventListener('quartz-interop-changed', handleQuartzInteropChanged);
       window.removeEventListener('shell-changed', handleShellChanged);
+      window.removeEventListener('jade-editor-font-changed', handleEditorFontChanged);
       window.removeEventListener('app-new', handleAppNew);
       window.removeEventListener('app-toggle-md-preview', handleAppToggleMdPreview);
       window.removeEventListener('app-open', handleAppOpen);
@@ -3879,7 +3904,7 @@ function App() {
     onSendToQuartz: handleSendToQuartz,
 
     // -- Editor wiring
-    editorTheme, perfPrefs, bigFileLines: BIG_FILE_LINES,
+    editorTheme, editorFontFamily, perfPrefs, bigFileLines: BIG_FILE_LINES,
     handleBeforeMount, handleEditorMount, handleEditorChange,
     editorRef,
 
