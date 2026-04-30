@@ -1,6 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import TitleBar from '../components/TitleBar';
-import MenuBar from '../components/MenuBar';
 import TabBar from '../components/TabBar';
 import StatusBar from '../components/StatusBar';
 import WelcomeScreen from '../components/WelcomeScreen';
@@ -8,13 +6,17 @@ import GeneralEditPanel from '../components/GeneralEditPanel';
 import ParticleEditorPanel from '../components/ParticleEditorPanel';
 import MarkdownEditPanel from '../components/MarkdownEditPanel';
 import VSToolbar from './VSToolbar';
+import VSTitleBar from './VSTitleBar';
 import VSDockPane from './VSDockPane';
+import VSDockGroup from './VSDockGroup';
+import FloatingEditorPane from './FloatingEditorPane';
+import MaterialOverridePanel from './MaterialOverridePanel';
 import EditorPane from './EditorPane';
 import SharedDialogs from './SharedDialogs';
 import WordFindPane from './WordFindPane';
 import DockGuides, { hitTestGuides } from './DockGuides';
 import FloatingToolWindow from './FloatingToolWindow';
-import { useToolLayout, type DockSide, type ToolId } from './useToolLayout';
+import { useToolLayout, type DockSide, type DockGroup, type ToolId } from './useToolLayout';
 import { getFileExtension } from '../lib/binOperations';
 import { useShell } from './ShellContext';
 import './Dock.css';
@@ -25,25 +27,62 @@ const TOOL_LABELS: Record<ToolId, string> = {
     particle: 'Particle Editor',
     markdown: 'Markdown',
     find: 'Find Results',
+    texture: 'Texture Insert',
+    material: 'Material Insert',
 };
 
 const DOCK_DEFAULT_SIZE: Record<DockSide, number> = {
-    left:   320,
-    right:  360,
-    bottom: 240,
+    'outer-left':   240,
+    'inner-left':   280,
+    'outer-right':  240,
+    'inner-right':  320,
+    'outer-top':    160,
+    'inner-top':    160,
+    'outer-bottom': 200,
+    'inner-bottom': 220,
 };
 
 const DOCK_MIN_SIZE: Record<DockSide, number> = {
-    left:   220,
-    right:  240,
-    bottom: 120,
+    'outer-left':   180,
+    'inner-left':   200,
+    'outer-right':  180,
+    'inner-right':  220,
+    'outer-top':    100,
+    'inner-top':    100,
+    'outer-bottom': 100,
+    'inner-bottom': 100,
 };
 
 const DOCK_STORAGE_KEY: Record<DockSide, string> = {
-    left:   'vs-dock-left',
-    right:  'vs-dock-right',
-    bottom: 'vs-dock-bottom',
+    'outer-left':   'vs-dock-outer-left',
+    'inner-left':   'vs-dock-inner-left',
+    'outer-right':  'vs-dock-outer-right',
+    'inner-right':  'vs-dock-inner-right',
+    'outer-top':    'vs-dock-outer-top',
+    'inner-top':    'vs-dock-inner-top',
+    'outer-bottom': 'vs-dock-outer-bottom',
+    'inner-bottom': 'vs-dock-inner-bottom',
 };
+
+const DOCK_SPLIT_STORAGE_KEY: Record<DockSide, string> = {
+    'outer-left':   'vs-dock-outer-left-split',
+    'inner-left':   'vs-dock-inner-left-split',
+    'outer-right':  'vs-dock-outer-right-split',
+    'inner-right':  'vs-dock-inner-right-split',
+    'outer-top':    'vs-dock-outer-top-split',
+    'inner-top':    'vs-dock-inner-top-split',
+    'outer-bottom': 'vs-dock-outer-bottom-split',
+    'inner-bottom': 'vs-dock-inner-bottom-split',
+};
+
+/** A `VSDockPane` only knows about the four cardinal sides — strip the
+ *  lane prefix so the resize handle ends up on the correct edge. */
+function dockPaneSide(side: DockSide): 'left' | 'right' | 'top' | 'bottom' {
+    if (side.endsWith('left'))   return 'left';
+    if (side.endsWith('right'))  return 'right';
+    if (side.endsWith('top'))    return 'top';
+    return 'bottom';
+}
 
 const FLOAT_DEFAULT_W = 360;
 const FLOAT_DEFAULT_H = 320;
@@ -58,7 +97,7 @@ const FLOAT_DEFAULT_H = 320;
 export default function VisualStudioShell() {
     const s = useShell();
     const { activeTab } = s;
-    const { layout, dockTool, floatTool, moveFloatingTool, resizeFloatingTool } = useToolLayout();
+    const { layout, dockTool, splitTool, floatTool, moveFloatingTool, resizeFloatingTool } = useToolLayout();
 
     const ext = activeTab && s.isEditorTab(activeTab)
         ? getFileExtension(activeTab.filePath ?? activeTab.fileName)
@@ -75,6 +114,8 @@ export default function VisualStudioShell() {
         particle: particleOpen,
         markdown: markdownOpen,
         find:     findOpen,
+        texture:  s.textureInsertOpen  && !!activeTab && s.isEditorTab(activeTab),
+        material: s.materialInsertOpen && !!activeTab && s.isEditorTab(activeTab),
     };
 
     const closeTool = useCallback((id: ToolId) => {
@@ -86,31 +127,47 @@ export default function VisualStudioShell() {
                 if (s.findWidgetOpen) s.onFind();
                 else if (s.replaceWidgetOpen) s.onReplace();
                 break;
+            case 'texture':  s.setTextureInsertOpen(false); break;
+            case 'material': s.setMaterialInsertOpen(false); break;
         }
     }, [s]);
 
-    // Bucket the open tools by where they are.
-    const docked: Record<DockSide, ToolId[]> = { left: [], right: [], bottom: [] };
+    // Bucket the open tools by side AND group. `docked[side]` is a tuple
+    // [group0, group1] of tool-id arrays — tools in the same group tab
+    // together, tools in different groups stack inside the same side via
+    // `VSDockGroup`'s split divider.
+    type GroupedSide = [ToolId[], ToolId[]];
+    const docked: Record<DockSide, GroupedSide> = {
+        'outer-left':   [[], []], 'inner-left':   [[], []],
+        'outer-right':  [[], []], 'inner-right':  [[], []],
+        'outer-top':    [[], []], 'inner-top':    [[], []],
+        'outer-bottom': [[], []], 'inner-bottom': [[], []],
+    };
     const floating: ToolId[] = [];
     (Object.keys(isOpen) as ToolId[]).forEach(id => {
         if (!isOpen[id]) return;
         const p = layout[id];
-        if (p.kind === 'dock') docked[p.side].push(id);
+        if (p.kind === 'dock') docked[p.side][p.group].push(id);
         else floating.push(id);
     });
 
-    // Active tab per dock side.
-    const [activeBySide, setActiveBySide] = useState<Record<DockSide, ToolId | null>>({
-        left: null, right: null, bottom: null,
+    // Active tab per (side, group).
+    const [activeBySideGroup, setActiveBySideGroup] = useState<Record<DockSide, [ToolId | null, ToolId | null]>>({
+        'outer-left':   [null, null], 'inner-left':   [null, null],
+        'outer-right':  [null, null], 'inner-right':  [null, null],
+        'outer-top':    [null, null], 'inner-top':    [null, null],
+        'outer-bottom': [null, null], 'inner-bottom': [null, null],
     });
     const dockedKey = useMemo(() => JSON.stringify(docked), [docked]);
     useEffect(() => {
-        setActiveBySide(prev => {
+        setActiveBySideGroup(prev => {
             const next = { ...prev };
             (Object.keys(docked) as DockSide[]).forEach(side => {
-                const ids = docked[side];
-                if (ids.length === 0) next[side] = null;
-                else if (!prev[side] || !ids.includes(prev[side]!)) next[side] = ids[0];
+                const [g0, g1] = docked[side];
+                const [a0, a1] = prev[side];
+                const newA0 = g0.length === 0 ? null : (a0 && g0.includes(a0)) ? a0 : g0[0];
+                const newA1 = g1.length === 0 ? null : (a1 && g1.includes(a1)) ? a1 : g1[0];
+                next[side] = [newA0, newA1];
             });
             return next;
         });
@@ -121,6 +178,27 @@ export default function VisualStudioShell() {
     const [draggingTool, setDraggingTool] = useState<ToolId | null>(null);
     const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
     const bodyRef = useRef<HTMLDivElement | null>(null);
+
+    // ── Editor pop-out state ──
+    // The editor pane has two states: docked at center (default) or
+    // floating as a draggable + resizable in-app window. Main editor
+    // stays mounted underneath when floating (hidden via CSS) so the
+    // model bookkeeping in App.tsx keeps working.
+    type EditorDragMode = 'pop' | 'editor-move' | 'editor-resize';
+    interface EditorDrag {
+        mode: EditorDragMode;
+        startX: number;
+        startY: number;
+        started: boolean;
+    }
+    const TAB_DRAG_THRESHOLD = 18;
+    const FLOAT_EDITOR_DEFAULT = { width: 720, height: 480 };
+    const [editorFloating, setEditorFloating] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+    const [editorDrag, setEditorDrag] = useState<EditorDrag | null>(null);
+    const editorDragRef = useRef<EditorDrag | null>(null);
+    editorDragRef.current = editorDrag;
+    const cursorRef = useRef<{ x: number; y: number } | null>(null);
+    cursorRef.current = cursor;
 
     // The drag has two flavors:
     //  - 'relocate' starts from a docked tab/header. Drop on a guide ->
@@ -154,6 +232,73 @@ export default function VisualStudioShell() {
         lastCursorRef.current = { x: e.clientX, y: e.clientY };
         setDraggingTool(id);
     }, []);
+
+    const startEditorDrag = useCallback((e: React.PointerEvent, mode: EditorDragMode) => {
+        if ((e.target as HTMLElement).closest('.tab-close-btn,.vs-dock-close')) return;
+        if (e.button !== 0) return;
+        setEditorDrag({ mode, startX: e.clientX, startY: e.clientY, started: false });
+    }, []);
+
+    useEffect(() => {
+        if (!editorDrag) return;
+        const onMove = (e: PointerEvent) => {
+            const cur = editorDragRef.current;
+            if (!cur) return;
+            const dx = e.clientX - cur.startX;
+            const dy = e.clientY - cur.startY;
+            const moved = Math.hypot(dx, dy) >= TAB_DRAG_THRESHOLD;
+
+            if (cur.mode === 'pop') {
+                if (!moved && !cur.started) return;
+                if (!cur.started) setEditorDrag({ ...cur, started: true });
+                setCursor({ x: e.clientX, y: e.clientY });
+                return;
+            }
+            if (cur.mode === 'editor-move') {
+                setEditorFloating(prev => prev && ({ ...prev, x: prev.x + (e.clientX - cur.startX), y: prev.y + (e.clientY - cur.startY) }));
+                setEditorDrag({ ...cur, startX: e.clientX, startY: e.clientY, started: true });
+                setCursor({ x: e.clientX, y: e.clientY });
+                return;
+            }
+            if (cur.mode === 'editor-resize') {
+                setEditorFloating(prev => prev && ({
+                    ...prev,
+                    width:  Math.max(360, prev.width  + (e.clientX - cur.startX)),
+                    height: Math.max(220, prev.height + (e.clientY - cur.startY)),
+                }));
+                setEditorDrag({ ...cur, startX: e.clientX, startY: e.clientY, started: true });
+                return;
+            }
+        };
+        const onUp = (e: PointerEvent) => {
+            const cur = editorDragRef.current;
+            if (!cur) return;
+
+            if (cur.mode === 'pop' && cur.started) {
+                const x = Math.max(40, e.clientX - 120);
+                const y = Math.max(40, e.clientY - 20);
+                setEditorFloating({ x, y, width: FLOAT_EDITOR_DEFAULT.width, height: FLOAT_EDITOR_DEFAULT.height });
+            } else if (cur.mode === 'editor-move' && cur.started) {
+                const editorRect = bodyRef.current?.querySelector('.vs-shell-editor')?.getBoundingClientRect();
+                if (editorRect && e.clientX >= editorRect.left && e.clientX <= editorRect.right
+                    && e.clientY >= editorRect.top && e.clientY <= editorRect.bottom) {
+                    setEditorFloating(null);
+                }
+            }
+            setEditorDrag(null);
+            setCursor(null);
+        };
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', onUp);
+        return () => {
+            window.removeEventListener('pointermove', onMove);
+            window.removeEventListener('pointerup', onUp);
+        };
+    }, [editorDrag]);
+
+    const reDockEditor = useCallback(() => setEditorFloating(null), []);
+
+    const visibleTabs = s.tabs;
 
     useEffect(() => {
         if (!draggingTool) return;
@@ -198,27 +343,39 @@ export default function VisualStudioShell() {
             if (!tool) return;
             const rect = bodyRef.current?.getBoundingClientRect();
             const cursorPt = { x: e.clientX, y: e.clientY };
+            // A plain click (no movement past the threshold) on a tab
+            // should fall through to the tab's onClick handler — switch
+            // active tab, NOT pop the tool out as a float.
+            const dx = e.clientX - dragStartRef.current.x;
+            const dy = e.clientY - dragStartRef.current.y;
+            const moved = Math.hypot(dx, dy) >= TAB_DRAG_THRESHOLD;
 
-            if (mode === 'relocate' && rect) {
+            if (mode === 'relocate' && rect && moved) {
                 const target = hitTestGuides(cursorPt, {
                     left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom,
                 });
                 if (target) {
                     dockTool(tool, target.side);
-                    setActiveBySide(prev => ({ ...prev, [target.side]: tool }));
+                    setActiveBySideGroup(prev => {
+                        const cur = prev[target.side];
+                        return { ...prev, [target.side]: [tool, cur[1]] as [ToolId | null, ToolId | null] };
+                    });
                 } else {
                     // No guide under the cursor — pop the tool out as a float.
                     const x = Math.max(rect.left + 16, e.clientX - 60);
                     const y = Math.max(rect.top + 16, e.clientY - 12);
                     floatTool(tool, { x, y, width: FLOAT_DEFAULT_W, height: FLOAT_DEFAULT_H });
                 }
-            } else if (mode === 'float-move' && rect) {
+            } else if (mode === 'float-move' && rect && moved) {
                 const target = hitTestGuides(cursorPt, {
                     left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom,
                 });
                 if (target) {
                     dockTool(tool, target.side);
-                    setActiveBySide(prev => ({ ...prev, [target.side]: tool }));
+                    setActiveBySideGroup(prev => {
+                        const cur = prev[target.side];
+                        return { ...prev, [target.side]: [tool, cur[1]] as [ToolId | null, ToolId | null] };
+                    });
                 }
             }
 
@@ -283,32 +440,88 @@ export default function VisualStudioShell() {
                 );
             case 'find':
                 return <WordFindPane mode={s.replaceWidgetOpen ? 'replace' : 'find'} />;
+            case 'texture':
+                return <MaterialOverridePanel entryType="texture" onClose={() => s.setTextureInsertOpen(false)} />;
+            case 'material':
+                return <MaterialOverridePanel entryType="material" onClose={() => s.setMaterialInsertOpen(false)} />;
         }
     };
 
-    const renderDock = (side: DockSide) => {
-        const ids = docked[side];
+    /** Render a single sub-pane inside a dock group. Uses `fill` so the
+     *  enclosing `VSDockGroup` owns the outer resize. */
+    const renderDockSubPane = (side: DockSide, group: DockGroup, ids: ToolId[]) => {
         if (ids.length === 0) return null;
-        const active = activeBySide[side] ?? ids[0];
+        const active = activeBySideGroup[side][group] ?? ids[0];
         const tabs = ids.map(id => ({ id, label: TOOL_LABELS[id] }));
+        const otherGroupHasTools = docked[side][group === 0 ? 1 : 0].length > 0;
 
         return (
             <VSDockPane
-                key={side}
-                side={side}
+                key={`${side}-${group}`}
+                side={dockPaneSide(side)}
                 defaultSize={DOCK_DEFAULT_SIZE[side]}
                 minSize={DOCK_MIN_SIZE[side]}
-                storageKey={DOCK_STORAGE_KEY[side]}
+                storageKey={undefined}
+                fill
                 tabs={tabs.length > 1 ? tabs : undefined}
                 title={tabs.length === 1 ? TOOL_LABELS[ids[0]] : undefined}
                 activeTabId={active}
-                onTabSelect={id => setActiveBySide(prev => ({ ...prev, [side]: id as ToolId }))}
+                onTabSelect={id => setActiveBySideGroup(prev => {
+                    const cur = prev[side];
+                    const next: [ToolId | null, ToolId | null] = group === 0
+                        ? [id as ToolId, cur[1]]
+                        : [cur[0], id as ToolId];
+                    return { ...prev, [side]: next };
+                })}
                 onTabPointerDown={(e, id) => startToolDrag(e, id as ToolId, 'relocate')}
                 onHeaderPointerDown={tabs.length === 1 ? (e => startToolDrag(e, ids[0], 'relocate')) : undefined}
                 onClose={() => closeTool(active)}
+                // Show the split button when the side has only one group
+                // populated AND it has at least 2 tools (you can't split
+                // off a single tool — it'd just leave one group empty).
+                // Once both groups exist, the button still toggles so a
+                // user can rejoin them.
+                onSplit={
+                    (otherGroupHasTools || ids.length >= 2)
+                        ? () => splitTool(active)
+                        : undefined
+                }
+                splitState={
+                    otherGroupHasTools
+                        ? (group === 0 ? 'group0' : 'group1')
+                        : 'splittable'
+                }
             >
                 {renderToolBody(active)}
             </VSDockPane>
+        );
+    };
+
+    const renderDock = (side: DockSide) => {
+        const [g0, g1] = docked[side];
+        if (g0.length === 0 && g1.length === 0) return null;
+
+        // If only one group has tools, render a single sub-pane wrapped
+        // in VSDockGroup (the wrapper provides the outer resize handle).
+        const hasBoth = g0.length > 0 && g1.length > 0;
+        const single = !hasBoth ? (g0.length > 0 ? g0 : g1) : null;
+
+        return (
+            <VSDockGroup
+                key={side}
+                side={dockPaneSide(side)}
+                defaultSize={DOCK_DEFAULT_SIZE[side]}
+                minSize={DOCK_MIN_SIZE[side]}
+                storageKey={DOCK_STORAGE_KEY[side]}
+                splitStorageKey={DOCK_SPLIT_STORAGE_KEY[side]}
+            >
+                {single
+                    ? renderDockSubPane(side, g0.length > 0 ? 0 : 1, single)
+                    : [
+                        renderDockSubPane(side, 0, g0),
+                        renderDockSubPane(side, 1, g1),
+                    ] as [ReactNode, ReactNode]}
+            </VSDockGroup>
         );
     };
 
@@ -316,71 +529,35 @@ export default function VisualStudioShell() {
 
     return (
         <div className={`app-container visualstudio-shell ${s.isDragging ? 'dragging' : ''}`}>
-            <TitleBar
-                appIcon={s.appIcon}
-                isMaximized={s.isMaximized}
-                onThemes={s.onThemes}
-                onPreferences={s.onPreferences}
-                onSettings={s.onSettings}
-                onAbout={s.onAbout}
-                onMinimize={s.onMinimize}
-                onMaximize={s.onMaximize}
-                onClose={s.onClose}
-                onParticleEditor={s.onParticleEditor}
-                onMaterialLibrary={s.onMaterialLibrary}
-                onQuartzAction={s.onSendToQuartz}
-            />
-
-            <MenuBar
-                findActive={s.findWidgetOpen}
-                replaceActive={s.replaceWidgetOpen}
-                generalEditActive={s.generalEditPanelOpen}
-                particlePanelActive={s.particlePanelOpen}
-                particleDisabled={!s.isBinFileOpen()}
-                onNewFile={s.onNew}
-                onOpenFile={s.onOpen}
-                onSaveFile={s.onSave}
-                onSaveFileAs={s.onSaveAs}
-                onOpenLog={s.onOpenLog}
-                onExit={s.onClose}
-                onUndo={s.onUndo}
-                onRedo={s.onRedo}
-                onCut={s.onCut}
-                onCopy={s.onCopy}
-                onPaste={s.onPaste}
-                onFind={s.onFind}
-                onReplace={s.onReplace}
-                onCompareFiles={s.onCompareFiles}
-                onSelectAll={s.onSelectAll}
-                onGeneralEdit={s.onGeneralEdit}
-                onParticlePanel={s.onParticlePanel}
-                onThemes={s.onThemes}
-                onSettings={s.onSettings}
-                onAbout={s.onAbout}
-                onMaterialLibrary={s.onMaterialLibrary}
-                recentFiles={s.recentFiles}
-                onOpenRecentFile={s.openFileFromPath}
-                openFileDisabled={s.openFileDisabled}
-            />
+            <VSTitleBar />
 
             <VSToolbar />
 
-            {s.tabs.length > 0 && (
-                <TabBar
-                    tabs={s.tabs}
-                    activeTabId={s.activeTabId}
-                    onTabSelect={s.onTabSelect}
-                    onTabClose={s.onTabClose}
-                    onTabCloseAll={s.onTabCloseAll}
-                    onTabPin={s.onTabPin}
-                />
-            )}
-
             <div className="vs-shell-body" ref={bodyRef}>
-                {renderDock('left')}
+                {renderDock('outer-left')}
+                {renderDock('inner-left')}
 
                 <div className="vs-shell-center">
-                    <div className="vs-shell-editor">
+                    {renderDock('outer-top')}
+                    {renderDock('inner-top')}
+
+                    {/* Tab strip lives inside the editor column so any
+                        top dock pushes tabs + editor down together. In
+                        VS the tabs belong to the editor pane, not the
+                        workspace top. */}
+                    {visibleTabs.length > 0 && (
+                        <TabBar
+                            tabs={visibleTabs}
+                            activeTabId={s.activeTabId}
+                            onTabSelect={s.onTabSelect}
+                            onTabClose={s.onTabClose}
+                            onTabCloseAll={s.onTabCloseAll}
+                            onTabPin={s.onTabPin}
+                            onTabPointerDown={e => startEditorDrag(e, 'pop')}
+                        />
+                    )}
+
+                    <div className={`vs-shell-editor${editorFloating ? ' editor-popped-out' : ''}`}>
                         {s.tabs.length === 0 && !s.fileLoading && (
                             <WelcomeScreen
                                 onOpenFile={s.onOpen}
@@ -395,10 +572,12 @@ export default function VisualStudioShell() {
                         <EditorPane />
                     </div>
 
-                    {renderDock('bottom')}
+                    {renderDock('inner-bottom')}
+                    {renderDock('outer-bottom')}
                 </div>
 
-                {renderDock('right')}
+                {renderDock('inner-right')}
+                {renderDock('outer-right')}
 
                 {/* Floating tool windows. They live above the body so they
                     can sit anywhere over the editor / docked panes. */}
@@ -427,6 +606,19 @@ export default function VisualStudioShell() {
                     cursor={cursor}
                     visible={!!draggingTool && dragModeRef.current !== 'float-resize'}
                 />
+
+                {/* Popped-out editor pane — in-app floating window. */}
+                {editorFloating && (
+                    <FloatingEditorPane
+                        x={editorFloating.x}
+                        y={editorFloating.y}
+                        width={editorFloating.width}
+                        height={editorFloating.height}
+                        onHeaderPointerDown={e => startEditorDrag(e, 'editor-move')}
+                        onResizePointerDown={e => startEditorDrag(e, 'editor-resize')}
+                        onClose={reDockEditor}
+                    />
+                )}
             </div>
 
             <StatusBar

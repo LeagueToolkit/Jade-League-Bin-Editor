@@ -1,6 +1,9 @@
 interface IconProps {
     size?: number;
     className?: string;
+    /** Override the SVG stroke width. Mostly for icons like CloseIcon
+     *  where some places (tab bar, dock pane) want a bolder X. */
+    strokeWidth?: number;
 }
 
 // Quartz / Export arrow icon
@@ -150,7 +153,7 @@ export function PinIcon({ size = 16, className = '' }: IconProps) {
 }
 
 // Close / X Icon
-export function CloseIcon({ size = 16, className = '' }: IconProps) {
+export function CloseIcon({ size = 16, className = '', strokeWidth = 2 }: IconProps) {
     return (
         <svg
             width={size}
@@ -158,7 +161,7 @@ export function CloseIcon({ size = 16, className = '' }: IconProps) {
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
-            strokeWidth="2"
+            strokeWidth={strokeWidth}
             strokeLinecap="round"
             strokeLinejoin="round"
             className={className}
@@ -514,6 +517,26 @@ export function ConverterIcon({ size = 16, className = '' }: IconProps) {
             <path d="M3 11V9a4 4 0 0 1 4-4h14" />
             <path d="M7 23l-4-4 4-4" />
             <path d="M21 13v2a4 4 0 0 1-4 4H3" />
+        </svg>
+    );
+}
+
+// Layout / Workspace Icon — outlined panel with a sidebar divider.
+export function LayoutIcon({ size = 16, className = '' }: IconProps) {
+    return (
+        <svg
+            width={size}
+            height={size}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={className}
+        >
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <line x1="9" y1="3" x2="9" y2="21" />
         </svg>
     );
 }

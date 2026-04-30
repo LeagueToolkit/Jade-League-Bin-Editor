@@ -1,6 +1,7 @@
+import { useEffect, useRef, useState } from 'react';
 import {
     SearchIcon, ReplaceIcon, EditIcon, SparklesIcon, LibraryIcon,
-    PaletteIcon, SettingsIcon, HelpIcon,
+    PaletteIcon, SettingsIcon, HelpIcon, ImageIcon, PencilIcon, QuartzIcon,
 } from '../components/Icons';
 import { useShell } from './ShellContext';
 
@@ -36,6 +37,19 @@ export default function VSToolbar() {
     const s = useShell();
     const binDisabled = !s.isBinFileOpen();
 
+    // Send-to-Quartz dropdown — same set of actions as the Classic
+    // shell's TitleBar menu, just rendered inline on the VS toolbar.
+    const [quartzOpen, setQuartzOpen] = useState(false);
+    const quartzRef = useRef<HTMLDivElement | null>(null);
+    useEffect(() => {
+        if (!quartzOpen) return;
+        const onDown = (e: MouseEvent) => {
+            if (!quartzRef.current?.contains(e.target as Node)) setQuartzOpen(false);
+        };
+        document.addEventListener('mousedown', onDown);
+        return () => document.removeEventListener('mousedown', onDown);
+    }, [quartzOpen]);
+
     return (
         <div className="vs-toolbar">
             <ToolbarBtn title="Find (Ctrl+F)" onClick={s.onFind} icon={<SearchIcon size={15} />} active={s.findWidgetOpen} />
@@ -49,6 +63,23 @@ export default function VSToolbar() {
                 icon={<EditIcon size={15} />}
                 active={s.generalEditPanelOpen}
             />
+            {/* Sub-icons next to General Editing — dockable insert tools
+                that mirror the modal flows inside General Editing's
+                Material Override section, but as draggable modules. */}
+            <ToolbarBtn
+                title={binDisabled ? 'Texture Insert (bin only)' : 'Texture Insert'}
+                onClick={s.onTextureInsert}
+                icon={<ImageIcon size={14} />}
+                active={s.textureInsertOpen}
+                disabled={binDisabled}
+            />
+            <ToolbarBtn
+                title={binDisabled ? 'Material Insert (bin only)' : 'Material Insert'}
+                onClick={s.onMaterialInsert}
+                icon={<PencilIcon size={14} />}
+                active={s.materialInsertOpen}
+                disabled={binDisabled}
+            />
             <ToolbarBtn
                 title={binDisabled ? 'Particle Editing (bin/py only)' : 'Particle Editing (Ctrl+P)'}
                 onClick={s.onParticlePanel}
@@ -58,13 +89,33 @@ export default function VSToolbar() {
             />
             <ToolbarBtn title="Material Library" onClick={s.onMaterialLibrary} icon={<LibraryIcon size={15} />} />
 
-            <div className="vs-toolbar-sep" />
-
-            <ToolbarBtn title="Themes" onClick={s.onThemes} icon={<PaletteIcon size={15} />} />
-            <ToolbarBtn title="Settings" onClick={s.onSettings} icon={<SettingsIcon size={15} />} />
+            {/* Send to Quartz — dropdown with the same 4 actions the
+                Classic shell's title-bar menu offers. */}
+            <div className="vs-toolbar-menu-wrap" ref={quartzRef}>
+                <button
+                    type="button"
+                    className={`vs-toolbar-btn${quartzOpen ? ' active' : ''}`}
+                    onClick={() => setQuartzOpen(o => !o)}
+                    title="Send to Quartz"
+                    aria-label="Send to Quartz"
+                >
+                    <QuartzIcon size={15} />
+                </button>
+                {quartzOpen && (
+                    <div className="vs-toolbar-menu-popup">
+                        <button className="vs-toolbar-menu-item" onClick={() => { setQuartzOpen(false); s.onSendToQuartz('paint'); }}>Paint In Quartz</button>
+                        <button className="vs-toolbar-menu-item" onClick={() => { setQuartzOpen(false); s.onSendToQuartz('port'); }}>Port In Quartz</button>
+                        <button className="vs-toolbar-menu-item" onClick={() => { setQuartzOpen(false); s.onSendToQuartz('bineditor'); }}>Open In BinEditor</button>
+                        <button className="vs-toolbar-menu-item" onClick={() => { setQuartzOpen(false); s.onSendToQuartz('vfxhub'); }}>Open In VFXHub</button>
+                    </div>
+                )}
+            </div>
 
             <div className="vs-toolbar-spacer" />
 
+            <ToolbarBtn title="Themes" onClick={s.onThemes} icon={<PaletteIcon size={15} />} />
+            <ToolbarBtn title="Preferences" onClick={s.onPreferences} icon={<PencilIcon size={15} />} />
+            <ToolbarBtn title="Settings" onClick={s.onSettings} icon={<SettingsIcon size={15} />} />
             <ToolbarBtn title="About" onClick={s.onAbout} icon={<HelpIcon size={15} />} />
         </div>
     );

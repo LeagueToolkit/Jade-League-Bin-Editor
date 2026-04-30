@@ -18,7 +18,7 @@ import {
     applyUIFont, injectFontFaces, fontFileNameToFamily,
     ensurePresetFontLoaded, preloadBundledFonts,
 } from '../lib/themeApplicator';
-import { PaletteIcon, SparklesIcon, ImageIcon, SettingsIcon, TypeIcon, FontSourceWindowsIcon, FontSourceBundledIcon, FontSourceImportedIcon } from './Icons';
+import { PaletteIcon, SparklesIcon, ImageIcon, SettingsIcon, TypeIcon, LayoutIcon, FontSourceWindowsIcon, FontSourceBundledIcon, FontSourceImportedIcon } from './Icons';
 import './ThemesDialog.css';
 
 interface ThemesDialogProps {
@@ -37,19 +37,39 @@ interface CustomTheme {
     selectedTab: string;
 }
 
-type NavSection = 'ui' | 'syntax' | 'background' | 'options' | 'fonts';
+type NavSection = 'ui' | 'syntax' | 'background' | 'workspace' | 'options' | 'fonts';
+
+type ShellVariant = 'vscode' | 'word' | 'visualstudio';
 
 const NAV_ITEMS: { id: NavSection; label: string; icon: React.ReactNode }[] = [
     { id: 'ui',         label: 'UI Theme',      icon: <PaletteIcon size={15} />  },
     { id: 'syntax',     label: 'Syntax Colors',  icon: <SparklesIcon size={15} /> },
     { id: 'background', label: 'Background',     icon: <ImageIcon size={15} />   },
     { id: 'fonts',      label: 'Fonts',          icon: <TypeIcon size={15} />    },
+    { id: 'workspace',  label: 'Workspace',      icon: <LayoutIcon size={15} />  },
     { id: 'options',    label: 'Options',         icon: <SettingsIcon size={15} />},
 ];
 
 
+// Persisted in localStorage so the active tab survives a shell switch.
+// (Switching shells in the Workspace tab re-mounts the whole dialog
+// because SharedDialogs lives inside the shell, so without this the
+// user would get bounced back to the UI Theme tab on every change.)
+const ACTIVE_SECTION_KEY = 'jade-themes-active-section';
+const VALID_SECTIONS: NavSection[] = ['ui', 'syntax', 'background', 'fonts', 'workspace', 'options'];
+function readSavedSection(): NavSection {
+    try {
+        const raw = window.localStorage.getItem(ACTIVE_SECTION_KEY);
+        if (raw && (VALID_SECTIONS as string[]).includes(raw)) return raw as NavSection;
+    } catch { /* ignore */ }
+    return 'ui';
+}
+
 export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: ThemesDialogProps) {
-    const [activeSection, setActiveSection] = useState<NavSection>('ui');
+    const [activeSection, setActiveSection] = useState<NavSection>(readSavedSection);
+    useEffect(() => {
+        try { window.localStorage.setItem(ACTIVE_SECTION_KEY, activeSection); } catch { /* ignore */ }
+    }, [activeSection]);
     const [selectedTheme, setSelectedTheme] = useState('Default');
     const [selectedSyntaxTheme, setSelectedSyntaxTheme] = useState('Default');
     const [useCustomTheme, setUseCustomTheme] = useState(false);
@@ -92,6 +112,10 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
     const [editorFont, setEditorFont] = useState('');
     const [fontsReady, setFontsReady] = useState(false);
     const fontFileInputRef = useRef<HTMLInputElement | null>(null);
+
+    // Workspace shell state — moved here from SettingsDialog so all
+    // visual layout choices (theme + chrome) live in one place.
+    const [shellVariant, setShellVariant] = useState<ShellVariant>('vscode');
 
     const [useCustomSyntaxTheme, setUseCustomSyntaxTheme] = useState(false);
     const [customSyntax, setCustomSyntax] = useState<SyntaxColors>({
@@ -374,6 +398,13 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
             })));
             setUiFont(await invoke<string>('get_preference',     { key: 'UIFont',    defaultValue: '' }));
             setEditorFont(await invoke<string>('get_preference', { key: 'EditorFont', defaultValue: '' }));
+
+            const shellRaw = await invoke<string>('get_preference', { key: 'UiShell', defaultValue: 'vscode' });
+            setShellVariant(
+                shellRaw === 'word' ? 'word'
+                    : shellRaw === 'visualstudio' ? 'visualstudio'
+                    : 'vscode'
+            );
 
             if (useCustomSyntaxRaw === 'true') {
                 const csKeyword  = await invoke<string>('get_preference', { key: 'CustomSyntax_Keyword',  defaultValue: '#569CD6' });
@@ -1132,6 +1163,71 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
         );
     };
 
+    const handleShellChange = async (variant: ShellVariant) => {
+        if (variant === shellVariant) return;
+        setShellVariant(variant);
+        try { await invoke('set_preference', { key: 'UiShell', value: variant }); }
+        catch (e) { console.error(e); }
+        window.dispatchEvent(new CustomEvent('shell-changed', { detail: variant }));
+    };
+
+    const renderWorkspace = () => (
+        <>
+            <h2 className="themes-section-title">Workspace Layout</h2>
+            <p className="themes-section-subtitle">
+                Choose how the app is organized: title bar, tab strip, menus or ribbon,
+                and where tool panels dock. Switching takes effect right away.
+            </p>
+
+            <div className="engine-switcher" style={{ marginTop: 12 }}>
+                <button
+                    className={`engine-option${shellVariant === 'vscode' ? ' active' : ''}`}
+                    onClick={() => handleShellChange('vscode')}
+                >
+                    Classic
+                </button>
+                <button
+                    className="engine-option"
+                    disabled
+                    title="The Document layout is still under construction and isn't ready to ship."
+                    aria-disabled
+                    style={{ opacity: 0.45, cursor: 'not-allowed' }}
+                >
+                    Document <span style={{ fontSize: 10, opacity: 0.7, marginLeft: 4 }}>(coming soon)</span>
+                </button>
+                <button
+                    className={`engine-option${shellVariant === 'visualstudio' ? ' active' : ''}`}
+                    onClick={() => handleShellChange('visualstudio')}
+                >
+                    Studio
+                </button>
+            </div>
+
+            <div className="engine-description">
+                {shellVariant === 'vscode' && (
+                    <>
+                        <span className="engine-description-title">Classic</span>
+                        <p className="engine-description-text">
+                            The original Jade layout. Tabs across the top, a menu bar
+                            with File / Edit / Tools, and floating popovers for Find,
+                            Replace, General Editing, and Particle Editing.
+                        </p>
+                    </>
+                )}
+                {shellVariant === 'visualstudio' && (
+                    <>
+                        <span className="engine-description-title">Studio</span>
+                        <p className="engine-description-text">
+                            Menu bar plus a quick action toolbar. Tool windows dock to
+                            the sides and bottom of the editor with resizable splits,
+                            and they remember their position between sessions.
+                        </p>
+                    </>
+                )}
+            </div>
+        </>
+    );
+
     const renderOptions = () => (
         <>
             <h2 className="themes-section-title">Display Options</h2>
@@ -1383,6 +1479,7 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
         syntax:     renderSyntax,
         background: renderBackground,
         fonts:      renderFonts,
+        workspace:  renderWorkspace,
         options:    renderOptions,
     };
 

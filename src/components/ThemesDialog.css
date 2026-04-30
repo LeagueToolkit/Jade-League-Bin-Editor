@@ -1076,6 +1076,80 @@
     min-width: 80px;
 }
 
+/* ── Workspace shell switcher (moved from SettingsDialog so the
+   Themes dialog can host all visual layout choices in one place) ── */
+.themes-dialog .engine-switcher {
+    display: flex;
+    padding: 3px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: var(--border-radius);
+    margin-bottom: 16px;
+    gap: 3px;
+}
+
+.themes-dialog .engine-option {
+    flex: 1;
+    padding: 10px 16px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: calc(var(--border-radius) - 2px);
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    position: relative;
+    letter-spacing: 0.01em;
+}
+
+.themes-dialog .engine-option:hover:not(.active):not(:disabled) {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-color);
+    border-color: rgba(255, 255, 255, 0.06);
+}
+
+.themes-dialog .engine-option.active {
+    background: linear-gradient(
+        135deg,
+        var(--jade-accent, var(--status-bar-bg)),
+        color-mix(in srgb, var(--jade-accent, var(--status-bar-bg)) 75%, white)
+    );
+    color: #ffffff;
+    border-color: transparent;
+    box-shadow:
+        0 2px 8px color-mix(in srgb, var(--jade-accent, var(--status-bar-bg)) 35%, transparent),
+        0 0 0 1px color-mix(in srgb, var(--jade-accent, var(--status-bar-bg)) 20%, transparent);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.themes-dialog .engine-option:disabled {
+    pointer-events: none;
+}
+
+.themes-dialog .engine-description {
+    padding: 16px 18px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: var(--border-radius);
+    margin-bottom: 12px;
+}
+
+.themes-dialog .engine-description-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--jade-accent-text, var(--text-color));
+    display: block;
+    margin-bottom: 6px;
+}
+
+.themes-dialog .engine-description-text {
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.55;
+    margin: 0;
+}
+
 /* ── Responsive ── */
 @media (max-width: 700px) {
     .themes-body {

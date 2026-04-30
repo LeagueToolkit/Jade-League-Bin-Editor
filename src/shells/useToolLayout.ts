@@ -1,11 +1,38 @@
 import { useCallback, useEffect, useState } from 'react';
 
-export type ToolId = 'general' | 'particle' | 'markdown' | 'find';
-export type DockSide = 'left' | 'right' | 'bottom';
+export type ToolId = 'general' | 'particle' | 'markdown' | 'find' | 'texture' | 'material';
+/**
+ * Each cardinal side has two parallel lanes — `outer` sits at the
+ * workspace edge, `inner` sits between outer and the editor. Tools in
+ * different lanes appear side-by-side; tools in the same lane stack as
+ * tabs. This matches Visual Studio's "between middle and edge"
+ * docking depth.
+ */
+export type DockSide =
+    | 'outer-left'   | 'inner-left'
+    | 'outer-right'  | 'inner-right'
+    | 'outer-top'    | 'inner-top'
+    | 'outer-bottom' | 'inner-bottom';
+
+export const DOCK_SIDES: DockSide[] = [
+    'outer-left', 'inner-left',
+    'outer-right', 'inner-right',
+    'outer-top', 'inner-top',
+    'outer-bottom', 'inner-bottom',
+];
+
+/**
+ * Each dock side can host up to two stacked sub-groups (`0` is the
+ * primary slot, `1` is the split slot). Tools in the same group tab
+ * together; tools in different groups stack along the side's
+ * perpendicular axis with a resizable divider.
+ */
+export type DockGroup = 0 | 1;
 
 export interface DockPlacement {
     kind: 'dock';
     side: DockSide;
+    group: DockGroup;
 }
 
 export interface FloatPlacement {
@@ -21,16 +48,31 @@ export type ToolPlacement = DockPlacement | FloatPlacement;
 export type LayoutMap = Record<ToolId, ToolPlacement>;
 
 const DEFAULT_LAYOUT: LayoutMap = {
-    general:  { kind: 'dock', side: 'right' },
-    particle: { kind: 'dock', side: 'right' },
-    markdown: { kind: 'dock', side: 'right' },
-    find:     { kind: 'dock', side: 'bottom' },
+    general:  { kind: 'dock', side: 'inner-right',  group: 0 },
+    particle: { kind: 'dock', side: 'inner-right',  group: 0 },
+    markdown: { kind: 'dock', side: 'inner-right',  group: 0 },
+    find:     { kind: 'dock', side: 'inner-bottom', group: 0 },
+    texture:  { kind: 'dock', side: 'inner-right',  group: 0 },
+    material: { kind: 'dock', side: 'inner-right',  group: 0 },
 };
 
 const STORAGE_KEY = 'vs-tool-layout';
 
 function isDockSide(v: unknown): v is DockSide {
-    return v === 'left' || v === 'right' || v === 'bottom';
+    return typeof v === 'string' && DOCK_SIDES.includes(v as DockSide);
+}
+
+/** Migration helper: the old layout used 'left' / 'right' / 'top' /
+ *  'bottom' without the lane prefix. Treat those as the inner lane. */
+const LEGACY_SIDE_MAP: Record<string, DockSide> = {
+    left:   'inner-left',
+    right:  'inner-right',
+    top:    'inner-top',
+    bottom: 'inner-bottom',
+};
+
+function asGroup(v: unknown): DockGroup {
+    return v === 1 ? 1 : 0;
 }
 
 function readStoredLayout(): LayoutMap {
@@ -44,7 +86,10 @@ function readStoredLayout(): LayoutMap {
             const entry = parsed[id] as any;
             if (!entry) continue;
             if (entry.kind === 'dock' && isDockSide(entry.side)) {
-                out[id] = { kind: 'dock', side: entry.side };
+                out[id] = { kind: 'dock', side: entry.side, group: asGroup(entry.group) };
+            } else if (entry.kind === 'dock' && typeof entry.side === 'string' && LEGACY_SIDE_MAP[entry.side]) {
+                // Migration: pre-lane layouts had bare 'left' / 'right' etc.
+                out[id] = { kind: 'dock', side: LEGACY_SIDE_MAP[entry.side], group: asGroup(entry.group) };
             } else if (entry.kind === 'float'
                 && Number.isFinite(entry.x) && Number.isFinite(entry.y)
                 && Number.isFinite(entry.width) && Number.isFinite(entry.height)) {
@@ -55,8 +100,9 @@ function readStoredLayout(): LayoutMap {
                     height: Math.max(160, entry.height),
                 };
             } else if (isDockSide(entry.side)) {
-                // Migration: legacy v1 entries used a bare { side } shape.
-                out[id] = { kind: 'dock', side: entry.side };
+                out[id] = { kind: 'dock', side: entry.side, group: asGroup(entry.group) };
+            } else if (typeof entry.side === 'string' && LEGACY_SIDE_MAP[entry.side]) {
+                out[id] = { kind: 'dock', side: LEGACY_SIDE_MAP[entry.side], group: asGroup(entry.group) };
             }
         }
         return out;
@@ -77,11 +123,50 @@ export function useToolLayout() {
         try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(layout)); } catch { /* quota / private mode */ }
     }, [layout]);
 
-    const dockTool = useCallback((id: ToolId, side: DockSide) => {
+    const dockTool = useCallback((id: ToolId, side: DockSide, group: DockGroup = 0) => {
         setLayout(prev => {
             const cur = prev[id];
-            if (cur.kind === 'dock' && cur.side === side) return prev;
-            return { ...prev, [id]: { kind: 'dock', side } };
+            if (cur.kind === 'dock' && cur.side === side && cur.group === group) return prev;
+            return { ...prev, [id]: { kind: 'dock', side, group } };
+        });
+    }, []);
+
+    /** Click action for the dock pane's split icon.
+     *
+     *  - **Single group, multi-tab** → SPLIT: move `id` (the pane's
+     *    active tool) into the side's other group.
+     *  - **Two groups populated** → MERGE: collapse everything on this
+     *    side back into group 0. Group 0 wins the merge regardless of
+     *    which pane was clicked, so the priority slot's active tab is
+     *    what stays selected after the useEffect rebalances. */
+    const splitTool = useCallback((id: ToolId) => {
+        setLayout(prev => {
+            const cur = prev[id];
+            if (cur.kind !== 'dock') return prev;
+            const side = cur.side;
+
+            const sideTools = (Object.keys(prev) as ToolId[]).filter(t => {
+                const p = prev[t];
+                return p.kind === 'dock' && p.side === side;
+            });
+            const hasG0 = sideTools.some(t => (prev[t] as DockPlacement).group === 0);
+            const hasG1 = sideTools.some(t => (prev[t] as DockPlacement).group === 1);
+
+            if (hasG0 && hasG1) {
+                // 2-group state — merge everything back into group 0.
+                const next = { ...prev };
+                sideTools.forEach(t => {
+                    const p = prev[t] as DockPlacement;
+                    if (p.group !== 0) {
+                        next[t] = { kind: 'dock', side, group: 0 };
+                    }
+                });
+                return next;
+            }
+
+            // 1-group state — split: move `id` to the other group.
+            const otherGroup: DockGroup = cur.group === 0 ? 1 : 0;
+            return { ...prev, [id]: { kind: 'dock', side, group: otherGroup } };
         });
     }, []);
 
@@ -124,5 +209,5 @@ export function useToolLayout() {
         setLayout(DEFAULT_LAYOUT);
     }, []);
 
-    return { layout, dockTool, floatTool, moveFloatingTool, resizeFloatingTool, resetLayout };
+    return { layout, dockTool, splitTool, floatTool, moveFloatingTool, resizeFloatingTool, resetLayout };
 }

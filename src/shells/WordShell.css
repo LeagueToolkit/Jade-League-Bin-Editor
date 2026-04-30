@@ -51,24 +51,24 @@
 .word-shell .ribbon-tab.active {
     background: var(--selected-tab-bg, #1e1e1e);
     color: #ffffff;
-    border-bottom: 2px solid var(--accent, #007acc);
+    border-bottom: 2px solid var(--jade-accent, #007acc);
     margin-bottom: -1px;
 }
 
 .word-shell .ribbon-tab-file {
-    background: var(--accent, #007acc);
+    background: var(--jade-accent, #007acc);
     color: #ffffff;
     font-weight: 600;
 }
 
 .word-shell .ribbon-tab-file:hover {
-    background: var(--accent-hover, #1f8ad9);
+    background: var(--jade-accent-hover, #1f8ad9);
 }
 
 .word-shell .ribbon-tab-file.active {
-    background: var(--accent, #007acc);
+    background: var(--jade-accent, #007acc);
     color: #ffffff;
-    border-bottom: 2px solid var(--accent, #007acc);
+    border-bottom: 2px solid var(--jade-accent, #007acc);
 }
 
 /* The ribbon body — holds groups of buttons. */
@@ -150,9 +150,9 @@
 }
 
 .word-shell .ribbon-btn.active {
-    background: var(--accent, #007acc);
+    background: var(--jade-accent, #007acc);
     color: #ffffff;
-    border-color: var(--accent, #007acc);
+    border-color: var(--jade-accent, #007acc);
 }
 
 .word-shell .ribbon-btn:disabled {

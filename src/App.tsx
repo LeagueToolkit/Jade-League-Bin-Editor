@@ -2,6 +2,7 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { ask as askDialog } from "@tauri-apps/plugin-dialog";
 import { Monaco } from "@monaco-editor/react";
 import type * as MonacoType from 'monaco-editor';
 import { registerRitobinLanguage, registerRitobinTheme, RITOBIN_LANGUAGE_ID, RITOBIN_THEME_ID } from "./lib/ritobinLanguage";
@@ -146,6 +147,8 @@ function App() {
   const [replaceWidgetOpen, setReplaceWidgetOpen] = useState(false);
   const [generalEditPanelOpen, setGeneralEditPanelOpen] = useState(false);
   const [particlePanelOpen, setParticlePanelOpen] = useState(false);
+  const [textureInsertOpen, setTextureInsertOpen] = useState(false);
+  const [materialInsertOpen, setMaterialInsertOpen] = useState(false);
   const [mdPreviewContent, setMdPreviewContent] = useState<string>('');
   const [showNewFileDialog, setShowNewFileDialog] = useState(false);
   const [particleDialogOpen, setParticleDialogOpen] = useState(false);
@@ -395,11 +398,27 @@ function App() {
     invoke<string>('get_preference', { key: 'SyntaxChecking', defaultValue: 'True' })
       .then(val => { syntaxCheckingEnabled.current = val !== 'False'; })
       .catch(() => {});
-    invoke<string>('get_preference', { key: 'UiShell', defaultValue: 'vscode' })
-      .then(val => {
+    // One-time migration: nudge existing users onto the new Studio
+    // layout so they get to try it. Stamped via the `StudioMigrated`
+    // pref, so subsequent launches respect whatever they end up
+    // choosing. No-op for first-run installs (defaults are vscode →
+    // we still flip to visualstudio and stamp).
+    (async () => {
+      try {
+        const migrated = await invoke<string>('get_preference', { key: 'StudioMigrated', defaultValue: 'False' });
+        if (migrated !== 'True') {
+          await invoke('set_preference', { key: 'UiShell', value: 'visualstudio' });
+          await invoke('set_preference', { key: 'StudioMigrated', value: 'True' });
+          setShellVariant('visualstudio');
+          window.dispatchEvent(new CustomEvent('shell-changed', { detail: 'visualstudio' }));
+          return;
+        }
+        const val = await invoke<string>('get_preference', { key: 'UiShell', defaultValue: 'vscode' });
         if (val === 'word' || val === 'visualstudio' || val === 'vscode') setShellVariant(val);
-      })
-      .catch(() => {});
+      } catch (e) {
+        console.warn('[App] shell load / migration failed:', e);
+      }
+    })();
 
     const handleCigaretteModeChanged = (e: Event) => {
       setCigaretteMode((e as CustomEvent<boolean>).detail);
@@ -1437,7 +1456,7 @@ function App() {
     // Model switching and view state restoration handled by the activeTabId useEffect
   }, [activeTabId, saveCurrentViewState]);
 
-  const handleTabClose = useCallback((tabId: string) => {
+  const handleTabClose = useCallback(async (tabId: string) => {
     const recentlyRejected = lastRejectedTabCloseRef.current;
     if (
       recentlyRejected &&
@@ -1450,9 +1469,16 @@ function App() {
     const tabToClose = tabs.find(t => t.id === tabId);
     if (!tabToClose) return;
 
-    // Confirm if modified
+    // Prompt BEFORE removing the tab. The previous code used the
+    // browser's `window.confirm()`, which Tauri's webview treats as
+    // non-blocking — the close proceeded and the popup appeared as a
+    // useless artifact. Tauri's `ask` is a real native modal.
     if (tabToClose.isModified) {
-      if (!confirm(`"${tabToClose.fileName}" has unsaved changes. Close anyway?`)) {
+      const proceed = await askDialog(
+        `"${tabToClose.fileName}" has unsaved changes. Close anyway?`,
+        { title: 'Unsaved changes', kind: 'warning' },
+      );
+      if (!proceed) {
         lastRejectedTabCloseRef.current = { tabId, at: Date.now() };
         return;
       }
@@ -1460,14 +1486,14 @@ function App() {
       // If this bin had library texture inserts during the session, the
       // user is now discarding those references. Offer to also delete
       // the texture folders we dropped into the mod so they don't
-      // linger as orphan files. Cleanup is fire-and-forget so the close
-      // handler can stay synchronous.
+      // linger as orphan files.
       if (tabToClose.filePath) {
         const inserts = jadelibInsertsRef.current.get(tabToClose.filePath);
         if (inserts && inserts.length > 0) {
           const summary = inserts.map(e => `assets/jadelib/${e.id}/`).join('\n  ');
-          const shouldDelete = confirm(
-            `You inserted library material textures in this session:\n\n  ${summary}\n\nRemove these folders from your mod too?`
+          const shouldDelete = await askDialog(
+            `You inserted library material textures in this session:\n\n  ${summary}\n\nRemove these folders from your mod too?`,
+            { title: 'Discard library inserts?', kind: 'warning' },
           );
           if (shouldDelete) {
             for (const e of inserts) {
@@ -1590,12 +1616,14 @@ function App() {
   }, [tabs, activeTabId]);
   handleTabCloseRef.current = handleTabClose;
 
-  const handleTabCloseAll = useCallback(() => {
+  const handleTabCloseAll = useCallback(async () => {
     const hasModified = tabs.some(t => t.isModified);
     if (hasModified) {
-      if (!confirm('Some tabs have unsaved changes. Close all anyway?')) {
-        return;
-      }
+      const proceed = await askDialog(
+        'Some tabs have unsaved changes. Close all anyway?',
+        { title: 'Unsaved changes', kind: 'warning' },
+      );
+      if (!proceed) return;
     }
 
     viewStatesRef.current.clear();
@@ -2751,6 +2779,209 @@ function App() {
     }, 500) as unknown as number;
   };
 
+  // ── Session restore ──
+  // VSCode-style "your unsaved work survives a crash" feature. We
+  // persist a JSON snapshot of open editor tabs (incl. unsaved content)
+  // to the preferences file on a debounced timer, and on next launch
+  // offer to restore it if there's anything worth recovering.
+  const SESSION_PREF_KEY = 'LastSession';
+  interface SessionSnapshotTab {
+    fileName: string;
+    filePath: string | null;
+    content?: string;
+    isModified: boolean;
+  }
+  interface SessionSnapshot {
+    savedAt: number;
+    activeFilePath: string | null;
+    activeFileName: string | null;
+    tabs: SessionSnapshotTab[];
+  }
+  const sessionSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sessionRestoredRef = useRef(false);
+
+  const writeSessionNow = useCallback(() => {
+    const live = tabsRef.current.filter(t => isEditorTab(t));
+    if (live.length === 0) {
+      // No editor tabs open — clear any stale snapshot so the next
+      // launch doesn't prompt for nothing.
+      invoke('set_preference', { key: SESSION_PREF_KEY, value: '' }).catch(() => { });
+      return;
+    }
+    const activeTab = live.find(t => t.id === activeTabIdRef.current) ?? null;
+    const snapshot: SessionSnapshot = {
+      savedAt: Date.now(),
+      activeFilePath: activeTab?.filePath ?? null,
+      activeFileName: activeTab?.fileName ?? null,
+      tabs: live.map(t => {
+        const model = monacoModelsRef.current.get(t.id);
+        const content = (model && !model.isDisposed()) ? model.getValue() : (t.content ?? '');
+        const includeContent = !!t.isModified || !t.filePath;
+        return {
+          fileName: t.fileName,
+          filePath: t.filePath ?? null,
+          isModified: !!t.isModified,
+          ...(includeContent ? { content } : {}),
+        };
+      }),
+    };
+    invoke('set_preference', {
+      key: SESSION_PREF_KEY,
+      value: JSON.stringify(snapshot),
+    }).catch(() => { });
+  }, [isEditorTab]);
+
+  const scheduleSessionSave = useCallback(() => {
+    if (sessionSaveTimerRef.current) clearTimeout(sessionSaveTimerRef.current);
+    sessionSaveTimerRef.current = setTimeout(writeSessionNow, 1500);
+  }, [writeSessionNow]);
+
+  // Save snapshot whenever tabs / active tab change. Content changes
+  // also trigger this via a call inside `handleEditorChange`.
+  useEffect(() => {
+    scheduleSessionSave();
+  }, [tabs, activeTabId, scheduleSessionSave]);
+
+  // On startup: if the previous session had unsaved work, prompt the
+  // user to restore. Runs exactly once. Only restores tabs that had
+  // dirty/untitled content — clean tabs would just reopen with stale
+  // content from the snapshot, which is worse than the user reopening
+  // them through the Recent Files menu.
+  useEffect(() => {
+    if (sessionRestoredRef.current) return;
+    sessionRestoredRef.current = true;
+
+    (async () => {
+      let raw: string;
+      try {
+        raw = await invoke<string>('get_preference', {
+          key: SESSION_PREF_KEY,
+          defaultValue: '',
+        });
+      } catch {
+        return;
+      }
+      if (!raw) return;
+
+      let snapshot: SessionSnapshot;
+      try { snapshot = JSON.parse(raw); } catch { return; }
+      if (!snapshot || !Array.isArray(snapshot.tabs)) return;
+
+      // Only the tabs that actually carried unsaved work — saved/clean
+      // tabs aren't worth a prompt.
+      const restorable = snapshot.tabs.filter(t => typeof t.content === 'string');
+      if (restorable.length === 0) return;
+
+      const proceed = await askDialog(
+        `Restore your previous session? Jade will reopen ${restorable.length} unsaved file${restorable.length === 1 ? '' : 's'} from your last run.`,
+        { title: 'Restore previous session', kind: 'info' },
+      );
+      if (!proceed) {
+        // User declined — clear the snapshot so we don't ask again.
+        invoke('set_preference', { key: SESSION_PREF_KEY, value: '' }).catch(() => { });
+        return;
+      }
+
+      const restored: EditorTab[] = restorable.map(t => {
+        const content = t.content ?? '';
+        const tab = createTab(t.filePath ?? null, content);
+        if (t.fileName) tab.fileName = t.fileName;
+        // Restored work is unsaved by definition — even if filePath
+        // exists, the snapshot may diverge from disk.
+        tab.isModified = true;
+        return tab;
+      });
+
+      setTabs(prev => [...prev, ...restored]);
+
+      // Pick whichever restored tab matches the snapshot's last-active
+      // selection; fall back to the first restored tab.
+      const matchActive =
+        (snapshot.activeFilePath
+          ? restored.find(t => t.filePath === snapshot.activeFilePath)
+          : restored.find(t => t.fileName === snapshot.activeFileName))
+        ?? restored[0];
+      if (matchActive) setActiveTabId(matchActive.id);
+    })();
+  }, []);
+
+  // ── VS-shell tool open-state persistence ──
+  // The VS shell is the only shell that treats find / general edit /
+  // particle / texture / material panels as dockable tool windows.
+  // Persisting their open state per-shell means a VS user gets back
+  // the panes they had docked after a restart, without those flags
+  // bleeding into Word / VSCode where they'd render as full-screen
+  // overlays and stack weirdly.
+  const VS_OPEN_TOOLS_KEY = 'vs-shell-open-tools';
+  const vsToolsRestoredRef = useRef(false);
+
+  // Save snapshot whenever an open flag changes — but only while the
+  // VS shell is active. Switching shells (which closes everything via
+  // the next effect) won't clobber the snapshot because shellVariant
+  // has already changed by the time those state updates flush.
+  useEffect(() => {
+    if (shellVariant !== 'visualstudio') return;
+    if (!vsToolsRestoredRef.current) return;     // skip the first render before restore runs
+    const snapshot = {
+      find:     findWidgetOpen,
+      replace:  replaceWidgetOpen,
+      general:  generalEditPanelOpen,
+      particle: particlePanelOpen,
+      texture:  textureInsertOpen,
+      material: materialInsertOpen,
+    };
+    try {
+      window.localStorage.setItem(VS_OPEN_TOOLS_KEY, JSON.stringify(snapshot));
+    } catch { /* quota / private mode */ }
+  }, [
+    shellVariant,
+    findWidgetOpen, replaceWidgetOpen,
+    generalEditPanelOpen, particlePanelOpen,
+    textureInsertOpen, materialInsertOpen,
+  ]);
+
+  // Restore tool open state when the VS shell becomes active (app
+  // start or when user switches into VS). Runs each time `shellVariant`
+  // resolves to 'visualstudio' — but the read is cheap and the writes
+  // are no-ops if values match.
+  useEffect(() => {
+    if (shellVariant !== 'visualstudio') {
+      vsToolsRestoredRef.current = false;
+      return;
+    }
+    try {
+      const raw = window.localStorage.getItem(VS_OPEN_TOOLS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<{
+          find: boolean; replace: boolean; general: boolean;
+          particle: boolean; texture: boolean; material: boolean;
+        }>;
+        if (parsed.find)     setFindWidgetOpen(true);
+        if (parsed.replace)  setReplaceWidgetOpen(true);
+        if (parsed.general)  setGeneralEditPanelOpen(true);
+        if (parsed.particle) setParticlePanelOpen(true);
+        if (parsed.texture)  setTextureInsertOpen(true);
+        if (parsed.material) setMaterialInsertOpen(true);
+      }
+    } catch { /* parse failure — ignore */ }
+    vsToolsRestoredRef.current = true;
+  }, [shellVariant]);
+
+  // Switching AWAY from VS closes every dockable tool flag. Word and
+  // VSCode shells don't render these as docked panes — leaving them
+  // open would either stack as floating overlays (Word) or do nothing
+  // useful (VSCode). The persistence effect above sees `shellVariant !==
+  // 'visualstudio'` and skips, so the snapshot survives the switch.
+  useEffect(() => {
+    if (shellVariant === 'visualstudio') return;
+    setFindWidgetOpen(false);
+    setReplaceWidgetOpen(false);
+    setGeneralEditPanelOpen(false);
+    setParticlePanelOpen(false);
+    setTextureInsertOpen(false);
+    setMaterialInsertOpen(false);
+  }, [shellVariant]);
+
   // Cleanup subscriptions only on component unmount (editor no longer remounts on tab change)
   useEffect(() => {
     return () => {
@@ -2826,6 +3057,8 @@ function App() {
       syntaxCheckDebounce.current = setTimeout(() => {
         if (editorRef.current) updateSyntaxMarkers(editorRef.current);
       }, 500);
+      // Snapshot the session so unsaved changes survive a crash.
+      scheduleSessionSave();
     }
   };
 
@@ -3281,6 +3514,18 @@ function App() {
       editorRef.current?.trigger('keyboard', 'closeFindWidget', null);
     }
     setGeneralEditPanelOpen(!generalEditPanelOpen);
+  };
+
+  // VS-shell-only toggles for the lightweight material-override insert
+  // tool windows. The classic in-General-Edit-panel modal still works
+  // unchanged — these are the dockable panel variants.
+  const handleTextureInsert = () => {
+    if (!isEditorTab(activeTabRef.current)) return;
+    setTextureInsertOpen(prev => !prev);
+  };
+  const handleMaterialInsert = () => {
+    if (!isEditorTab(activeTabRef.current)) return;
+    setMaterialInsertOpen(prev => !prev);
   };
 
   // Handle content change from General Edit Panel (undoable, preserves cursor/scroll)
@@ -3881,7 +4126,9 @@ function App() {
     // -- Panel state
     findWidgetOpen, replaceWidgetOpen,
     generalEditPanelOpen, particlePanelOpen,
+    textureInsertOpen, materialInsertOpen,
     setGeneralEditPanelOpen, setParticlePanelOpen,
+    setTextureInsertOpen, setMaterialInsertOpen,
 
     // -- Recent files
     recentFiles, openFileDisabled, openFileFromPath,
@@ -3898,6 +4145,7 @@ function App() {
 
     // -- Tools
     onGeneralEdit: handleGeneralEdit, onParticlePanel: handleParticlePanel,
+    onTextureInsert: handleTextureInsert, onMaterialInsert: handleMaterialInsert,
     onParticleEditor: handleParticleEditor, onMaterialLibrary: handleMaterialLibrary,
     onThemes: handleThemes, onSettings: handleSettings,
     onPreferences: handlePreferences, onAbout: handleAbout,
@@ -3906,7 +4154,7 @@ function App() {
     // -- Editor wiring
     editorTheme, editorFontFamily, perfPrefs, bigFileLines: BIG_FILE_LINES,
     handleBeforeMount, handleEditorMount, handleEditorChange,
-    editorRef,
+    editorRef, monacoModelsRef, monacoRef,
 
     // -- Edit panel callbacks
     handleGeneralEditContentChange, handleScrollToLine,

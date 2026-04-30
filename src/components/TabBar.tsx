@@ -45,6 +45,9 @@ interface TabBarProps {
     onTabClose: (tabId: string) => void;
     onTabCloseAll: () => void;
     onTabPin: (tabId: string) => void;
+    /** Pointer-down on a tab — used by the VS shell to start a tab-drag
+     *  gesture for popping the document out into a floating window. */
+    onTabPointerDown?: (e: React.PointerEvent, tabId: string) => void;
 }
 
 export default function TabBar({
@@ -54,6 +57,7 @@ export default function TabBar({
     onTabClose,
     onTabCloseAll,
     onTabPin,
+    onTabPointerDown,
 }: TabBarProps) {
     const tabsContainerRef = useRef<HTMLDivElement>(null);
 
@@ -121,6 +125,7 @@ export default function TabBar({
                         className={`tab ${activeTabId === tab.id ? 'active' : ''} ${tab.isModified ? 'modified' : ''} ${tab.isPinned ? 'pinned' : ''}`}
                         onClick={() => onTabSelect(tab.id)}
                         onMouseDown={(e) => handleMouseDown(e, tab.id)}
+                        onPointerDown={(e) => onTabPointerDown?.(e, tab.id)}
                         onContextMenu={(e) => handleContextMenu(e, tab)}
                         onDoubleClick={(e) => handleDoubleClick(e, tab.id)}
                         title={tab.filePath || tab.fileName}
@@ -137,7 +142,7 @@ export default function TabBar({
                                 onClick={(e) => handleCloseClick(e, tab.id)}
                                 title="Close (Middle Click)"
                             >
-                                <CloseIcon size={16} />
+                                <CloseIcon size={16} strokeWidth={2.5} />
                             </button>
                         )}
                     </div>

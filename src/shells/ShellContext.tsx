@@ -73,8 +73,16 @@ export interface ShellContextValue {
     replaceWidgetOpen: boolean;
     generalEditPanelOpen: boolean;
     particlePanelOpen: boolean;
+    /** Material-override insert tool windows. The classic
+     *  modal-flavored `MaterialOverrideDialog` still opens from the
+     *  General Edit panel; these flags drive the lighter dockable
+     *  panel variants used by the VS shell. */
+    textureInsertOpen: boolean;
+    materialInsertOpen: boolean;
     setGeneralEditPanelOpen: (open: boolean) => void;
     setParticlePanelOpen: (open: boolean) => void;
+    setTextureInsertOpen: (open: boolean) => void;
+    setMaterialInsertOpen: (open: boolean) => void;
 
     // -- Recent files
     recentFiles: string[];
@@ -104,6 +112,9 @@ export interface ShellContextValue {
     onParticlePanel: () => void;
     onParticleEditor: () => void;
     onMaterialLibrary: () => void;
+    /** Toggles for the dockable material-override insert tools. */
+    onTextureInsert: () => void;
+    onMaterialInsert: () => void;
     onThemes: () => void;
     onSettings: () => void;
     onPreferences: () => void;
@@ -121,6 +132,12 @@ export interface ShellContextValue {
     handleEditorMount: (editor: MonacoType.editor.IStandaloneCodeEditor) => void;
     handleEditorChange: (value: string | undefined) => void;
     editorRef: React.MutableRefObject<MonacoType.editor.IStandaloneCodeEditor | null>;
+    /** Monaco's text-model registry, keyed by tab id. Pop-out document
+     *  windows mount their own Monaco editor against the same model so
+     *  edits stay in sync with the main editor (Monaco allows a single
+     *  model to be attached to multiple editors). */
+    monacoModelsRef: React.MutableRefObject<Map<string, MonacoType.editor.ITextModel>>;
+    monacoRef: React.MutableRefObject<Monaco | null>;
 
     // -- Edit panel callbacks
     handleGeneralEditContentChange: (newContent: string) => void;
