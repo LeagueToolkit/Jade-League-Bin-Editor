@@ -72,7 +72,13 @@
 }
 
 .md-preview-body code {
-    font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+    /* `ui-monospace` first so we use the OS native monospace (Cascadia Mono
+       on Win11, Menlo on macOS) which always has full box-drawing coverage
+       at consistent widths. Ligatures off — they merge characters like
+       "->" into single glyphs that throw off ASCII alignment. */
+    font-family: ui-monospace, 'Cascadia Mono', 'Consolas', 'Courier New', monospace;
+    font-variant-ligatures: none;
+    font-feature-settings: "liga" 0, "calt" 0;
     font-size: 0.9em;
     background: rgba(255, 255, 255, 0.06);
     padding: 1px 6px;
@@ -86,13 +92,20 @@
     padding: 12px 14px;
     overflow-x: auto;
     margin: 0.8em 0;
+    /* Preserve whitespace AND don't wrap — wrapping breaks ASCII art
+       and aligned tables that the user expects to render verbatim. */
+    white-space: pre;
+    tab-size: 4;
+    -moz-tab-size: 4;
 }
 .md-preview-body pre code {
     background: transparent;
     padding: 0;
     border-radius: 0;
-    font-size: 0.85em;
-    line-height: 1.55;
+    font-size: 0.88em;
+    line-height: 1.655;
+    display: block;
+    white-space: pre;
 }
 
 .md-preview-body hr {

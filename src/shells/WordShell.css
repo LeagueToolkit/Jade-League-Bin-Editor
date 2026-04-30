@@ -76,9 +76,9 @@
     display: flex;
     align-items: stretch;
     gap: 0;
-    padding: 6px 8px;
+    padding: 2px 8px;
     background: var(--selected-tab-bg, #1e1e1e);
-    min-height: 88px;
+    min-height: 68px;
     overflow-x: auto;
 }
 
@@ -119,9 +119,7 @@
     font-size: 10px;
     color: #969696;
     text-align: center;
-    margin-top: 4px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+    margin-top: 2px;
     user-select: none;
 }
 
@@ -163,14 +161,18 @@
 .word-shell .ribbon-btn-lg {
     flex-direction: column;
     align-items: center;
-    padding: 6px 10px;
+    justify-content: flex-end;
+    padding: 2px 10px 4px;
     min-width: 56px;
-    min-height: 56px;
+    min-height: 60px;
     gap: 2px;
 }
 
 .word-shell .ribbon-btn-lg .ribbon-btn-icon {
-    margin-bottom: 2px;
+    margin-bottom: 0;
+    flex: 1;
+    display: inline-flex;
+    align-items: center;
 }
 
 .word-shell .ribbon-btn-icon {
@@ -186,6 +188,467 @@
 
 .word-shell .ribbon-btn-lg .ribbon-btn-label {
     font-size: 11px;
+}
+
+/* Vertical stack used by the Word-style Clipboard group: small Cut /
+   Copy buttons sitting to the right of the big Paste button. Buttons
+   inside a stack lose their padding-y to compress. */
+.word-shell .ribbon-stack {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: center;
+    gap: 2px;
+    height: 100%;
+}
+
+.word-shell .ribbon-stack .ribbon-btn {
+    padding: 2px 6px;
+    min-height: 20px;
+    justify-content: flex-start;
+}
+
+/* Sharpen the Word-shell ribbon icons — the round line caps and joins
+   the rest of the app uses for navigation icons feel too soft for a
+   utility ribbon. Forcing miter joins + butt caps gives crisp corners
+   and pixel-aligned tips, matching MS Office's sharper look. */
+.word-shell .ribbon-btn .ribbon-btn-icon svg,
+.word-shell .ribbon-btn .ribbon-btn-icon svg * {
+    stroke-linecap: butt;
+    stroke-linejoin: miter;
+}
+
+/* ── Syntax group (Word's "Font" group, repurposed) ── */
+.word-shell .ribbon-group-syntax {
+    min-width: 260px;
+}
+.word-shell .ribbon-group-syntax-content {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 3px;
+    padding: 2px 0;
+}
+.word-shell .syntax-row {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    flex-wrap: nowrap;
+    height: 22px;
+    width: 100%;
+}
+
+.word-shell .ribbon-syntax-scheme-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 6px 2px 8px;
+    height: 22px;
+    min-width: 130px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid #3e3e42;
+    border-radius: 3px;
+    color: var(--text-color, #cccccc);
+    font-size: 11px;
+    cursor: pointer;
+}
+.word-shell .ribbon-syntax-scheme-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+.word-shell .ribbon-syntax-scheme-btn-lh {
+    min-width: 160px;
+}
+.word-shell .ribbon-syntax-scheme-label {
+    flex: 1;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Portal-rendered dropdown — escapes the ribbon's overflow:auto so the
+   list overlays the editor instead of stretching the ribbon. Capped at
+   ~6 items tall with internal scroll for longer lists. */
+.ribbon-dropdown-portal {
+    position: fixed;
+    z-index: 1500;
+    max-height: 220px;
+    overflow-y: auto;
+    background: var(--tab-bg, #2d2d30);
+    border: 1px solid var(--border-color, #3e3e42);
+    border-radius: 4px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    padding: 4px 0;
+}
+.ribbon-dropdown-portal::-webkit-scrollbar { width: 8px; }
+.ribbon-dropdown-portal::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+}
+.ribbon-dropdown-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: 0;
+    color: var(--text-color, #cccccc);
+    font-size: 12px;
+    padding: 6px 12px;
+    cursor: pointer;
+}
+.ribbon-dropdown-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+.ribbon-dropdown-item.active {
+    background: var(--jade-accent, #007acc);
+    color: #ffffff;
+}
+[data-ui-mode="modern"] .ribbon-dropdown-portal {
+    background: var(--modern-glass-bg);
+    backdrop-filter: var(--modern-blur);
+    -webkit-backdrop-filter: var(--modern-blur);
+    border-color: var(--modern-glass-border);
+}
+[data-ui-mode="modern"] .ribbon-dropdown-item:hover {
+    background: var(--modern-accent-10);
+}
+[data-ui-mode="modern"] .ribbon-dropdown-item.active {
+    background: var(--modern-accent);
+}
+
+.word-shell .ribbon-fontsize {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+.word-shell .ribbon-fontsize-input {
+    width: 36px;
+    height: 22px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid #3e3e42;
+    border-radius: 3px;
+    color: var(--text-color, #cccccc);
+    font-size: 12px;
+    text-align: center;
+    padding: 0 2px;
+    font-family: inherit;
+    box-sizing: border-box;
+}
+.word-shell .ribbon-fontsize-input:hover,
+.word-shell .ribbon-fontsize-input:focus {
+    background: rgba(255, 255, 255, 0.08);
+    outline: none;
+    border-color: var(--jade-accent, #007acc);
+}
+
+/* A↑ / A↓ font-size step buttons — Word-style "increase/decrease font
+   size" pair sitting horizontally next to the font-size input. They
+   share the same outline as the dropdown / input so the row reads as
+   one continuous strip of controls. */
+.word-shell .ribbon-fontsize-tweak {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
+    width: 28px;
+    height: 22px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid #3e3e42;
+    border-radius: 3px;
+    color: var(--text-color, #cccccc);
+    cursor: pointer;
+    padding: 0;
+    box-sizing: border-box;
+}
+.word-shell .ribbon-fontsize-tweak:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+.word-shell .ribbon-fontsize-tweak-letter {
+    font-size: 12px;
+    line-height: 1;
+}
+.word-shell .ribbon-fontsize-tweak-arrow {
+    font-size: 7px;
+    line-height: 1;
+}
+
+/* Reset button next to the line-spacing dropdown — circular refresh
+   glyph, same outline as the rest of the row's controls. */
+.word-shell .ribbon-syntax-reset {
+    width: 24px;
+    height: 22px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid #3e3e42;
+    border-radius: 3px;
+    color: var(--text-color, #cccccc);
+    font-size: 13px;
+    cursor: pointer;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    flex-shrink: 0;
+}
+.word-shell .ribbon-syntax-reset:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+/* Row-2 line-spacing dropdown grows to fill the row, so its right
+   edge lines up with the right edge of the font-size A▼ button on
+   row 1. The reset button hugs the right side. */
+.word-shell .ribbon-syntax-scheme-btn-lh {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: 100%;
+}
+
+.word-shell .ribbon-syntax-swatches {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+.word-shell .ribbon-syntax-swatch {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 22px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    cursor: pointer;
+    padding: 0;
+}
+.word-shell .ribbon-syntax-swatch:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: #3e3e42;
+}
+.word-shell .ribbon-syntax-swatch-label {
+    font-size: 9px;
+    color: var(--text-color, #cccccc);
+    line-height: 1;
+}
+.word-shell .ribbon-syntax-swatch-color {
+    display: block;
+    width: 18px;
+    height: 4px;
+    border-radius: 1px;
+    margin-bottom: 2px;
+}
+
+/* ── Fonts gallery (Word's "Styles" gallery, repurposed) ──
+   Seven fixed cells visible at all times + a chevron button on the
+   right that opens a portal popup with every font and an Import
+   button. No horizontal scroll on the visible row — the popup is the
+   "see more" affordance, matching the Word styles gallery layout. */
+.word-shell .ribbon-group-fonts {
+    flex: 0 1 auto;
+}
+.word-shell .ribbon-group-fonts-content {
+    padding: 0;
+    flex-direction: row;
+    align-items: stretch;
+    gap: 0;
+}
+.word-shell .ribbon-fonts-grid {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    height: 56px;
+    border: 1px solid #3e3e42;
+    border-right: 0;
+    border-radius: 3px 0 0 3px;
+    background: rgba(255, 255, 255, 0.02);
+}
+.word-shell .ribbon-fonts-cell {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 84px;
+    height: 100%;
+    padding: 0 6px;
+    background: transparent;
+    border: 0;
+    border-right: 1px solid rgba(255, 255, 255, 0.06);
+    color: var(--text-color, #cccccc);
+    font-size: 13px;
+    cursor: pointer;
+    overflow: hidden;
+}
+.word-shell .ribbon-fonts-cell:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+.word-shell .ribbon-fonts-cell.active {
+    background: var(--jade-accent, #007acc);
+    color: #ffffff;
+}
+.word-shell .ribbon-fonts-cell-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+}
+
+/* Chevron-down "more fonts" button hugging the right edge of the grid.
+   Same outline as the cells so the whole row reads as one strip. */
+.word-shell .ribbon-fonts-more {
+    width: 22px;
+    height: 56px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid #3e3e42;
+    border-radius: 0 3px 3px 0;
+    color: var(--text-color, #cccccc);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    flex-shrink: 0;
+}
+.word-shell .ribbon-fonts-more:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+/* Portal-rendered "more fonts" popup — modeled on Word's expanded
+   styles gallery. A wrapping grid of cells (each shown in its own
+   typeface, same dimensions as the ribbon's visible cells), then a
+   divider and a stack of left-aligned action items. */
+.ribbon-fonts-more-popup {
+    position: fixed;
+    z-index: 1500;
+    width: 720px;
+    max-height: 520px;
+    overflow-y: auto;
+    background: var(--tab-bg, #2d2d30);
+    border: 1px solid var(--border-color, #3e3e42);
+    border-radius: 4px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.ribbon-fonts-more-popup::-webkit-scrollbar { width: 8px; }
+.ribbon-fonts-more-popup::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+}
+
+.ribbon-fonts-popup-grid {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 4px;
+}
+.ribbon-fonts-popup-cell {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 60px;
+    padding: 4px 6px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid #3e3e42;
+    border-radius: 3px;
+    color: var(--text-color, #cccccc);
+    font-size: 13px;
+    cursor: pointer;
+    overflow: hidden;
+}
+.ribbon-fonts-popup-cell:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: var(--jade-accent, #007acc);
+}
+.ribbon-fonts-popup-cell.active {
+    background: var(--jade-accent, #007acc);
+    color: #ffffff;
+    border-color: var(--jade-accent, #007acc);
+}
+.ribbon-fonts-popup-cell-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+    text-align: center;
+}
+
+.ribbon-fonts-popup-divider {
+    height: 1px;
+    background: var(--border-color, #3e3e42);
+    margin: 4px 0;
+}
+
+.ribbon-fonts-popup-actions {
+    display: flex;
+    flex-direction: column;
+    padding: 0 4px 4px;
+}
+.ribbon-fonts-popup-action {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: 0;
+    color: var(--text-color, #cccccc);
+    font-size: 12px;
+    padding: 8px 8px;
+    cursor: pointer;
+    border-radius: 3px;
+}
+.ribbon-fonts-popup-action:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+.ribbon-fonts-popup-action-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 22px;
+    color: var(--jade-accent, #007acc);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: -0.5px;
+}
+
+[data-ui-mode="modern"] .ribbon-fonts-more-popup {
+    background: var(--modern-glass-bg);
+    backdrop-filter: var(--modern-blur);
+    -webkit-backdrop-filter: var(--modern-blur);
+    border-color: var(--modern-glass-border);
+}
+[data-ui-mode="modern"] .ribbon-fonts-popup-cell:hover {
+    border-color: var(--modern-accent);
+}
+[data-ui-mode="modern"] .ribbon-fonts-popup-cell.active {
+    background: var(--modern-accent);
+    border-color: var(--modern-accent);
+}
+[data-ui-mode="modern"] .ribbon-fonts-popup-action:hover {
+    background: var(--modern-accent-10);
+}
+[data-ui-mode="modern"] .ribbon-fonts-popup-action-icon {
+    color: var(--modern-accent);
+}
+
+/* Modern UI tweaks for the new groups. */
+[data-ui-mode="modern"] .word-shell .ribbon-syntax-scheme-btn,
+[data-ui-mode="modern"] .word-shell .ribbon-fontsize-input {
+    background: var(--modern-accent-10);
+    border-color: var(--modern-glass-border);
+}
+[data-ui-mode="modern"] .word-shell .ribbon-syntax-scheme-pop {
+    background: var(--modern-glass-bg);
+    backdrop-filter: var(--modern-blur);
+    -webkit-backdrop-filter: var(--modern-blur);
+    border-color: var(--modern-glass-border);
+}
+[data-ui-mode="modern"] .word-shell .ribbon-fonts-gallery {
+    background: var(--modern-accent-10);
+    border-color: var(--modern-glass-border);
+}
+[data-ui-mode="modern"] .word-shell .ribbon-fonts-cell.active {
+    background: var(--modern-accent);
 }
 
 /* Recent-files popup attached to the File ribbon button. */
@@ -236,12 +699,14 @@
 /* ───────────────────── Body: side pane + page ─────────────────────
    The "body" is the area between TabBar and StatusBar. Contains an
    optional left task pane and the document/editor area to its right.
-*/
+   The "desk" color outside the page comes from a slightly darker
+   variant of the active theme so it tracks the user's palette instead
+   of always being gray. */
 .word-shell .word-shell-body {
     flex: 1;
     display: flex;
     overflow: hidden;
-    background: #1a1a1a;
+    background: color-mix(in srgb, var(--window-bg, #1a1a1a) 80%, #000);
     min-height: 0;
 }
 
@@ -254,22 +719,35 @@
     overflow: hidden;
 }
 
-/* Page-style editor surface — gray "desk" background, the editor
-   itself sits in a centered column with breathing room around it. */
+/* Page-style editor surface — themed "desk" background framing a
+   fake "page" rectangle that spans the full vertical area. The page
+   itself isn't scrollable; Monaco scrolls text inside it like a
+   regular code editor. Desk margin is on the sides only so the page
+   reads as a sheet with no top/bottom bleed.  */
 .word-shell .editor-container {
-    background: #1a1a1a;
+    background: color-mix(in srgb, var(--window-bg, #1a1a1a) 80%, #000);
     box-sizing: border-box;
-    padding: 18px max(32px, calc((100% - 920px) / 2));
+    /* Side desk only — page spans top to bottom of the editor area.  */
+    padding: 0 max(56px, calc((100% - 940px) / 2));
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
 }
 
-/* Subtle inner card — Monaco fills the inner box; a thin shadow gives
-   the "page" feel. We let the editor's own theme drive the page color. */
-.word-shell .editor-container .monaco-editor,
-.word-shell .editor-container .monaco-editor-background,
-.word-shell .editor-container .monaco-editor .overflow-guard {
-    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04),
-                0 8px 24px rgba(0, 0, 0, 0.45);
+
+/* The editor IS the page now — fills the desk vertically. Soft
+   side-shadows give the "sheet on a desk" feel without rounded
+   corners (which look weird against the top/bottom edges). */
+.word-shell .editor-container .monaco-editor {
+    flex: 1 1 auto;
+    height: 100%;
+    box-shadow:
+        -1px 0 0 color-mix(in srgb, var(--text-color, #cccccc) 14%, transparent),
+        1px 0 0 color-mix(in srgb, var(--text-color, #cccccc) 14%, transparent),
+        -16px 0 24px -16px rgba(0, 0, 0, 0.5),
+        16px 0 24px -16px rgba(0, 0, 0, 0.5);
 }
+
 
 /* ───────────────────── Left side pane ───────────────────── */
 .word-shell .word-side-pane {
@@ -285,3 +763,78 @@
 
 /* (Shared dock + find pane + docked panel styles are in Dock.css —
    imported by both WordShell and VisualStudioShell.) */
+
+
+/* ───────────────────── Modern UI overrides ─────────────────────
+   When [data-ui-mode="modern"] is set on <html>, the shell switches to
+   the same translucent glass surface the VS shell and dialogs use.
+   We swap solid backgrounds for the modern-* tokens, drop hard hex
+   borders for glass borders, and add backdrop-filter so the desk
+   image bleeds through. */
+[data-ui-mode="modern"] .word-shell .ribbon-bar {
+    background: var(--modern-title-bg) !important;
+    backdrop-filter: var(--modern-blur);
+    -webkit-backdrop-filter: var(--modern-blur);
+    border-bottom: 1px solid var(--modern-glass-border) !important;
+}
+
+[data-ui-mode="modern"] .word-shell .ribbon-tabs {
+    background: transparent;
+    border-bottom: 1px solid var(--modern-glass-border);
+}
+
+[data-ui-mode="modern"] .word-shell .ribbon-tab:hover {
+    background: var(--modern-accent-10);
+}
+
+[data-ui-mode="modern"] .word-shell .ribbon-tab.active {
+    background: var(--modern-glass-bg);
+    border-bottom-color: var(--modern-accent);
+}
+
+[data-ui-mode="modern"] .word-shell .ribbon-tab-file,
+[data-ui-mode="modern"] .word-shell .ribbon-tab-file.active {
+    background: var(--modern-accent);
+}
+
+[data-ui-mode="modern"] .word-shell .ribbon-tab-file:hover {
+    background: var(--modern-accent-hover, var(--modern-accent));
+}
+
+[data-ui-mode="modern"] .word-shell .ribbon-body {
+    background: var(--modern-glass-bg);
+    backdrop-filter: var(--modern-blur);
+    -webkit-backdrop-filter: var(--modern-blur);
+}
+
+[data-ui-mode="modern"] .word-shell .ribbon-group {
+    border-right-color: var(--modern-glass-border);
+}
+
+[data-ui-mode="modern"] .word-shell .ribbon-btn:hover:not(:disabled) {
+    background: var(--modern-accent-10);
+    border-color: var(--modern-glass-border);
+}
+
+[data-ui-mode="modern"] .word-shell .ribbon-btn.active {
+    background: var(--modern-accent);
+    border-color: var(--modern-accent);
+}
+
+[data-ui-mode="modern"] .word-shell .ribbon-recent-pop {
+    background: var(--modern-glass-bg);
+    backdrop-filter: var(--modern-blur);
+    -webkit-backdrop-filter: var(--modern-blur);
+    border-color: var(--modern-glass-border);
+}
+
+[data-ui-mode="modern"] .word-shell .ribbon-recent-item:hover:not(:disabled) {
+    background: var(--modern-accent-10);
+}
+
+[data-ui-mode="modern"] .word-shell .word-side-pane {
+    background: var(--modern-glass-bg);
+    backdrop-filter: var(--modern-blur);
+    -webkit-backdrop-filter: var(--modern-blur);
+    border-right-color: var(--modern-glass-border);
+}

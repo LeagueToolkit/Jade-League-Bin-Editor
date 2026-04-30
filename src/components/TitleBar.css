@@ -203,3 +203,160 @@
   font-size: 16px;
   font-weight: 300;
 }
+
+/* ─────────────── Word-style title-bar cluster ───────────────
+   When `wordMode` is set, the left section ditches the static
+   "Jade - BIN Editor" label for a Save/Undo/Redo cluster plus a
+   tabs dropdown that hosts the active document name. The Word
+   shell uses this in place of the regular tab strip. */
+.title-word-cluster {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  -webkit-app-region: no-drag;
+  height: 100%;
+}
+
+.title-word-cluster .toolbar-btn {
+  width: 24px;
+  height: 22px;
+  border-color: transparent;
+  margin: 0 1px;
+}
+
+.title-word-cluster .toolbar-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.title-word-tabs {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-left: 6px;
+}
+
+.title-word-tabs-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--border-radius, 3px);
+  color: var(--title-bar-name-fg);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 0.12s, border-color 0.12s;
+  max-width: 320px;
+}
+
+.title-word-tabs-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: #3e3e42;
+}
+
+.title-word-tabs-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.title-word-tabs-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 280px;
+}
+
+.title-word-tabs-popup {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 260px;
+  max-height: 360px;
+  overflow-y: auto;
+  background: var(--tab-bg, #2d2d30);
+  border: 1px solid var(--border-color, #3e3e42);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  z-index: 200;
+  padding: 4px 0;
+}
+
+.title-word-tab-row {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 4px 0 10px;
+}
+
+.title-word-tab-row.active {
+  background: var(--selected-tab-bg, #1e1e1e);
+}
+
+.title-word-tab-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.title-word-tab-name {
+  flex: 1;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  color: var(--text-color, #cccccc);
+  font-size: 12px;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.title-word-tab-text {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.title-word-tab-dot {
+  color: var(--text-color, #cccccc);
+  margin-left: 2px;
+}
+
+.title-word-tab-close {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+  color: var(--text-color, #cccccc);
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+.title-word-tab-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  opacity: 1;
+}
+
+/* Modern UI overrides for the Word title cluster. */
+[data-ui-mode="modern"] .title-word-tabs-btn:hover:not(:disabled) {
+  background: var(--modern-accent-10);
+  border-color: var(--modern-glass-border);
+}
+
+[data-ui-mode="modern"] .title-word-tabs-popup {
+  background: var(--modern-glass-bg);
+  backdrop-filter: var(--modern-blur);
+  -webkit-backdrop-filter: var(--modern-blur);
+  border-color: var(--modern-glass-border);
+}
+
+[data-ui-mode="modern"] .title-word-tab-row.active {
+  background: var(--modern-accent-10);
+}

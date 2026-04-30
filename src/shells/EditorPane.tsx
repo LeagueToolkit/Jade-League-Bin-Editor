@@ -1,4 +1,6 @@
 import Editor from '@monaco-editor/react';
+import { useEffect, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { RITOBIN_LANGUAGE_ID } from '../lib/ritobinLanguage';
 import { getFileExtension } from '../lib/binOperations';
 import { getFileName } from '../components/TabBar';
@@ -25,6 +27,39 @@ export default function EditorPane() {
     const isVS = shellVariant === 'visualstudio';
     const stripChrome = isWord; // VS keeps full Monaco chrome — only Word goes "page" mode
     const dockPanels = isWord || isVS;
+
+    // User-tunable editor font size + line height. Loaded from prefs on
+    // mount and live-updated via custom events the ribbon's Syntax group
+    // dispatches. lineHeight=0 means "use Monaco's default", anything
+    // else is a multiplier of the font size.
+    const [editorFontSize, setEditorFontSize] = useState(14);
+    const [editorLineHeight, setEditorLineHeight] = useState(0);
+    useEffect(() => {
+        let cancelled = false;
+        invoke<string>('get_preference', { key: 'EditorFontSize', defaultValue: '14' })
+            .then(v => { if (!cancelled) setEditorFontSize(Number(v) || 14); })
+            .catch(() => {});
+        invoke<string>('get_preference', { key: 'EditorLineHeight', defaultValue: '0' })
+            .then(v => { if (!cancelled) setEditorLineHeight(Number(v) || 0); })
+            .catch(() => {});
+        const onSize = (e: Event) => {
+            const n = Number((e as CustomEvent).detail);
+            if (Number.isFinite(n)) setEditorFontSize(n);
+        };
+        const onLh = (e: Event) => {
+            const n = Number((e as CustomEvent).detail);
+            if (Number.isFinite(n)) setEditorLineHeight(n);
+        };
+        window.addEventListener('jade-editor-fontsize-changed', onSize);
+        window.addEventListener('jade-editor-lineheight-changed', onLh);
+        return () => {
+            cancelled = true;
+            window.removeEventListener('jade-editor-fontsize-changed', onSize);
+            window.removeEventListener('jade-editor-lineheight-changed', onLh);
+        };
+    }, []);
+
+
 
     return (
         <>
@@ -95,16 +130,22 @@ export default function EditorPane() {
                             minimap: { enabled: stripChrome ? false : isOn(s.perfPrefs.minimap) },
                             glyphMargin: !stripChrome,
                             lineNumbers: (stripChrome ? 'off' : 'on') as 'off' | 'on',
-                            lineDecorationsWidth: stripChrome ? 0 : undefined,
-                            fontSize: stripChrome ? 13 : 14,
+                            fontSize: editorFontSize,
+                            // 0 == Monaco default. Non-zero is a multiplier
+                            // of fontSize, converted to pixels for Monaco.
+                            lineHeight: editorLineHeight > 0
+                                ? Math.round(editorFontSize * editorLineHeight)
+                                : 0,
                             scrollBeyondLastLine: false,
                             automaticLayout: true,
-                            // Word shell deliberately uses a sans-serif "document" font.
-                            // Other shells honor the user-selected editor font; when
-                            // none is set, leave fontFamily undefined so Monaco falls
-                            // back to its own default (matches pre-PR behavior).
+                            // Word shell defaults to a sans-serif "document"
+                            // stack but yields to a user-selected font when
+                            // one is set, so swapping fonts from the ribbon
+                            // gallery actually changes Monaco's typeface.
+                            // Other shells just honor the user override (or
+                            // leave undefined to keep Monaco's own default).
                             fontFamily: stripChrome
-                                ? "'Aptos', 'Calibri', 'Segoe UI', system-ui, sans-serif"
+                                ? (s.editorFontFamily || "'Aptos', 'Calibri', 'Segoe UI', system-ui, sans-serif")
                                 : (s.editorFontFamily || undefined),
                             lineNumbersMinChars: stripChrome ? 0 : 6,
                             fixedOverflowWidgets: true,
@@ -124,13 +165,33 @@ export default function EditorPane() {
                             hideCursorInOverviewRuler: stripChrome,
                             scrollbar: stripChrome
                                 ? {
+                                    // Word mode: the page rectangle is now
+                                    // decorative (full height of the desk,
+                                    // not scrollable on its own). Text
+                                    // scrolls inside Monaco like a normal
+                                    // code editor.
                                     vertical: 'auto' as const,
                                     horizontal: 'hidden' as const,
-                                    verticalScrollbarSize: 10,
                                     useShadows: false,
                                 }
                                 : undefined,
+                            // Word shell: inner top/bottom padding so the first
+                            // and last lines don't hug the page edge. Combined
+                            // with the desk margin in .editor-container this
+                            // gives the standard Word ~1in page-margin feel.
+                            padding: stripChrome ? { top: 56, bottom: 112 } : undefined,
+                            // Pad the left side of every line so text starts
+                            // ~1in from the page edge — Monaco has no native
+                            // horizontal padding option, so we abuse the line
+                            // decorations gutter instead.
+                            lineDecorationsWidth: stripChrome ? 64 : undefined,
+                            // Wrap earlier in Word mode so text leaves a
+                            // right margin that visually mirrors the 64px
+                            // left page margin (lineDecorationsWidth above).
+                            // 'bounded' keeps the viewport edge as a hard
+                            // backstop on narrow windows.
                             wordWrap: (stripChrome ? 'on' : 'off') as 'on' | 'off',
+                            wordWrapColumn: stripChrome ? 64 : undefined,
                             find: {
                                 addExtraSpaceOnTop: false,
                                 autoFindInSelection: 'never' as const,

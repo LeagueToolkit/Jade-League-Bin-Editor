@@ -1187,13 +1187,11 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
                     Classic
                 </button>
                 <button
-                    className="engine-option"
-                    disabled
-                    title="The Document layout is still under construction and isn't ready to ship."
-                    aria-disabled
-                    style={{ opacity: 0.45, cursor: 'not-allowed' }}
+                    className={`engine-option${shellVariant === 'word' ? ' active' : ''}`}
+                    onClick={() => handleShellChange('word')}
+                    title="Very unfinished — Classic or Studio recommended"
                 >
-                    Document <span style={{ fontSize: 10, opacity: 0.7, marginLeft: 4 }}>(coming soon)</span>
+                    Document <span style={{ fontSize: 10, opacity: 0.7, marginLeft: 4 }}>(experimental)</span>
                 </button>
                 <button
                     className={`engine-option${shellVariant === 'visualstudio' ? ' active' : ''}`}
@@ -1221,6 +1219,20 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
                             Menu bar plus a quick action toolbar. Tool windows dock to
                             the sides and bottom of the editor with resizable splits,
                             and they remember their position between sessions.
+                        </p>
+                    </>
+                )}
+                {shellVariant === 'word' && (
+                    <>
+                        <span className="engine-description-title">Document (experimental)</span>
+                        <p className="engine-description-text">
+                            A Word-style ribbon layout — title bar with Save / Undo /
+                            Redo, a tabs dropdown in place of the tab strip, and a
+                            ribbon for Home / Insert / View / Help. <strong>Very
+                            unfinished.</strong> The ribbon groups, the page rectangle,
+                            and several tool wirings are still being built. For day-to-day
+                            work use Classic or Studio. Document is here for previewing
+                            and feedback only.
                         </p>
                     </>
                 )}

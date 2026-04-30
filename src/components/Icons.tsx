@@ -455,6 +455,65 @@ export function ChevronRightIcon({ size = 16, className = '' }: IconProps) {
     );
 }
 
+// Dropdown caret
+export function ChevronDownIcon({ size = 16, className = '', strokeWidth = 2 }: IconProps) {
+    return (
+        <svg
+            width={size}
+            height={size}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={className}
+        >
+            <path d="m6 9 6 6 6-6" />
+        </svg>
+    );
+}
+
+// Undo arrow
+export function UndoIcon({ size = 16, className = '', strokeWidth = 1.8 }: IconProps) {
+    return (
+        <svg
+            width={size}
+            height={size}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={className}
+        >
+            <path d="M3 7v6h6" />
+            <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6.7 3L3 13" />
+        </svg>
+    );
+}
+
+// Redo arrow
+export function RedoIcon({ size = 16, className = '', strokeWidth = 1.8 }: IconProps) {
+    return (
+        <svg
+            width={size}
+            height={size}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={className}
+        >
+            <path d="M21 7v6h-6" />
+            <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6.7 3L21 13" />
+        </svg>
+    );
+}
+
 // Converter / swap arrows icon
 export function TypeIcon({ size = 16, className = '' }: IconProps) {
     return (
@@ -537,6 +596,291 @@ export function LayoutIcon({ size = 16, className = '' }: IconProps) {
         >
             <rect x="3" y="3" width="18" height="18" rx="2" />
             <line x1="9" y1="3" x2="9" y2="21" />
+        </svg>
+    );
+}
+
+// ───────────────────────── Ribbon icons ─────────────────────────
+// All sized for both 16 (small inline buttons) and 28+ (large ribbon
+// buttons). Drawn outlined in currentColor so they pick up the active
+// theme just like the existing icons.
+
+// Clipboard with a sheet of paper in front — Word-style Paste icon.
+// Soft outlined style matching the other ribbon icons, but composed
+// of two layered shapes (clipboard back + page foreground) so it
+// reads as "paste from clipboard" rather than just "clipboard".
+export function ClipboardIcon({ size = 16, className = '', strokeWidth = 1.6 }: IconProps) {
+    return (
+        <svg
+            width={size}
+            height={size}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={className}
+        >
+            {/* Clipboard back panel */}
+            <rect x="4" y="5" width="11" height="14" rx="1.5" />
+            {/* Clip at top */}
+            <rect x="7" y="3" width="5" height="3" rx="0.8" />
+            {/* Sheet of paper in front, offset down-right */}
+            <rect x="9" y="9" width="11" height="12" rx="1.5" fill="var(--editor-bg, #1e1e1e)" />
+            {/* Text lines on the front sheet */}
+            <line x1="11.5" y1="13" x2="17.5" y2="13" />
+            <line x1="11.5" y1="16" x2="17.5" y2="16" />
+            <line x1="11.5" y1="19" x2="15" y2="19" />
+        </svg>
+    );
+}
+
+// Scissors — Cut.
+export function CutIcon({ size = 16, className = '', strokeWidth = 1.6 }: IconProps) {
+    return (
+        <svg
+            width={size}
+            height={size}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={className}
+        >
+            <circle cx="6" cy="6" r="3" />
+            <circle cx="6" cy="18" r="3" />
+            <line x1="20" y1="4" x2="8.12" y2="15.88" />
+            <line x1="14.47" y1="14.48" x2="20" y2="20" />
+            <line x1="8.12" y1="8.12" x2="12" y2="12" />
+        </svg>
+    );
+}
+
+// Two overlapping rectangles — Copy.
+export function CopyIcon({ size = 16, className = '', strokeWidth = 1.6 }: IconProps) {
+    return (
+        <svg
+            width={size}
+            height={size}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={className}
+        >
+            <rect x="9" y="9" width="11" height="11" rx="1.5" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+        </svg>
+    );
+}
+
+// Page with a corner fold — File / New.
+export function FileIcon({ size = 16, className = '', strokeWidth = 1.6 }: IconProps) {
+    return (
+        <svg
+            width={size}
+            height={size}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={className}
+        >
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
+        </svg>
+    );
+}
+
+// Folder being opened — Open.
+export function FolderOpenIcon({ size = 16, className = '', strokeWidth = 1.6 }: IconProps) {
+    return (
+        <svg
+            width={size}
+            height={size}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={className}
+        >
+            <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v2H3z" />
+            <path d="M3 11h17l-2 8a2 2 0 0 1-2 1.5H5a2 2 0 0 1-2-2z" />
+        </svg>
+    );
+}
+
+// Clock — Recent.
+export function ClockIcon({ size = 16, className = '', strokeWidth = 1.6 }: IconProps) {
+    return (
+        <svg
+            width={size}
+            height={size}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={className}
+        >
+            <circle cx="12" cy="12" r="9" />
+            <polyline points="12 7 12 12 15.5 14" />
+        </svg>
+    );
+}
+
+// Floppy disk — Save. Sharp body, label area, slot at top.
+export function SaveIcon({ size = 16, className = '' }: IconProps) {
+    return (
+        <svg width={size} height={size} viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="butt" strokeLinejoin="miter">
+            <path d="M3 3h15l3 3v15H3z" fill="currentColor" fillOpacity="0.35" />
+            <path d="M3 3h15l3 3v15H3z" />
+            <rect x="7" y="3" width="9" height="5" fill="currentColor" />
+            <rect x="13" y="4" width="2" height="3" fill="var(--editor-bg, #1e1e1e)" stroke="none" />
+            <rect x="6" y="13" width="12" height="8" fill="none" />
+        </svg>
+    );
+}
+
+// Save with a small "as" arrow tail — Save As.
+export function SaveAsIcon({ size = 16, className = '', strokeWidth = 1.6 }: IconProps) {
+    return (
+        <svg
+            width={size}
+            height={size}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={className}
+        >
+            <path d="M19 14V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h9" />
+            <polyline points="15 21 15 13 7 13 7 21" />
+            <polyline points="7 3 7 8 13 8" />
+            <path d="M17 17l3 3-3 3" />
+            <line x1="20" y1="20" x2="14" y2="20" />
+        </svg>
+    );
+}
+
+// Document with stacked lines — Open Log.
+export function LogIcon({ size = 16, className = '', strokeWidth = 1.6 }: IconProps) {
+    return (
+        <svg
+            width={size}
+            height={size}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={className}
+        >
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
+            <line x1="8" y1="13" x2="16" y2="13" />
+            <line x1="8" y1="16" x2="16" y2="16" />
+            <line x1="8" y1="19" x2="13" y2="19" />
+        </svg>
+    );
+}
+
+// Power / Exit.
+export function PowerIcon({ size = 16, className = '', strokeWidth = 1.6 }: IconProps) {
+    return (
+        <svg
+            width={size}
+            height={size}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={className}
+        >
+            <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
+            <line x1="12" y1="2" x2="12" y2="12" />
+        </svg>
+    );
+}
+
+// Stack of three lines bracketed — Select All.
+export function SelectAllIcon({ size = 16, className = '', strokeWidth = 1.6 }: IconProps) {
+    return (
+        <svg
+            width={size}
+            height={size}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={className}
+        >
+            <rect x="3" y="3" width="18" height="18" rx="2" strokeDasharray="4 3" />
+            <line x1="7" y1="9" x2="17" y2="9" />
+            <line x1="7" y1="13" x2="17" y2="13" />
+            <line x1="7" y1="17" x2="13" y2="17" />
+        </svg>
+    );
+}
+
+// Diff / split squares — Compare Files.
+export function DiffIcon({ size = 16, className = '', strokeWidth = 1.6 }: IconProps) {
+    return (
+        <svg
+            width={size}
+            height={size}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={className}
+        >
+            <rect x="3" y="3" width="8" height="18" rx="1.5" />
+            <rect x="13" y="3" width="8" height="18" rx="1.5" />
+            <line x1="5" y1="8" x2="9" y2="8" />
+            <line x1="5" y1="12" x2="9" y2="12" />
+            <line x1="15" y1="8" x2="19" y2="8" />
+            <line x1="15" y1="12" x2="19" y2="12" />
+            <line x1="15" y1="16" x2="19" y2="16" />
+        </svg>
+    );
+}
+
+// Arrow pointing into a tray — Send To.
+export function SendIcon({ size = 16, className = '', strokeWidth = 1.6 }: IconProps) {
+    return (
+        <svg
+            width={size}
+            height={size}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={className}
+        >
+            <path d="M3 12l18-9-4 18-5-7-9-2z" />
+            <line x1="12" y1="14" x2="17" y2="3" />
         </svg>
     );
 }

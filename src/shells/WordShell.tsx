@@ -1,5 +1,4 @@
 import TitleBar from '../components/TitleBar';
-import TabBar from '../components/TabBar';
 import StatusBar from '../components/StatusBar';
 import WelcomeScreen from '../components/WelcomeScreen';
 import RibbonBar from './RibbonBar';
@@ -33,20 +32,17 @@ export default function WordShell() {
                 onParticleEditor={s.onParticleEditor}
                 onMaterialLibrary={s.onMaterialLibrary}
                 onQuartzAction={s.onSendToQuartz}
+                wordMode
+                tabs={s.tabs}
+                activeTabId={s.activeTabId}
+                onTabSelect={s.onTabSelect}
+                onTabClose={s.onTabClose}
+                onSave={s.onSave}
+                onUndo={s.onUndo}
+                onRedo={s.onRedo}
             />
 
             <RibbonBar />
-
-            {s.tabs.length > 0 && (
-                <TabBar
-                    tabs={s.tabs}
-                    activeTabId={s.activeTabId}
-                    onTabSelect={s.onTabSelect}
-                    onTabClose={s.onTabClose}
-                    onTabCloseAll={s.onTabCloseAll}
-                    onTabPin={s.onTabPin}
-                />
-            )}
 
             <div className="word-shell-body">
                 <WordSidePane />
