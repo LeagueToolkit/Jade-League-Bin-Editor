@@ -114,53 +114,42 @@
     opacity: 0.9;
 }
 
+/* Modified indicator — single dot on the LEFT of the file name. */
 .tab-modified-dot {
     color: var(--text-color, #e8e8e8);
-    font-size: 8px;
-    margin-right: 2px;
+    font-size: 14px;
+    line-height: 1;
+    margin-right: 6px;
+    flex-shrink: 0;
 }
 
+/* Close button — always clearly visible. The previous design hid the
+   X behind a "modified dot" overlay, which collided with the left
+   dot and left users hunting for a way to close the tab. */
 .tab-close-btn {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 22px;
-    height: 22px;
+    width: 24px;
+    height: 24px;
     border: none;
     background: transparent;
     color: var(--text-color, #cccccc);
     cursor: pointer;
-    border-radius: 3px;
-    font-size: 10px;
-    opacity: 0.5;
+    border-radius: 4px;
+    opacity: 1;
     transition: all 0.1s ease;
     flex-shrink: 0;
 }
 
 .tab:hover .tab-close-btn,
 .tab.active .tab-close-btn {
-    opacity: 0.8;
-}
-
-.tab-close-btn:hover {
-    opacity: 1 !important;
-    background: #e51400;
-    color: #ffffff;
-}
-
-.tab.modified .tab-close-btn {
     opacity: 1;
 }
 
-/* Show dot indicator for modified but not hovered */
-.tab.modified:not(:hover) .tab-close-btn {
-    font-size: 0;
-}
-
-.tab.modified:not(:hover) .tab-close-btn::before {
-    content: '●';
-    font-size: 10px;
-    color: var(--text-color, #e8e8e8);
+.tab-close-btn:hover {
+    background: #e51400;
+    color: #ffffff;
 }
 
 .tabs-actions {

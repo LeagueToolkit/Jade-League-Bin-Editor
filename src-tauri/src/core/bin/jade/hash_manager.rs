@@ -307,9 +307,15 @@ pub fn get_cached_hashes() -> &'static RwLock<HashManager> {
 }
 
 /// Reload cached hashes from disk and return total loaded count.
+///
+/// Loads from disk *before* acquiring the write lock so concurrent readers
+/// (e.g. file opens that resolve hash names) only block during the brief
+/// swap, not for the full multi-second disk read.
 pub fn reload_cached_hashes() -> usize {
+    let new_hashes = load_from_default_hash_dir();
+    let count = new_hashes.total_count();
     let lock = get_cached_hashes();
     let mut guard = lock.write();
-    *guard = load_from_default_hash_dir();
-    guard.total_count()
+    *guard = new_hashes;
+    count
 }

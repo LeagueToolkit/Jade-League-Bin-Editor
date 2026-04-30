@@ -210,9 +210,45 @@
     color: var(--text-color);
 }
 
+.theme-item.disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.theme-item.disabled:hover {
+    background: transparent;
+    border-color: transparent;
+}
+
+.theme-item-lock {
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-left: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
 .theme-preview-dots {
     display: flex;
     gap: 5px;
+}
+
+.theme-item-icon {
+    width: auto;
+    max-width: 44px;
+    height: 18px;
+    object-fit: contain;
+    border-radius: 3px;
+    flex-shrink: 0;
+    mix-blend-mode: screen;
+}
+
+.theme-item-icon-light {
+    mix-blend-mode: multiply;
+}
+
+.theme-item-icon-invert {
+    filter: invert(1) brightness(0.88);
 }
 
 .preview-dot {
@@ -385,6 +421,40 @@
     border-radius: var(--border-radius);
     max-width: 100%;
     box-sizing: border-box;
+}
+
+/* ── Theme default background row ── */
+.theme-bg-section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px 14px;
+    margin-bottom: 10px;
+    background: var(--tab-bg);
+    border: 1px solid #3E3E42;
+    border-radius: var(--border-radius);
+    flex-shrink: 0;
+}
+
+.theme-bg-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.theme-bg-thumbnail {
+    width: 72px;
+    height: 44px;
+    object-fit: cover;
+    border-radius: 3px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    flex-shrink: 0;
+    margin-left: auto;
+}
+
+.theme-bg-blur {
+    padding-top: 4px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .background-options {
@@ -612,14 +682,14 @@
 }
 
 .btn-apply {
-    background: linear-gradient(135deg, #0e639c, #1177bb);
+    background: var(--jade-accent, #0e639c);
     color: #ffffff;
-    box-shadow: 0 4px 12px rgba(14, 99, 156, 0.3);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--jade-accent, #0e639c) 40%, transparent);
 }
 
 .btn-apply:hover {
-    background: linear-gradient(135deg, #1177bb, #1485cc);
-    box-shadow: 0 6px 16px rgba(14, 99, 156, 0.4);
+    background: color-mix(in srgb, var(--jade-accent, #0e639c) 80%, white);
+    box-shadow: 0 6px 16px color-mix(in srgb, var(--jade-accent, #0e639c) 50%, transparent);
 }
 
 .btn-close {
@@ -636,34 +706,448 @@
 /* ── Scrollbars ── */
 .theme-list::-webkit-scrollbar,
 .custom-theme-editor::-webkit-scrollbar,
-.themes-content::-webkit-scrollbar {
+.themes-content::-webkit-scrollbar,
+.font-list::-webkit-scrollbar,
+.font-preview-panel::-webkit-scrollbar {
     width: 5px;
 }
 
 .theme-list::-webkit-scrollbar-track,
 .custom-theme-editor::-webkit-scrollbar-track,
-.themes-content::-webkit-scrollbar-track {
+.themes-content::-webkit-scrollbar-track,
+.font-list::-webkit-scrollbar-track,
+.font-preview-panel::-webkit-scrollbar-track {
     background: transparent;
 }
 
 .theme-list::-webkit-scrollbar-thumb,
 .custom-theme-editor::-webkit-scrollbar-thumb,
-.themes-content::-webkit-scrollbar-thumb {
+.themes-content::-webkit-scrollbar-thumb,
+.font-list::-webkit-scrollbar-thumb,
+.font-preview-panel::-webkit-scrollbar-thumb {
     background: var(--scrollbar-thumb);
     border-radius: 3px;
 }
 
 .theme-list::-webkit-scrollbar-thumb:hover,
 .custom-theme-editor::-webkit-scrollbar-thumb:hover,
-.themes-content::-webkit-scrollbar-thumb:hover {
+.themes-content::-webkit-scrollbar-thumb:hover,
+.font-list::-webkit-scrollbar-thumb:hover,
+.font-preview-panel::-webkit-scrollbar-thumb:hover {
     background: var(--scrollbar-thumb-hover);
 }
 
 .theme-list,
 .custom-theme-editor,
-.themes-content {
+.themes-content,
+.font-list,
+.font-preview-panel {
     scrollbar-width: thin;
     scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+/* ── Fonts section ── */
+.fonts-split-layout {
+    display: flex;
+    gap: 12px;
+    flex: 1;
+    min-height: 0;
+}
+
+.font-list-panel {
+    flex: 1 1 50%;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 0;
+}
+
+.font-ui-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+/* ── FontPicker (custom themed dropdown) ─────────────────────────── */
+.font-picker {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.font-picker-trigger {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 10px;
+    background: var(--tab-bg);
+    color: var(--text-color);
+    border: 1px solid #3E3E42;
+    border-radius: var(--border-radius);
+    font-size: 12px;
+    cursor: pointer;
+    transition: border-color 0.12s, background 0.12s;
+}
+
+.font-picker-trigger:hover {
+    background: var(--selected-tab-bg);
+    border-color: var(--jade-accent, #4a4a4a);
+}
+
+.font-picker.open .font-picker-trigger {
+    border-color: var(--jade-accent, #007acc);
+}
+
+.font-picker-trigger-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: left;
+    flex: 1 1 auto;
+}
+
+.font-picker-chevron {
+    display: inline-flex;
+    align-items: center;
+    transform: rotate(90deg);
+    transition: transform 0.15s;
+    opacity: 0.7;
+    margin-left: 8px;
+    flex-shrink: 0;
+}
+
+.font-picker-chevron.open {
+    transform: rotate(-90deg);
+}
+
+.font-picker-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    z-index: 100;
+    max-height: 320px;
+    overflow-y: auto;
+    background: var(--window-bg);
+    border: 1px solid #3E3E42;
+    border-radius: var(--border-radius);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+    padding: 4px 0;
+}
+
+.font-picker-group + .font-picker-group {
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    margin-top: 4px;
+    padding-top: 4px;
+}
+
+.font-picker-group-title {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    padding: 6px 12px 4px;
+    user-select: none;
+}
+
+.font-picker-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    color: var(--text-color);
+    border: none;
+    padding: 6px 12px;
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.font-picker-item:hover {
+    background: var(--selected-tab-bg);
+}
+
+.font-picker-item.selected {
+    background: color-mix(in srgb, var(--jade-accent, #007acc) 28%, transparent);
+    color: var(--jade-accent-text, #ffffff);
+}
+
+.font-picker-item.selected:hover {
+    background: color-mix(in srgb, var(--jade-accent, #007acc) 40%, transparent);
+}
+
+.font-list-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-top: 2px;
+    flex-shrink: 0;
+}
+
+.font-list {
+    flex: 1;
+    overflow-y: auto;
+    background: var(--tab-bg);
+    border: 1px solid #2D2D30;
+    border-radius: 4px;
+    min-height: 0;
+}
+
+.font-list-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 5px 10px;
+    cursor: pointer;
+    border-bottom: 1px solid #2D2D30;
+    transition: background 0.12s;
+    gap: 4px;
+}
+
+.font-list-item:last-child {
+    border-bottom: none;
+}
+
+.font-list-item:hover {
+    background: var(--selected-tab-bg);
+    border-color: #3E3E42;
+}
+
+.font-list-item.selected {
+    background: var(--selected-tab-bg);
+    border-left: 2px solid var(--status-bar-bg);
+    padding-left: 8px;
+}
+
+.font-list-item-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+}
+
+.font-source-icon {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    opacity: 0.4;
+    color: var(--text-color);
+    transition: opacity 0.12s;
+    cursor: default;
+}
+
+.font-list-item:hover .font-source-icon {
+    opacity: 0.75;
+}
+
+.font-source-icon.font-source-theme {
+    opacity: 0.75;
+}
+
+.font-list-item:hover .font-source-icon.font-source-theme {
+    opacity: 1;
+}
+
+.font-list-section-header {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding: 5px 10px 3px;
+    background: rgba(0,0,0,0.15);
+    border-bottom: 1px solid #2D2D30;
+}
+
+/* Keep delete button styles for imported fonts in the list */
+.font-library-delete {
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    opacity: 0.6;
+    padding: 0;
+    line-height: 1;
+}
+
+.font-library-delete:hover {
+    background: rgba(232, 17, 35, 0.2);
+    color: #ef4444;
+    opacity: 1;
+}
+
+/* ── Font preview panel ── */
+.font-preview-panel {
+    flex: 1 1 50%;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 14px;
+    border: 1px solid #2D2D30;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.font-preview-name {
+    font-size: 22px;
+    font-weight: 400;
+    line-height: 1.2;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-shrink: 0;
+}
+
+.font-preview-chars {
+    font-size: 12px;
+    opacity: 0.55;
+    flex-shrink: 0;
+    letter-spacing: 0.03em;
+}
+
+.font-preview-code {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.6;
+    overflow: auto;
+    flex: 1;
+    min-height: 0;
+}
+
+.font-preview-code code {
+    font-family: inherit;
+}
+
+/* UI font select (small, inline) */
+.font-ui-row .font-select {
+    flex: 1;
+    min-width: 0;
+    padding: 4px 8px;
+    font-size: 12px;
+    background: var(--tab-bg);
+    color: var(--text-color);
+    border: 1px solid #3E3E42;
+    border-radius: 4px;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23999'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    padding-right: 24px;
+}
+
+.font-ui-row .font-select:focus {
+    outline: none;
+    border-color: var(--status-bar-bg);
+}
+
+.font-ui-row .font-select option {
+    background: var(--window-bg);
+    color: var(--text-color);
+}
+
+
+.font-assignment-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    min-width: 80px;
+}
+
+/* ── Workspace shell switcher (moved from SettingsDialog so the
+   Themes dialog can host all visual layout choices in one place) ── */
+.themes-dialog .engine-switcher {
+    display: flex;
+    padding: 3px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: var(--border-radius);
+    margin-bottom: 16px;
+    gap: 3px;
+}
+
+.themes-dialog .engine-option {
+    flex: 1;
+    padding: 10px 16px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: calc(var(--border-radius) - 2px);
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    position: relative;
+    letter-spacing: 0.01em;
+}
+
+.themes-dialog .engine-option:hover:not(.active):not(:disabled) {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-color);
+    border-color: rgba(255, 255, 255, 0.06);
+}
+
+.themes-dialog .engine-option.active {
+    background: linear-gradient(
+        135deg,
+        var(--jade-accent, var(--status-bar-bg)),
+        color-mix(in srgb, var(--jade-accent, var(--status-bar-bg)) 75%, white)
+    );
+    color: #ffffff;
+    border-color: transparent;
+    box-shadow:
+        0 2px 8px color-mix(in srgb, var(--jade-accent, var(--status-bar-bg)) 35%, transparent),
+        0 0 0 1px color-mix(in srgb, var(--jade-accent, var(--status-bar-bg)) 20%, transparent);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.themes-dialog .engine-option:disabled {
+    pointer-events: none;
+}
+
+.themes-dialog .engine-description {
+    padding: 16px 18px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: var(--border-radius);
+    margin-bottom: 12px;
+}
+
+.themes-dialog .engine-description-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--jade-accent-text, var(--text-color));
+    display: block;
+    margin-bottom: 6px;
+}
+
+.themes-dialog .engine-description-text {
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.55;
+    margin: 0;
 }
 
 /* ── Responsive ── */

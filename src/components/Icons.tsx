@@ -1,6 +1,9 @@
 interface IconProps {
     size?: number;
     className?: string;
+    /** Override the SVG stroke width. Mostly for icons like CloseIcon
+     *  where some places (tab bar, dock pane) want a bolder X. */
+    strokeWidth?: number;
 }
 
 // Quartz / Export arrow icon
@@ -150,7 +153,7 @@ export function PinIcon({ size = 16, className = '' }: IconProps) {
 }
 
 // Close / X Icon
-export function CloseIcon({ size = 16, className = '' }: IconProps) {
+export function CloseIcon({ size = 16, className = '', strokeWidth = 2 }: IconProps) {
     return (
         <svg
             width={size}
@@ -158,7 +161,7 @@ export function CloseIcon({ size = 16, className = '' }: IconProps) {
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
-            strokeWidth="2"
+            strokeWidth={strokeWidth}
             strokeLinecap="round"
             strokeLinejoin="round"
             className={className}
@@ -394,6 +397,25 @@ export function HashIcon({ size = 16, className = '' }: IconProps) {
     );
 }
 
+// Lightning bolt — used by the Performance settings tab
+export function BoltIcon({ size = 16, className = '' }: IconProps) {
+    return (
+        <svg
+            width={size}
+            height={size}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={className}
+        >
+            <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />
+        </svg>
+    );
+}
+
 // Arrow Up / Update Icon
 export function ArrowUpIcon({ size = 16, className = '' }: IconProps) {
     return (
@@ -434,6 +456,50 @@ export function ChevronRightIcon({ size = 16, className = '' }: IconProps) {
 }
 
 // Converter / swap arrows icon
+export function TypeIcon({ size = 16, className = '' }: IconProps) {
+    return (
+        <svg width={size} height={size} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}>
+            <path d="M2 13L5.5 4L9 13M3.5 10H7.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            <path d="M10.5 6H14.5M12.5 6V13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+    );
+}
+
+// Windows system font indicator (4-pane grid)
+export function FontSourceWindowsIcon({ size = 16, className = '' }: IconProps) {
+    return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className={className}>
+            <rect x="2"  y="2"  width="9" height="9" rx="1" />
+            <rect x="13" y="2"  width="9" height="9" rx="1" />
+            <rect x="2"  y="13" width="9" height="9" rx="1" />
+            <rect x="13" y="13" width="9" height="9" rx="1" />
+        </svg>
+    );
+}
+
+// Bundled-with-app font indicator (package box)
+export function FontSourceBundledIcon({ size = 16, className = '' }: IconProps) {
+    return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+            <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" />
+            <path d="m3.3 7 8.7 5 8.7-5" />
+            <path d="M12 22V12" />
+        </svg>
+    );
+}
+
+// User-imported font indicator (file with up-arrow)
+export function FontSourceImportedIcon({ size = 16, className = '' }: IconProps) {
+    return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+            <polyline points="14 2 14 8 20 8" />
+            <path d="M12 18v-6" />
+            <path d="m9 15 3-3 3 3" />
+        </svg>
+    );
+}
+
 export function ConverterIcon({ size = 16, className = '' }: IconProps) {
     return (
         <svg
@@ -451,6 +517,26 @@ export function ConverterIcon({ size = 16, className = '' }: IconProps) {
             <path d="M3 11V9a4 4 0 0 1 4-4h14" />
             <path d="M7 23l-4-4 4-4" />
             <path d="M21 13v2a4 4 0 0 1-4 4H3" />
+        </svg>
+    );
+}
+
+// Layout / Workspace Icon — outlined panel with a sidebar divider.
+export function LayoutIcon({ size = 16, className = '' }: IconProps) {
+    return (
+        <svg
+            width={size}
+            height={size}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={className}
+        >
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <line x1="9" y1="3" x2="9" y2="21" />
         </svg>
     );
 }

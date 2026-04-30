@@ -712,13 +712,19 @@ interface SemanticEntryInfo {
 function checkSemanticWarnings(lines: string[]): SyntaxError[] {
   const warnings: SyntaxError[] = [];
 
-  // 1. Collect entry names inside skinMeshProperties and watch for duplicates.
-  //    Only entries within skinMeshProperties scope are checked — two separate
-  //    StaticMaterialDef blocks sharing sub-field names is normal and expected.
+  // 1. Duplicate-entry-name warnings — material definitions only.
+  //    The structural check is scoped to `StaticMaterialDef` blocks
+  //    because two materials with the same name silently collide
+  //    (only one wins). Non-material named entries inside the file
+  //    (e.g. `"Chains" = SubmeshVisibilityEventData`, particle event
+  //    blocks, etc.) legitimately reuse names across different parts
+  //    of a skin and shouldn't be flagged.
   const entryRe = /^\s*("([^"]+)"|0x[0-9a-fA-F]+)\s*=\s*(\w+)\s*\{/;
   const entriesByName = new Map<string, SemanticEntryInfo[]>();
 
-  // Find skinMeshProperties scope boundaries
+  // skinMeshProperties scope boundaries — used by later passes (cross-
+  // reference between raw textures and material overrides). Computed
+  // once here so the rest of the function can reuse them.
   let smpStart = -1;
   let smpEnd = -1;
   for (let i = 0; i < lines.length; i++) {
@@ -737,14 +743,12 @@ function checkSemanticWarnings(lines: string[]): SyntaxError[] {
   }
 
   for (let idx = 0; idx < lines.length; idx++) {
-    // Only check for duplicates inside skinMeshProperties
-    if (smpStart !== -1 && (idx < smpStart || idx > smpEnd)) continue;
-
     const line = lines[idx];
     const m = entryRe.exec(line);
     if (!m) continue;
-    const name = m[2] ?? m[1]; // quoted name or hex hash
     const classType = m[3];
+    if (classType !== 'StaticMaterialDef') continue;
+    const name = m[2] ?? m[1];
     const colIdx = line.indexOf(m[1]);
     const info: SemanticEntryInfo = {
       name,
@@ -761,7 +765,6 @@ function checkSemanticWarnings(lines: string[]): SyntaxError[] {
     }
   }
 
-  // Duplicate entry name warnings — flag every occurrence after the first
   for (const [name, infos] of entriesByName.entries()) {
     if (infos.length < 2) continue;
     for (let i = 1; i < infos.length; i++) {
@@ -769,7 +772,7 @@ function checkSemanticWarnings(lines: string[]): SyntaxError[] {
         line: infos[i].line,
         column: infos[i].column,
         length: infos[i].length,
-        message: `Duplicate entry name "${name}" — may cause unexpected behavior`,
+        message: `Duplicate material "${name}" — only the first definition will be used`,
         severity: 'warning',
       });
     }

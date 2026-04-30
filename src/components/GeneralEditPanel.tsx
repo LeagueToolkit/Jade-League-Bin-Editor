@@ -25,6 +25,10 @@ interface GeneralEditPanelProps {
    *  into the user's mod. The parent uses this to track per-session
    *  inserts so it can offer cleanup when the user closes without saving. */
   onLibraryInsert?: (filePath: string, modRoot: string, id: string) => void;
+  /** When true, render as a normal block element (used inside the Word
+   *  shell's left task pane). Skips the absolute-positioning logic that
+   *  anchors the panel against the editor container. */
+  docked?: boolean;
 }
 
 export default function GeneralEditPanel({
@@ -33,7 +37,8 @@ export default function GeneralEditPanel({
   editorContent,
   onContentChange,
   filePath,
-  onLibraryInsert
+  onLibraryInsert,
+  docked = false,
 }: GeneralEditPanelProps) {
   // Animation state - for slide down animation like Monaco
   const [isVisible, setIsVisible] = useState(false);
@@ -65,59 +70,70 @@ export default function GeneralEditPanel({
   
   const isUpdatingFromPercentage = useRef(false);
 
+  // Mirrors the ParticleEditorPanel positioning logic exactly: pin the
+  // panel to the left edge of the minimap when one is rendered, otherwise
+  // park it 28px from the right edge. The earlier find-widget short-
+  // circuit produced inconsistent positions when Monaco reflowed (find
+  // widget closed/opened, minimap toggled), so we drop that branch.
   const updatePanelPosition = useCallback(() => {
     const editorContainer = document.querySelector('.editor-container') as HTMLElement | null;
     if (!editorContainer) return;
-
     const containerRect = editorContainer.getBoundingClientRect();
-    const findWidget = editorContainer.querySelector('.monaco-editor .find-widget') as HTMLElement | null;
-    if (findWidget) {
-      const widgetRect = findWidget.getBoundingClientRect();
-      const rightOffset = Math.max(0, containerRect.right - widgetRect.right);
-      setPanelRight(`${Math.round(rightOffset)}px`);
-      return;
-    }
-
     const minimap = editorContainer.querySelector('.monaco-editor .minimap') as HTMLElement | null;
-    if (minimap) {
+    if (minimap && minimap.offsetWidth > 0) {
       const minimapRect = minimap.getBoundingClientRect();
       const minimapWidth = Math.max(0, containerRect.right - minimapRect.left);
       setPanelRight(`${Math.round(minimapWidth + 14)}px`);
       return;
     }
-
     setPanelRight('28px');
   }, []);
 
   // Handle open/close animation
   useEffect(() => {
     if (isOpen) {
-      // First render the element
       setIsRendered(true);
-      // Then trigger animation on next frame
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           setIsVisible(true);
         });
       });
-      updatePanelPosition();
+      if (!docked) updatePanelPosition();
     } else {
-      // First hide with animation
       setIsVisible(false);
-      // Then unmount after animation completes
       const timer = setTimeout(() => {
         setIsRendered(false);
-      }, 200); // Match CSS transition duration
+      }, docked ? 0 : 200);
       return () => clearTimeout(timer);
     }
-  }, [isOpen, updatePanelPosition]);
+  }, [isOpen, docked, updatePanelPosition]);
 
+  // Re-measure on window resize, perf-pref toggles (minimap on/off etc.)
+  // and any internal layout shift in the editor container. Skipped when
+  // docked — the panel is a normal flex child and doesn't need to track
+  // the editor's geometry.
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || docked) return;
     const handleResize = () => updatePanelPosition();
     window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, [isOpen, updatePanelPosition]);
+    const handlePerfPref = () => {
+      requestAnimationFrame(() => requestAnimationFrame(updatePanelPosition));
+    };
+    window.addEventListener('perf-pref-changed', handlePerfPref);
+    let ro: ResizeObserver | null = null;
+    const container = document.querySelector('.editor-container');
+    if (container && typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => updatePanelPosition());
+      ro.observe(container);
+      const monacoEl = container.querySelector('.monaco-editor');
+      if (monacoEl) ro.observe(monacoEl);
+    }
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('perf-pref-changed', handlePerfPref);
+      ro?.disconnect();
+    };
+  }, [isOpen, docked, updatePanelPosition]);
 
   // Load skinScale value from content
   const loadSkinScaleValue = useCallback(() => {
@@ -1084,10 +1100,10 @@ export default function GeneralEditPanel({
 
   return (
     <>
-      <div className="general-edit-panel-wrapper">
+      <div className={`general-edit-panel-wrapper${docked ? ' docked' : ''}`}>
         <div
-          className={`general-edit-panel ${isVisible ? 'visible' : ''}`}
-          style={{ right: panelRight }}
+          className={`general-edit-panel ${docked ? 'docked' : ''} ${isVisible ? 'visible' : ''}`}
+          style={docked ? undefined : { right: panelRight }}
         >
           <div className="gep-left-bar" />
           <div className="gep-header">

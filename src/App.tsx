@@ -2,35 +2,22 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import Editor, { Monaco } from "@monaco-editor/react";
+import { ask as askDialog } from "@tauri-apps/plugin-dialog";
+import { Monaco } from "@monaco-editor/react";
 import type * as MonacoType from 'monaco-editor';
 import { registerRitobinLanguage, registerRitobinTheme, RITOBIN_LANGUAGE_ID, RITOBIN_THEME_ID } from "./lib/ritobinLanguage";
 import { registerColorProvider } from "./lib/colorProvider";
-import { openBinFile, saveBinFile, saveBinFileAs, readBinDirect, writeBinDirect } from "./lib/binOperations";
+import {
+  saveBinFile, readBinDirect, writeBinDirect,
+  openAnyEditorFile, saveAnyFileAs, saveAnyFileToPath, readTextDirect,
+  isBinLikePath, isPlainTextPath, getFileExtension,
+} from "./lib/binOperations";
 import { loadSavedTheme } from "./lib/themeApplicator";
 import { checkSyntax, suggestType } from "./lib/syntaxChecker";
 import { texBufferToDataURL, ddsBufferToDataURL, ddsFormatName } from "./lib/texFormat";
-import TitleBar from "./components/TitleBar";
-import MenuBar from "./components/MenuBar";
-import TabBar, { EditorTab, createQuartzDiffTab, createTab, createTexPreviewTab, getFileName } from "./components/TabBar";
-import StatusBar from "./components/StatusBar";
-import WelcomeScreen from "./components/WelcomeScreen";
-import AboutDialog from "./components/AboutDialog";
-import ThemesDialog from "./components/ThemesDialog";
-import MaterialLibraryBrowser from "./components/MaterialLibraryBrowser";
-import SettingsDialog from "./components/SettingsDialog";
-import PreferencesDialog from "./components/PreferencesDialog";
-import GeneralEditPanel from "./components/GeneralEditPanel";
-import ParticleEditorPanel from "./components/ParticleEditorPanel";
-import ParticleEditorDialog from "./components/ParticleEditorDialog";
-import UpdateToast from "./components/UpdateToast";
-import HashSyncToast from "./components/HashSyncToast";
-import QuartzInstallModal from "./components/QuartzInstallModal";
-import TexHoverPopup from "./components/TexHoverPopup";
-import EditorContextMenu from "./components/EditorContextMenu";
-import TexturePreviewTab from "./components/TexturePreviewTab";
-import QuartzDiffTab from "./components/QuartzDiffTab";
-import SmokeOverlay from "./components/SmokeOverlay";
+import { EditorTab, createQuartzDiffTab, createMarkdownPreviewTab, createTab, createTexPreviewTab, getFileName } from "./components/TabBar";
+import { ShellProvider, type ShellContextValue, type PerfMode, type PerfKey, type HashSyncToastState, type ShellVariant } from "./shells/ShellContext";
+import ShellHost from "./shells/ShellHost";
 import { findAndOpenLinkedBins, LinkedBinResult } from "./lib/linkedBinParser";
 import "./App.css";
 import "./App.modernui.css";
@@ -80,11 +67,41 @@ interface QuartzHistoryEntry {
 const MAX_QUARTZ_HISTORY_PER_FILE = 10;
 const QUARTZ_INTEROP_DEBUG = true;
 
-type HashSyncToastState = {
-  visible: boolean;
-  status: 'checking' | 'downloading' | 'success' | 'error';
-  message: string;
-};
+/**
+ * Pick the Monaco language id for a given file path. Bins and their
+ * .py sidecars stay on the ritobin language so the existing syntax,
+ * decorations and language services keep working. Other formats fall
+ * back to a Monaco built-in or 'plaintext' so JSON/MD/etc. don't get
+ * ritobin coloring on them.
+ */
+function getMonacoLanguageForPath(filePath: string | null): string {
+  if (!filePath) return RITOBIN_LANGUAGE_ID;
+  const ext = getFileExtension(filePath);
+  if (!ext || ext === 'bin' || ext === 'py') return RITOBIN_LANGUAGE_ID;
+  switch (ext) {
+    case 'json':           return 'json';
+    case 'xml':            return 'xml';
+    case 'html':
+    case 'htm':            return 'html';
+    case 'css':            return 'css';
+    case 'js':
+    case 'mjs':
+    case 'cjs':
+    case 'jsx':            return 'javascript';
+    case 'ts':
+    case 'tsx':            return 'typescript';
+    case 'md':
+    case 'markdown':       return 'markdown';
+    case 'yaml':
+    case 'yml':            return 'yaml';
+    case 'sql':            return 'sql';
+    case 'sh':             return 'shell';
+    case 'bat':
+    case 'cmd':            return 'bat';
+    case 'ps1':            return 'powershell';
+    default:               return 'plaintext';
+  }
+}
 
 function App() {
   // Tab management - start with NO tabs (empty)
@@ -94,6 +111,27 @@ function App() {
 
   // UI state
   const [statusMessage, setStatusMessage] = useState("Ready");
+  const [appMemoryBytes, setAppMemoryBytes] = useState<number>(0);
+
+  // Performance preferences: each editor feature can be 'on' (always),
+  // 'auto' (off on big files >50k lines) or 'off' (always). Mirrors the
+  // schema written by the Performance tab in SettingsDialog.
+  const PERF_PREF_KEYS: Record<PerfKey, string> = {
+    minimap:              'Perf_Minimap',
+    bracketColors:        'Perf_BracketColors',
+    occurrencesHighlight: 'Perf_OccurrencesHighlight',
+    selectionHighlight:   'Perf_SelectionHighlight',
+    lineHighlight:        'Perf_LineHighlight',
+    folding:              'Perf_Folding',
+    stopRenderingLine:    'Perf_StopRenderingLine',
+  };
+  const PERF_DEFAULTS: Record<PerfKey, PerfMode> = {
+    minimap: 'auto', bracketColors: 'auto', occurrencesHighlight: 'auto',
+    selectionHighlight: 'auto', lineHighlight: 'auto', folding: 'auto',
+    stopRenderingLine: 'auto',
+  };
+  const BIG_FILE_LINES = 75_000;
+  const [perfPrefs, setPerfPrefs] = useState<Record<PerfKey, PerfMode>>(PERF_DEFAULTS);
   const [showAboutDialog, setShowAboutDialog] = useState(false);
   const [showThemesDialog, setShowThemesDialog] = useState(false);
   const [showMaterialLibrary, setShowMaterialLibrary] = useState(false);
@@ -102,13 +140,17 @@ function App() {
   const [showQuartzInstallModal, setShowQuartzInstallModal] = useState(false);
   const [updateToastVersion, setUpdateToastVersion] = useState<string | null>(null);
   const [hashSyncToast, setHashSyncToast] = useState<HashSyncToastState | null>(null);
+  const [fileLoading, setFileLoading] = useState<{ name: string; detail?: string } | null>(null);
   const [, setHashSyncBusy] = useState(true);
-  const [hashesReady, setHashesReady] = useState(false);
   const [appIcon, setAppIcon] = useState<string>("/media/jade.ico");
   const [findWidgetOpen, setFindWidgetOpen] = useState(false);
   const [replaceWidgetOpen, setReplaceWidgetOpen] = useState(false);
   const [generalEditPanelOpen, setGeneralEditPanelOpen] = useState(false);
   const [particlePanelOpen, setParticlePanelOpen] = useState(false);
+  const [textureInsertOpen, setTextureInsertOpen] = useState(false);
+  const [materialInsertOpen, setMaterialInsertOpen] = useState(false);
+  const [mdPreviewContent, setMdPreviewContent] = useState<string>('');
+  const [showNewFileDialog, setShowNewFileDialog] = useState(false);
   const [particleDialogOpen, setParticleDialogOpen] = useState(false);
   const [monacoInstance, setMonacoInstance] = useState<Monaco | null>(null);
   const [editorTheme, setEditorTheme] = useState(RITOBIN_THEME_ID);
@@ -119,6 +161,11 @@ function App() {
   const [recentFiles, setRecentFiles] = useState<string[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [cigaretteMode, setCigaretteMode] = useState(false);
+  const [shellVariant, setShellVariant] = useState<ShellVariant>('vscode');
+  // Mirror in a ref so long-lived listeners (Monaco mutation observer)
+  // see the current variant without re-binding when it changes.
+  const shellVariantRef = useRef<ShellVariant>('vscode');
+  shellVariantRef.current = shellVariant;
   const [quartzInteropEnabled, setQuartzInteropEnabled] = useState(true);
   const [quartzHistoryEntries, setQuartzHistoryEntries] = useState<QuartzHistoryEntry[]>([]);
   const quartzSessionsRef = useRef<Map<string, QuartzEditSession>>(new Map());
@@ -151,7 +198,26 @@ function App() {
   });
 
   const editorRef = useRef<MonacoType.editor.IStandaloneCodeEditor | null>(null);
+  // Empty default lets Monaco fall back to its own font (matches the
+  // pre-PR look). The theme system only sets a real value when the user
+  // picks a font in Themes > Fonts.
+  const [editorFontFamily, setEditorFontFamily] = useState("");
   const editorDisposablesRef = useRef<MonacoType.IDisposable[]>([]);
+
+  // When font state changes, tell Monaco to re-measure so cursor/selection align correctly.
+  useEffect(() => {
+    if (!monacoRef.current || !editorRef.current) return;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      monacoRef.current?.editor.remeasureFonts();
+    }));
+  }, [editorFontFamily]);
+
+  // PR #4 introduced an `editorOptions` memo for plumbing the font into
+  // Monaco from this file. Since the shells refactor moved Monaco into
+  // EditorPane, the memo would be unused here. We forward the font
+  // family through ShellContext instead — EditorPane reads it (TODO:
+  // wire fontFamily into shellCtx + EditorPane to actually swap fonts).
+
   const emitterDecorationIds = useRef<string[]>([]);
   const emitterDecorDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const emitterHintsEnabled = useRef(true);
@@ -173,6 +239,7 @@ function App() {
   const openFileFromPathRef = useRef<((path: string) => Promise<void>) | null>(null);
   const openingFilesRef = useRef<Set<string>>(new Set()); // prevents duplicate concurrent opens
   const handleTabCloseRef = useRef<((tabId: string) => void) | null>(null);
+  const handleNewRef = useRef<(() => void) | null>(null);
   const handleOpenRef = useRef<(() => void) | null>(null);
   const handleSaveRef = useRef<(() => void) | null>(null);
   const handleSaveAsRef = useRef<(() => void) | null>(null);
@@ -214,6 +281,97 @@ function App() {
   const statusMessageRef = useRef<string>("Ready");
   const allowHashStatusUpdateRef = useRef<boolean>(true);
   const hashToastHideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Latches when the user dismisses the hash sync toast so subsequent
+  // progress events from the backend don't keep reopening it. Reset at
+  // the start of each new check session.
+  const hashToastDismissedRef = useRef<boolean>(false);
+  const showHashToast = useCallback((state: HashSyncToastState) => {
+    if (hashToastDismissedRef.current) return;
+    setHashSyncToast(state);
+  }, []);
+
+  // Auto-clear status messages after 5s — keeps the status bar tidy
+  // by reverting whatever transient message ("Opened …", "Saved", etc.)
+  // back to the idle "Ready" state.
+  useEffect(() => {
+    if (statusMessage === 'Ready' || !statusMessage) return;
+    const t = setTimeout(() => {
+      setStatusMessage('Ready');
+      statusMessageRef.current = 'Ready';
+    }, 5000);
+    return () => clearTimeout(t);
+  }, [statusMessage]);
+
+  // Poll the app's RAM usage for the status bar indicator. Backend walks
+  // the whole process tree (Rust + WebView2 helpers) and returns Private
+  // Bytes — same metric Task Manager shows. Refresh slowly so the query
+  // and the JS re-render don't add measurable overhead.
+  useEffect(() => {
+    let cancelled = false;
+    const tick = () => {
+      invoke<number>('get_app_memory_usage')
+        .then(bytes => { if (!cancelled) setAppMemoryBytes(Number(bytes) || 0); })
+        .catch(() => {});
+    };
+    tick();
+    const id = setInterval(tick, 5000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
+
+  // Load performance preferences once and listen for live changes from
+  // the Performance tab in Settings so changes apply without restart.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const next: Record<PerfKey, PerfMode> = { ...PERF_DEFAULTS };
+      for (const key of Object.keys(PERF_PREF_KEYS) as PerfKey[]) {
+        try {
+          const raw = await invoke<string>('get_preference', {
+            key: PERF_PREF_KEYS[key],
+            defaultValue: PERF_DEFAULTS[key],
+          });
+          if (raw === 'on' || raw === 'auto' || raw === 'off') next[key] = raw as PerfMode;
+        } catch { /* fall through to default */ }
+      }
+      if (!cancelled) setPerfPrefs(next);
+    })();
+
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ key: PerfKey; mode: PerfMode }>).detail;
+      if (!detail) return;
+      setPerfPrefs(prev => ({ ...prev, [detail.key]: detail.mode }));
+    };
+    window.addEventListener('perf-pref-changed', handler);
+    return () => { cancelled = true; window.removeEventListener('perf-pref-changed', handler); };
+  }, []);
+
+  // When the active tab is a markdown preview, mirror its source tab's
+  // content into mdPreviewContent. We subscribe to the source model's
+  // content change so the rendered preview stays current if the user
+  // switches back to the source, edits, and returns. Falls back to the
+  // last cached `content` field on the source tab if Monaco hasn't
+  // materialized a model for it yet (uncommon).
+  useEffect(() => {
+    if (activeTab?.tabType !== 'markdown-preview') {
+      return;
+    }
+    const sourceId = activeTab.sourceTabId;
+    if (!sourceId) {
+      setMdPreviewContent('');
+      return;
+    }
+    const sourceModel = monacoModelsRef.current.get(sourceId);
+    if (!sourceModel || sourceModel.isDisposed()) {
+      const sourceTab = tabsRef.current.find(t => t.id === sourceId);
+      setMdPreviewContent(sourceTab?.content ?? '');
+      return;
+    }
+    setMdPreviewContent(sourceModel.getValue());
+    const sub = sourceModel.onDidChangeContent(() => {
+      setMdPreviewContent(sourceModel.getValue());
+    });
+    return () => { sub.dispose(); };
+  }, [activeTabId, activeTab?.tabType, activeTab?.sourceTabId]);
 
   // Load custom icon and window state on mount
   useEffect(() => {
@@ -240,6 +398,27 @@ function App() {
     invoke<string>('get_preference', { key: 'SyntaxChecking', defaultValue: 'True' })
       .then(val => { syntaxCheckingEnabled.current = val !== 'False'; })
       .catch(() => {});
+    // One-time migration: nudge existing users onto the new Studio
+    // layout so they get to try it. Stamped via the `StudioMigrated`
+    // pref, so subsequent launches respect whatever they end up
+    // choosing. No-op for first-run installs (defaults are vscode →
+    // we still flip to visualstudio and stamp).
+    (async () => {
+      try {
+        const migrated = await invoke<string>('get_preference', { key: 'StudioMigrated', defaultValue: 'False' });
+        if (migrated !== 'True') {
+          await invoke('set_preference', { key: 'UiShell', value: 'visualstudio' });
+          await invoke('set_preference', { key: 'StudioMigrated', value: 'True' });
+          setShellVariant('visualstudio');
+          window.dispatchEvent(new CustomEvent('shell-changed', { detail: 'visualstudio' }));
+          return;
+        }
+        const val = await invoke<string>('get_preference', { key: 'UiShell', defaultValue: 'vscode' });
+        if (val === 'word' || val === 'visualstudio' || val === 'vscode') setShellVariant(val);
+      } catch (e) {
+        console.warn('[App] shell load / migration failed:', e);
+      }
+    })();
 
     const handleCigaretteModeChanged = (e: Event) => {
       setCigaretteMode((e as CustomEvent<boolean>).detail);
@@ -247,8 +426,18 @@ function App() {
     const handleQuartzInteropChanged = (e: Event) => {
       setQuartzInteropEnabled((e as CustomEvent<boolean>).detail !== false);
     };
+    const handleShellChanged = (e: Event) => {
+      const v = (e as CustomEvent<ShellVariant>).detail;
+      if (v === 'vscode' || v === 'word' || v === 'visualstudio') setShellVariant(v);
+    };
+    const handleEditorFontChanged = (e: Event) => {
+      const fontFamily = (e as CustomEvent<string>).detail;
+      setEditorFontFamily(fontFamily);
+    };
     window.addEventListener('cigarette-mode-changed', handleCigaretteModeChanged);
     window.addEventListener('quartz-interop-changed', handleQuartzInteropChanged);
+    window.addEventListener('shell-changed', handleShellChanged);
+    window.addEventListener('jade-editor-font-changed', handleEditorFontChanged);
 
     // Listen for open-file events from backend (file association double-click or single-instance)
     const openFileUnlisten = listen<string>('open-file', async (event) => {
@@ -283,25 +472,25 @@ function App() {
 
       const skipped = Number(payload.skipped || 0);
       if (phase === 'checking') {
-        setHashSyncToast({
+        showHashToast({
           visible: true,
           status: 'checking',
           message: payload.message || 'Checking hash updates...'
         });
       } else if (phase === 'downloading') {
-        setHashSyncToast({
+        showHashToast({
           visible: true,
           status: 'downloading',
           message: `Checked ${current}/${total} - Updated ${downloaded}${payload.file ? ` - ${payload.file}` : ''}`
         });
       } else if (phase === 'success') {
-        setHashSyncToast({
+        showHashToast({
           visible: true,
           status: 'success',
           message: payload.message || `Done - Updated ${downloaded}, Skipped ${skipped}`
         });
       } else if (phase === 'error') {
-        setHashSyncToast({
+        showHashToast({
           visible: true,
           status: 'error',
           message: payload.message || 'Hash update failed'
@@ -348,6 +537,7 @@ function App() {
     window.addEventListener('icon-changed', handleIconChange);
 
     // Event listeners for keyboard shortcuts
+    const handleAppNew = () => handleNewRef.current?.();
     const handleAppOpen = () => handleOpenRef.current?.();
     const handleAppSave = () => handleSaveRef.current?.();
     const handleAppSaveAs = () => handleSaveAsRef.current?.();
@@ -359,7 +549,35 @@ function App() {
         handleTabCloseRef.current?.(activeTabIdRef.current);
       }
     };
+    const handleAppToggleMdPreview = () => {
+      // Open (or focus) a Markdown preview tab tied to the current
+      // markdown editor tab. If the active tab IS already a preview, jump
+      // back to its source. If the active tab isn't markdown, do nothing.
+      const current = activeTabRef.current;
+      if (!current) return;
+      const all = tabsRef.current;
 
+      if (current.tabType === 'markdown-preview') {
+        if (current.sourceTabId) setActiveTabId(current.sourceTabId);
+        return;
+      }
+      // Fall back to fileName so unsaved tabs (e.g. File → New → README.md
+      // with filePath still null) are still recognised as markdown.
+      const ext = getFileExtension(current.filePath ?? current.fileName);
+      if (ext !== 'md' && ext !== 'markdown') return;
+
+      const existingPreview = all.find(t => t.tabType === 'markdown-preview' && t.sourceTabId === current.id);
+      if (existingPreview) {
+        setActiveTabId(existingPreview.id);
+        return;
+      }
+      const previewTab = createMarkdownPreviewTab(current.id, current.fileName);
+      setTabs(prev => [...prev, previewTab]);
+      setActiveTabId(previewTab.id);
+    };
+
+    window.addEventListener('app-new', handleAppNew);
+    window.addEventListener('app-toggle-md-preview', handleAppToggleMdPreview);
     window.addEventListener('app-open', handleAppOpen);
     window.addEventListener('app-save', handleAppSave);
     window.addEventListener('app-save-as', handleAppSaveAs);
@@ -370,13 +588,23 @@ function App() {
 
     // Keyboard shortcut for General Edit panel (Ctrl+O), Particle panel (Ctrl+Shift+P), Tab switching (Ctrl+Tab/Ctrl+Shift+Tab) and Escape to close
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Helper to check if current file is a bin file (using ref for up-to-date value)
+      // Helper to check if current file is bin or .py sidecar (ritobin
+      // content). Used to gate particle/material/skin shortcuts so they
+      // don't fire on markdown / json / plain-text tabs.
       const isBinFile = (): boolean => {
         const tab = activeTabRef.current;
         if (!tab) return false;
         if (!isEditorTab(tab)) return false;
-        return tab.fileName.toLowerCase().endsWith('.bin');
+        const name = (tab.filePath ?? tab.fileName).toLowerCase();
+        return name.endsWith('.bin') || name.endsWith('.py');
       };
+
+      // Ctrl+N - New file (untitled tab)
+      if (e.ctrlKey && (e.key === 'n' || e.key === 'N') && !e.shiftKey) {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('app-new'));
+        return;
+      }
 
       // Ctrl+S - Save file
       if (e.ctrlKey && e.key === 's' && !e.shiftKey) {
@@ -390,6 +618,13 @@ function App() {
       if (e.ctrlKey && e.shiftKey && e.key === 'S') {
         e.preventDefault();
         window.dispatchEvent(new CustomEvent('app-save-as'));
+        return;
+      }
+
+      // Ctrl+Shift+V - Toggle markdown preview (matches VS Code)
+      if (e.ctrlKey && e.shiftKey && (e.key === 'V' || e.key === 'v')) {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('app-toggle-md-preview'));
         return;
       }
 
@@ -567,7 +802,11 @@ function App() {
 
         for (const filePath of event.payload.paths) {
           console.log('Dropped file:', filePath);
-          if (filePath.toLowerCase().endsWith('.bin')) {
+          // Accept any file Jade knows how to open: bin/.py go through
+          // the bin pipeline, the curated plain-text list opens as raw
+          // text. Unknown extensions are ignored so dropping (say) a
+          // .exe doesn't try to render binary garbage.
+          if (isBinLikePath(filePath) || isPlainTextPath(filePath)) {
             await openFileFromPathRef.current?.(filePath);
           }
         }
@@ -598,6 +837,10 @@ function App() {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('cigarette-mode-changed', handleCigaretteModeChanged);
       window.removeEventListener('quartz-interop-changed', handleQuartzInteropChanged);
+      window.removeEventListener('shell-changed', handleShellChanged);
+      window.removeEventListener('jade-editor-font-changed', handleEditorFontChanged);
+      window.removeEventListener('app-new', handleAppNew);
+      window.removeEventListener('app-toggle-md-preview', handleAppToggleMdPreview);
       window.removeEventListener('app-open', handleAppOpen);
       window.removeEventListener('app-save', handleAppSave);
       window.removeEventListener('app-save-as', handleAppSaveAs);
@@ -715,21 +958,48 @@ function App() {
     }
   };
 
-  // Always auto-download/update hashes on startup.
+  // Auto-download/update hashes on startup, gated by the user's chosen
+  // schedule (every launch / every 7 days / never). The whole flow is
+  // background work — file opening is never blocked by this.
   const autoDownloadHashesOnStartup = async () => {
+    // Reset the toast dismissed latch for this new session.
+    hashToastDismissedRef.current = false;
     try {
-      // If hash files are already present, allow opening bins immediately.
       const preStatus = await invoke<{ all_present: boolean }>('check_hashes').catch(() => ({ all_present: false }));
-      if (preStatus?.all_present) {
-        setHashesReady(true);
+
+      const mode = await invoke<string>('get_preference', {
+        key: 'HashUpdateMode',
+        defaultValue: 'every_launch'
+      }).catch(() => 'every_launch');
+
+      // "never" — skip the network entirely.
+      if (mode === 'never') {
+        setHashSyncBusy(false);
+        return;
       }
+
+      // "every_7_days" — skip if we've checked within the past week and
+      // hashes are present on disk.
+      if (mode === 'every_7_days') {
+        const lastCheckedStr = await invoke<string>('get_preference', {
+          key: 'LastHashCheckAt',
+          defaultValue: '0'
+        }).catch(() => '0');
+        const lastChecked = parseInt(lastCheckedStr, 10) || 0;
+        const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+        if (preStatus?.all_present && (Date.now() - lastChecked) < sevenDaysMs) {
+          setHashSyncBusy(false);
+          return;
+        }
+      }
+
       setHashSyncBusy(true);
       const useBinaryFormat = await invoke<string>('get_preference', {
         key: 'UseBinaryHashFormat',
         defaultValue: 'False'
       }) === 'True';
 
-      setHashSyncToast({
+      showHashToast({
         visible: true,
         status: 'checking',
         message: 'Checking hash updates...'
@@ -739,7 +1009,7 @@ function App() {
       setStatusMessage('Auto-downloading latest hash files...');
       statusMessageRef.current = 'Auto-downloading latest hash files...';
       try {
-        setHashSyncToast({
+        showHashToast({
           visible: true,
           status: 'downloading',
           message: 'Updating hash files...'
@@ -748,7 +1018,7 @@ function App() {
         const downloaded = await invoke<string[]>('download_hashes', { useBinary: useBinaryFormat });
         const downloadedCount = Array.isArray(downloaded) ? downloaded.length : 0;
 
-        setHashSyncToast({
+        showHashToast({
           visible: true,
           status: 'success',
           message: downloadedCount > 0
@@ -765,22 +1035,19 @@ function App() {
 
         setStatusMessage('Latest hash files downloaded');
         statusMessageRef.current = 'Latest hash files downloaded';
-        const hashStatus = await invoke<{ all_present: boolean }>('check_hashes').catch(() => ({ all_present: false }));
-        setHashesReady(Boolean(hashStatus?.all_present));
         setHashSyncBusy(false);
+        await invoke('set_preference', { key: 'LastHashCheckAt', value: String(Date.now()) }).catch(() => {});
         // Re-enable hash status updates after a short delay
         setTimeout(() => {
           allowHashStatusUpdateRef.current = true;
         }, 500);
       } catch (error) {
         console.error('[App] Failed to auto-download hashes:', error);
-        setHashSyncToast({
+        showHashToast({
           visible: true,
           status: 'error',
           message: `Hash update failed: ${String(error)}`
         });
-        const hashStatus = await invoke<{ all_present: boolean }>('check_hashes').catch(() => ({ all_present: false }));
-        setHashesReady(Boolean(hashStatus?.all_present));
         setHashSyncBusy(false);
         setStatusMessage('Ready');
         statusMessageRef.current = 'Ready';
@@ -788,13 +1055,11 @@ function App() {
       }
     } catch (error) {
       console.error('[App] Failed to auto-download hashes:', error);
-      setHashSyncToast({
+      showHashToast({
         visible: true,
         status: 'error',
         message: `Hash update failed: ${String(error)}`
       });
-      const hashStatus = await invoke<{ all_present: boolean }>('check_hashes').catch(() => ({ all_present: false }));
-      setHashesReady(Boolean(hashStatus?.all_present));
       setHashSyncBusy(false);
       allowHashStatusUpdateRef.current = true;
     }
@@ -1105,27 +1370,25 @@ function App() {
   }, []);
 
   const openFileFromPath = async (filePath: string) => {
-    if (!hashesReady) {
-      setStatusMessage('Hashes are not installed yet. Please wait.');
-      return;
-    }
     // Prevent duplicate concurrent opens (e.g. Tauri drag-drop firing twice,
     // or rapid re-drops of the same file before the first open completes).
     const normalizedPath = filePath.toLowerCase();
     if (openingFilesRef.current.has(normalizedPath)) return;
     openingFilesRef.current.add(normalizedPath);
+    const fileName = getFileName(filePath);
+    setFileLoading({ name: fileName });
     try {
       // Block hash status updates while opening file
       allowHashStatusUpdateRef.current = false;
-      setStatusMessage(`Opening ${getFileName(filePath)}...`);
-      statusMessageRef.current = `Opening ${getFileName(filePath)}...`;
+      setStatusMessage(`Opening ${fileName}...`);
+      statusMessageRef.current = `Opening ${fileName}...`;
 
       const existingTab = tabs.find(t => t.filePath && t.filePath.toLowerCase() === filePath.toLowerCase());
       if (existingTab) {
         ensureTrackedBinSession(filePath, existingTab.content, 'paint');
         setActiveTabId(existingTab.id);
-        setStatusMessage(`Switched to ${getFileName(filePath)}`);
-        statusMessageRef.current = `Switched to ${getFileName(filePath)}`;
+        setStatusMessage(`Switched to ${fileName}`);
+        statusMessageRef.current = `Switched to ${fileName}`;
         // Re-enable hash status updates after a delay
         setTimeout(() => {
           allowHashStatusUpdateRef.current = true;
@@ -1133,7 +1396,11 @@ function App() {
         return;
       }
 
-      const content = await readBinForEditor(filePath);
+      const isBin = isBinLikePath(filePath);
+      const content = isBin
+        ? await readBinForEditor(filePath)
+        : await readTextDirect(filePath);
+      setFileLoading({ name: fileName, detail: 'Rendering editor…' });
       const newTab = createTab(filePath, content);
       // Store initial mtime so the auto-reload poller doesn't fire immediately
       invoke<number>('get_file_mtime', { path: filePath })
@@ -1143,8 +1410,8 @@ function App() {
       setActiveTabId(newTab.id);
 
       await addToRecentFiles(filePath);
-      setStatusMessage(`Opened ${getFileName(filePath)}`);
-      statusMessageRef.current = `Opened ${getFileName(filePath)}`;
+      setStatusMessage(`Opened ${fileName}`);
+      statusMessageRef.current = `Opened ${fileName}`;
 
       await openLinkedBinFiles(filePath, content);
 
@@ -1162,6 +1429,9 @@ function App() {
       }, 2000);
     } finally {
       openingFilesRef.current.delete(normalizedPath);
+      // Give Monaco a tick to commit the new model paint before clearing
+      // the overlay, so big files don't show a flash of empty editor.
+      requestAnimationFrame(() => setFileLoading(null));
     }
   };
   // Keep the ref up-to-date every render so event listeners always call the
@@ -1186,7 +1456,7 @@ function App() {
     // Model switching and view state restoration handled by the activeTabId useEffect
   }, [activeTabId, saveCurrentViewState]);
 
-  const handleTabClose = useCallback((tabId: string) => {
+  const handleTabClose = useCallback(async (tabId: string) => {
     const recentlyRejected = lastRejectedTabCloseRef.current;
     if (
       recentlyRejected &&
@@ -1199,9 +1469,16 @@ function App() {
     const tabToClose = tabs.find(t => t.id === tabId);
     if (!tabToClose) return;
 
-    // Confirm if modified
+    // Prompt BEFORE removing the tab. The previous code used the
+    // browser's `window.confirm()`, which Tauri's webview treats as
+    // non-blocking — the close proceeded and the popup appeared as a
+    // useless artifact. Tauri's `ask` is a real native modal.
     if (tabToClose.isModified) {
-      if (!confirm(`"${tabToClose.fileName}" has unsaved changes. Close anyway?`)) {
+      const proceed = await askDialog(
+        `"${tabToClose.fileName}" has unsaved changes. Close anyway?`,
+        { title: 'Unsaved changes', kind: 'warning' },
+      );
+      if (!proceed) {
         lastRejectedTabCloseRef.current = { tabId, at: Date.now() };
         return;
       }
@@ -1209,14 +1486,14 @@ function App() {
       // If this bin had library texture inserts during the session, the
       // user is now discarding those references. Offer to also delete
       // the texture folders we dropped into the mod so they don't
-      // linger as orphan files. Cleanup is fire-and-forget so the close
-      // handler can stay synchronous.
+      // linger as orphan files.
       if (tabToClose.filePath) {
         const inserts = jadelibInsertsRef.current.get(tabToClose.filePath);
         if (inserts && inserts.length > 0) {
           const summary = inserts.map(e => `assets/jadelib/${e.id}/`).join('\n  ');
-          const shouldDelete = confirm(
-            `You inserted library material textures in this session:\n\n  ${summary}\n\nRemove these folders from your mod too?`
+          const shouldDelete = await askDialog(
+            `You inserted library material textures in this session:\n\n  ${summary}\n\nRemove these folders from your mod too?`,
+            { title: 'Discard library inserts?', kind: 'warning' },
           );
           if (shouldDelete) {
             for (const e of inserts) {
@@ -1256,6 +1533,12 @@ function App() {
     if (closedFileKey && tabToClose.tabType !== 'quartz-diff') {
       newTabs = newTabs.filter(t => !(t.tabType === 'quartz-diff' && t.diffSourceFilePath?.toLowerCase() === closedFileKey));
     }
+    // Closing a markdown editor tab also closes any preview tabs that
+    // were rendering its content — the source is gone, the preview has
+    // nothing to show.
+    if (tabToClose.tabType !== 'markdown-preview') {
+      newTabs = newTabs.filter(t => !(t.tabType === 'markdown-preview' && t.sourceTabId === tabId));
+    }
     let nextActiveId: string | null = null;
     if (tabId === activeTabId) {
       if (newTabs.length > 0) {
@@ -1282,7 +1565,7 @@ function App() {
           const existing = monaco.editor.getModel(uri);
           nextModel = (existing && !existing.isDisposed())
             ? existing
-            : monaco.editor.createModel(nextTab.content, RITOBIN_LANGUAGE_ID, uri);
+            : monaco.editor.createModel(nextTab.content, getMonacoLanguageForPath(nextTab.filePath ?? nextTab.fileName), uri);
           monacoModelsRef.current.set(nextActiveId, nextModel!);
         }
         if (nextModel) {
@@ -1305,7 +1588,7 @@ function App() {
           const existing = monaco.editor.getModel(uri);
           fallbackModel = (existing && !existing.isDisposed())
             ? existing
-            : monaco.editor.createModel(fallbackEditorTab.content, RITOBIN_LANGUAGE_ID, uri);
+            : monaco.editor.createModel(fallbackEditorTab.content, getMonacoLanguageForPath(fallbackEditorTab.filePath ?? fallbackEditorTab.fileName), uri);
         }
         if (fallbackModel) {
           monacoModelsRef.current.set(fallbackEditorTab.id, fallbackModel);
@@ -1333,12 +1616,14 @@ function App() {
   }, [tabs, activeTabId]);
   handleTabCloseRef.current = handleTabClose;
 
-  const handleTabCloseAll = useCallback(() => {
+  const handleTabCloseAll = useCallback(async () => {
     const hasModified = tabs.some(t => t.isModified);
     if (hasModified) {
-      if (!confirm('Some tabs have unsaved changes. Close all anyway?')) {
-        return;
-      }
+      const proceed = await askDialog(
+        'Some tabs have unsaved changes. Close all anyway?',
+        { title: 'Unsaved changes', kind: 'warning' },
+      );
+      if (!proceed) return;
     }
 
     viewStatesRef.current.clear();
@@ -1493,7 +1778,7 @@ function App() {
         }
       }
 
-      model = monaco.editor.createModel(activeTab.content, RITOBIN_LANGUAGE_ID, uri);
+      model = monaco.editor.createModel(activeTab.content, getMonacoLanguageForPath(activeTab.filePath ?? activeTab.fileName), uri);
       monacoModelsRef.current.set(activeTabId, model!);
     }
 
@@ -1607,27 +1892,43 @@ function App() {
     const decorations: MonacoType.editor.IModelDeltaDecoration[] = [];
     const lineCount = model.getLineCount();
 
-    // First pass: index every StaticMaterialDef name → its line.
-    //             And every material link → its line.
-    // Case-insensitive because field names in bin files are usually
-    // capitalised (Material:, SamplerValues:, TextureName:, etc.).
-    const defByName = new Map<string, number>();
-    const linksByName = new Map<string, number[]>();
-    const defLineRe = /^\s*"([^"]+)"\s*=\s*StaticMaterialDef\s*\{/i;
-    const linkLineRe = /material\s*:\s*link\s*=\s*"([^"]+)"/i;
+    // Both forms can appear when a bin gets re-saved and the toolchain
+    // doesn't have the original string in its hash table:
+    //   "Some/Material/Path" = StaticMaterialDef { ... }     (named)
+    //   0x029ad92c            = StaticMaterialDef { ... }    (hashed)
+    //   Material: link = "Some/Material/Path"
+    //   Material: link = 0x029ad92c
+    // Bin hashing is deterministic, so a hashed link points at a def with
+    // the same hex within the same file. Index both kinds under one
+    // keyspace ("s:<name>" or "h:<lowercase-hex>") so either side can be
+    // hashed or named without losing the match.
+    const defByKey = new Map<string, number>();
+    const linksByKey = new Map<string, number[]>();
+    const defLineRe = /^\s*(?:"([^"]+)"|(0x[0-9a-fA-F]+))\s*=\s*StaticMaterialDef\s*\{/i;
+    const linkLineRe = /material\s*:\s*link\s*=\s*(?:"([^"]+)"|(0x[0-9a-fA-F]+))/i;
+
+    const keyOf = (named: string | undefined, hex: string | undefined): string | null => {
+      if (named) return 's:' + named;
+      if (hex) return 'h:' + hex.toLowerCase();
+      return null;
+    };
 
     for (let ln = 1; ln <= lineCount; ln++) {
       const line = model.getLineContent(ln);
       const dm = defLineRe.exec(line);
       if (dm) {
-        defByName.set(dm[1], ln);
+        const key = keyOf(dm[1], dm[2]);
+        if (key) defByKey.set(key, ln);
         continue;
       }
       const lm = linkLineRe.exec(line);
       if (lm) {
-        const arr = linksByName.get(lm[1]) ?? [];
-        arr.push(ln);
-        linksByName.set(lm[1], arr);
+        const key = keyOf(lm[1], lm[2]);
+        if (key) {
+          const arr = linksByKey.get(key) ?? [];
+          arr.push(ln);
+          linksByKey.set(key, arr);
+        }
       }
     }
 
@@ -1638,8 +1939,8 @@ function App() {
 
       const lm = linkLineRe.exec(line);
       if (lm) {
-        const name = lm[1];
-        const targetLine = defByName.get(name);
+        const key = keyOf(lm[1], lm[2]);
+        const targetLine = key ? defByKey.get(key) : undefined;
         if (targetLine !== undefined) {
           const col = line.length + 1;
           decorations.push({
@@ -1657,8 +1958,8 @@ function App() {
 
       const dm = defLineRe.exec(line);
       if (dm) {
-        const name = dm[1];
-        const targets = linksByName.get(name);
+        const key = keyOf(dm[1], dm[2]);
+        const targets = key ? linksByKey.get(key) : undefined;
         if (targets && targets.length > 0) {
           const col = line.length + 1;
           decorations.push({
@@ -2065,7 +2366,19 @@ function App() {
     const model = editor.getModel();
     if (!monaco || !model || model.isDisposed()) return;
 
-    if (!syntaxCheckingEnabled.current) {
+    // The syntax checker is bin/ritobin-specific. Skip it for plain-text
+    // tabs (json, md, txt, etc.) so we don't paint nonsense errors on
+    // unrelated formats.
+    const modelUriPath = model.uri.path || '';
+    const isRitobinTab = (() => {
+      const ext = getFileExtension(modelUriPath);
+      // Untitled buffers have no extension — treat as ritobin so the
+      // existing default-language behavior is preserved.
+      if (!ext) return true;
+      return ext === 'bin' || ext === 'py';
+    })();
+
+    if (!syntaxCheckingEnabled.current || !isRitobinTab) {
       monaco.editor.setModelMarkers(model, 'syntax-checker', []);
       syntaxDecorationIds.current = model.deltaDecorations(syntaxDecorationIds.current, []);
       return;
@@ -2397,7 +2710,7 @@ function App() {
           if (existing && !existing.isDisposed()) {
             model = existing;
           } else {
-            model = monaco.editor.createModel(activeTabData.content, RITOBIN_LANGUAGE_ID, uri);
+            model = monaco.editor.createModel(activeTabData.content, getMonacoLanguageForPath(activeTabData.filePath ?? activeTabData.fileName), uri);
           }
           monacoModelsRef.current.set(activeTabId, model);
           editor.setModel(model);
@@ -2428,6 +2741,11 @@ function App() {
       const editorElement = editor.getDomNode();
       if (editorElement) {
         mutationObserverRef.current = new MutationObserver(() => {
+          // Only the VSCode shell uses Monaco's native find widget. In
+          // Word/VS shells the widget is suppressed, so its absence is
+          // expected — letting the observer fire would close our custom
+          // find pane the moment the user opens it.
+          if (shellVariantRef.current !== 'vscode') return;
           const findWidget = editorElement.querySelector('.find-widget');
           if (findWidget) {
             const isHidden = findWidget.classList.contains('hidden') ||
@@ -2460,6 +2778,209 @@ function App() {
       mutationSetupTimeoutRef.current = null;
     }, 500) as unknown as number;
   };
+
+  // ── Session restore ──
+  // VSCode-style "your unsaved work survives a crash" feature. We
+  // persist a JSON snapshot of open editor tabs (incl. unsaved content)
+  // to the preferences file on a debounced timer, and on next launch
+  // offer to restore it if there's anything worth recovering.
+  const SESSION_PREF_KEY = 'LastSession';
+  interface SessionSnapshotTab {
+    fileName: string;
+    filePath: string | null;
+    content?: string;
+    isModified: boolean;
+  }
+  interface SessionSnapshot {
+    savedAt: number;
+    activeFilePath: string | null;
+    activeFileName: string | null;
+    tabs: SessionSnapshotTab[];
+  }
+  const sessionSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sessionRestoredRef = useRef(false);
+
+  const writeSessionNow = useCallback(() => {
+    const live = tabsRef.current.filter(t => isEditorTab(t));
+    if (live.length === 0) {
+      // No editor tabs open — clear any stale snapshot so the next
+      // launch doesn't prompt for nothing.
+      invoke('set_preference', { key: SESSION_PREF_KEY, value: '' }).catch(() => { });
+      return;
+    }
+    const activeTab = live.find(t => t.id === activeTabIdRef.current) ?? null;
+    const snapshot: SessionSnapshot = {
+      savedAt: Date.now(),
+      activeFilePath: activeTab?.filePath ?? null,
+      activeFileName: activeTab?.fileName ?? null,
+      tabs: live.map(t => {
+        const model = monacoModelsRef.current.get(t.id);
+        const content = (model && !model.isDisposed()) ? model.getValue() : (t.content ?? '');
+        const includeContent = !!t.isModified || !t.filePath;
+        return {
+          fileName: t.fileName,
+          filePath: t.filePath ?? null,
+          isModified: !!t.isModified,
+          ...(includeContent ? { content } : {}),
+        };
+      }),
+    };
+    invoke('set_preference', {
+      key: SESSION_PREF_KEY,
+      value: JSON.stringify(snapshot),
+    }).catch(() => { });
+  }, [isEditorTab]);
+
+  const scheduleSessionSave = useCallback(() => {
+    if (sessionSaveTimerRef.current) clearTimeout(sessionSaveTimerRef.current);
+    sessionSaveTimerRef.current = setTimeout(writeSessionNow, 1500);
+  }, [writeSessionNow]);
+
+  // Save snapshot whenever tabs / active tab change. Content changes
+  // also trigger this via a call inside `handleEditorChange`.
+  useEffect(() => {
+    scheduleSessionSave();
+  }, [tabs, activeTabId, scheduleSessionSave]);
+
+  // On startup: if the previous session had unsaved work, prompt the
+  // user to restore. Runs exactly once. Only restores tabs that had
+  // dirty/untitled content — clean tabs would just reopen with stale
+  // content from the snapshot, which is worse than the user reopening
+  // them through the Recent Files menu.
+  useEffect(() => {
+    if (sessionRestoredRef.current) return;
+    sessionRestoredRef.current = true;
+
+    (async () => {
+      let raw: string;
+      try {
+        raw = await invoke<string>('get_preference', {
+          key: SESSION_PREF_KEY,
+          defaultValue: '',
+        });
+      } catch {
+        return;
+      }
+      if (!raw) return;
+
+      let snapshot: SessionSnapshot;
+      try { snapshot = JSON.parse(raw); } catch { return; }
+      if (!snapshot || !Array.isArray(snapshot.tabs)) return;
+
+      // Only the tabs that actually carried unsaved work — saved/clean
+      // tabs aren't worth a prompt.
+      const restorable = snapshot.tabs.filter(t => typeof t.content === 'string');
+      if (restorable.length === 0) return;
+
+      const proceed = await askDialog(
+        `Restore your previous session? Jade will reopen ${restorable.length} unsaved file${restorable.length === 1 ? '' : 's'} from your last run.`,
+        { title: 'Restore previous session', kind: 'info' },
+      );
+      if (!proceed) {
+        // User declined — clear the snapshot so we don't ask again.
+        invoke('set_preference', { key: SESSION_PREF_KEY, value: '' }).catch(() => { });
+        return;
+      }
+
+      const restored: EditorTab[] = restorable.map(t => {
+        const content = t.content ?? '';
+        const tab = createTab(t.filePath ?? null, content);
+        if (t.fileName) tab.fileName = t.fileName;
+        // Restored work is unsaved by definition — even if filePath
+        // exists, the snapshot may diverge from disk.
+        tab.isModified = true;
+        return tab;
+      });
+
+      setTabs(prev => [...prev, ...restored]);
+
+      // Pick whichever restored tab matches the snapshot's last-active
+      // selection; fall back to the first restored tab.
+      const matchActive =
+        (snapshot.activeFilePath
+          ? restored.find(t => t.filePath === snapshot.activeFilePath)
+          : restored.find(t => t.fileName === snapshot.activeFileName))
+        ?? restored[0];
+      if (matchActive) setActiveTabId(matchActive.id);
+    })();
+  }, []);
+
+  // ── VS-shell tool open-state persistence ──
+  // The VS shell is the only shell that treats find / general edit /
+  // particle / texture / material panels as dockable tool windows.
+  // Persisting their open state per-shell means a VS user gets back
+  // the panes they had docked after a restart, without those flags
+  // bleeding into Word / VSCode where they'd render as full-screen
+  // overlays and stack weirdly.
+  const VS_OPEN_TOOLS_KEY = 'vs-shell-open-tools';
+  const vsToolsRestoredRef = useRef(false);
+
+  // Save snapshot whenever an open flag changes — but only while the
+  // VS shell is active. Switching shells (which closes everything via
+  // the next effect) won't clobber the snapshot because shellVariant
+  // has already changed by the time those state updates flush.
+  useEffect(() => {
+    if (shellVariant !== 'visualstudio') return;
+    if (!vsToolsRestoredRef.current) return;     // skip the first render before restore runs
+    const snapshot = {
+      find:     findWidgetOpen,
+      replace:  replaceWidgetOpen,
+      general:  generalEditPanelOpen,
+      particle: particlePanelOpen,
+      texture:  textureInsertOpen,
+      material: materialInsertOpen,
+    };
+    try {
+      window.localStorage.setItem(VS_OPEN_TOOLS_KEY, JSON.stringify(snapshot));
+    } catch { /* quota / private mode */ }
+  }, [
+    shellVariant,
+    findWidgetOpen, replaceWidgetOpen,
+    generalEditPanelOpen, particlePanelOpen,
+    textureInsertOpen, materialInsertOpen,
+  ]);
+
+  // Restore tool open state when the VS shell becomes active (app
+  // start or when user switches into VS). Runs each time `shellVariant`
+  // resolves to 'visualstudio' — but the read is cheap and the writes
+  // are no-ops if values match.
+  useEffect(() => {
+    if (shellVariant !== 'visualstudio') {
+      vsToolsRestoredRef.current = false;
+      return;
+    }
+    try {
+      const raw = window.localStorage.getItem(VS_OPEN_TOOLS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<{
+          find: boolean; replace: boolean; general: boolean;
+          particle: boolean; texture: boolean; material: boolean;
+        }>;
+        if (parsed.find)     setFindWidgetOpen(true);
+        if (parsed.replace)  setReplaceWidgetOpen(true);
+        if (parsed.general)  setGeneralEditPanelOpen(true);
+        if (parsed.particle) setParticlePanelOpen(true);
+        if (parsed.texture)  setTextureInsertOpen(true);
+        if (parsed.material) setMaterialInsertOpen(true);
+      }
+    } catch { /* parse failure — ignore */ }
+    vsToolsRestoredRef.current = true;
+  }, [shellVariant]);
+
+  // Switching AWAY from VS closes every dockable tool flag. Word and
+  // VSCode shells don't render these as docked panes — leaving them
+  // open would either stack as floating overlays (Word) or do nothing
+  // useful (VSCode). The persistence effect above sees `shellVariant !==
+  // 'visualstudio'` and skips, so the snapshot survives the switch.
+  useEffect(() => {
+    if (shellVariant === 'visualstudio') return;
+    setFindWidgetOpen(false);
+    setReplaceWidgetOpen(false);
+    setGeneralEditPanelOpen(false);
+    setParticlePanelOpen(false);
+    setTextureInsertOpen(false);
+    setMaterialInsertOpen(false);
+  }, [shellVariant]);
 
   // Cleanup subscriptions only on component unmount (editor no longer remounts on tab change)
   useEffect(() => {
@@ -2536,6 +3057,8 @@ function App() {
       syntaxCheckDebounce.current = setTimeout(() => {
         if (editorRef.current) updateSyntaxMarkers(editorRef.current);
       }, 500);
+      // Snapshot the session so unsaved changes survive a crash.
+      scheduleSessionSave();
     }
   };
 
@@ -2545,27 +3068,105 @@ function App() {
   const handleClose = () => getCurrentWindow().close();
 
   // File Operations
-  const handleOpen = async () => {
-    if (!hashesReady) {
-      setStatusMessage('Hashes are not installed yet. Please wait.');
-      return;
+  const handleNew = () => {
+    setShowNewFileDialog(true);
+  };
+
+  // Markdown panel helpers — used by MarkdownEditPanel buttons. Each
+  // returns true if it applied a change so the panel can show a status
+  // when the user clicked something but had nothing selected.
+  const mdWrapSelection = useCallback((before: string, after: string): boolean => {
+    const editor = editorRef.current;
+    if (!editor) return false;
+    const sel = editor.getSelection();
+    const model = editor.getModel();
+    if (!sel || !model || sel.isEmpty()) return false;
+    const text = model.getValueInRange(sel);
+    editor.executeEdits('md-wrap', [{ range: sel, text: before + text + after }]);
+    editor.focus();
+    return true;
+  }, []);
+
+  const mdPrefixLines = useCallback((prefix: string): boolean => {
+    const editor = editorRef.current;
+    if (!editor) return false;
+    const sel = editor.getSelection();
+    const model = editor.getModel();
+    if (!sel || !model) return false;
+    const monaco = monacoRef.current;
+    if (!monaco) return false;
+    const startLine = sel.startLineNumber;
+    const endLine = sel.endLineNumber;
+    const edits: MonacoType.editor.IIdentifiedSingleEditOperation[] = [];
+    for (let ln = startLine; ln <= endLine; ln++) {
+      edits.push({
+        range: new monaco.Range(ln, 1, ln, 1),
+        text: prefix,
+      });
     }
+    editor.executeEdits('md-prefix', edits);
+    editor.focus();
+    return true;
+  }, []);
+
+  const mdInsertAtCaret = useCallback((text: string): boolean => {
+    const editor = editorRef.current;
+    if (!editor) return false;
+    const sel = editor.getSelection();
+    if (!sel) return false;
+    editor.executeEdits('md-insert', [{ range: sel, text }]);
+    editor.focus();
+    return true;
+  }, []);
+
+  const handleCreateNewFile = (fileName: string) => {
+    // Build an unsaved tab with the chosen name. filePath stays null
+    // (the file isn't on disk yet), but tab.fileName carries the
+    // extension so Monaco language detection and the panel switch
+    // (markdown vs bin tools) pick the right behavior.
+    saveCurrentViewState();
+    const newTab: EditorTab = {
+      ...createTab(null, ''),
+      fileName,
+    };
+    setTabs(prev => [...prev, newTab]);
+    setActiveTabId(newTab.id);
+    setShowNewFileDialog(false);
+    setStatusMessage(`New file: ${fileName}`);
+    statusMessageRef.current = `New file: ${fileName}`;
+  };
+
+  const handleOpen = async () => {
     try {
       // Block hash status updates while opening file
       allowHashStatusUpdateRef.current = false;
-      const result = await openBinFile();
+      const result = await openAnyEditorFile();
       if (result) {
-        const resolvedContent = await readBinForEditor(result.path, result.content);
-        addTab(result.path, resolvedContent);
-        setStatusMessage(`Opened ${result.path}`);
-        statusMessageRef.current = `Opened ${result.path}`;
+        setFileLoading({ name: getFileName(result.path) });
+        try {
+          // Bin and .py sidecars run through the bin pipeline (which also
+          // handles the Quartz py-sidecar workflow). Plain-text files
+          // (json, txt, md, etc.) are read directly and skip linked-bin
+          // resolution since that's a bin-only feature.
+          const isBin = isBinLikePath(result.path);
+          const resolvedContent = isBin
+            ? await readBinForEditor(result.path, result.content)
+            : result.content;
+          setFileLoading({ name: getFileName(result.path), detail: 'Rendering editor…' });
+          addTab(result.path, resolvedContent);
+          setStatusMessage(`Opened ${result.path}`);
+          statusMessageRef.current = `Opened ${result.path}`;
 
-        if (result.path) {
-          await addToRecentFiles(result.path);
+          if (result.path) {
+            await addToRecentFiles(result.path);
+          }
+
+          if (isBin) {
+            await openLinkedBinFiles(result.path, resolvedContent);
+          }
+        } finally {
+          requestAnimationFrame(() => setFileLoading(null));
         }
-
-        // Open linked bin files if preference enabled
-        await openLinkedBinFiles(result.path, resolvedContent);
 
         // Re-enable hash status updates after file is opened
         setTimeout(() => {
@@ -2576,6 +3177,7 @@ function App() {
       console.error('Failed to open file:', error);
       setStatusMessage(`Error: ${error}`);
       statusMessageRef.current = `Error: ${error}`;
+      setFileLoading(null);
       setTimeout(() => {
         allowHashStatusUpdateRef.current = true;
       }, 2000);
@@ -2636,10 +3238,13 @@ function App() {
       if (activeTab.filePath) {
         // Read content from editor for active tab, or from state for inactive tabs
         const content = editorRef.current?.getValue() || activeTab.content;
-        await persistPySidecarIfNeeded(activeTab.filePath, content);
-        await saveBinFile(content, activeTab.filePath);
+        const isBin = isBinLikePath(activeTab.filePath);
+        if (isBin) {
+          await persistPySidecarIfNeeded(activeTab.filePath, content);
+        }
+        await saveAnyFileToPath(content, activeTab.filePath);
         try {
-          if (quartzInteropEnabled) {
+          if (isBin && quartzInteropEnabled) {
             const session = quartzSessionsRef.current.get(activeTab.filePath.toLowerCase());
             const mode = session?.mode || 'paint';
             await invoke('notify_quartz_bin_updated', {
@@ -2703,11 +3308,17 @@ function App() {
       allowHashStatusUpdateRef.current = false;
       // Read content from editor for active tab, or from state for inactive tabs
       const content = editorRef.current?.getValue() || activeTab.content;
-      const newPath = await saveBinFileAs(content);
+      const defaultName = activeTab.filePath
+        ? getFileName(activeTab.filePath)
+        : (activeTab.fileName && activeTab.fileName !== 'Untitled' ? activeTab.fileName : 'Untitled.txt');
+      const newPath = await saveAnyFileAs(content, defaultName);
       if (newPath) {
-        await persistPySidecarIfNeeded(newPath, content);
+        const isBin = isBinLikePath(newPath);
+        if (isBin) {
+          await persistPySidecarIfNeeded(newPath, content);
+        }
         try {
-          if (quartzInteropEnabled) {
+          if (isBin && quartzInteropEnabled) {
             const oldSession = activeTab.filePath
               ? quartzSessionsRef.current.get(activeTab.filePath.toLowerCase())
               : null;
@@ -2786,15 +3397,24 @@ function App() {
     document.execCommand('paste');
   };
 
+  // In the Word and Visual Studio shells, find/replace is rendered as a
+  // dock pane (left side / bottom) with a custom UI that drives Monaco
+  // via the model.findMatches API. We skip Monaco's native find widget
+  // so the two UIs don't fight. In VS, opening find leaves general /
+  // particle docks open — they live in different docks.
   const handleFind = () => {
     if (!isEditorTab(activeTabRef.current)) return;
+    const useNativeWidget = shellVariant === 'vscode';
+    const stackTools = shellVariant === 'visualstudio';
     if (findWidgetOpen) {
-      editorRef.current?.trigger('keyboard', 'closeFindWidget', null);
+      if (useNativeWidget) editorRef.current?.trigger('keyboard', 'closeFindWidget', null);
       setFindWidgetOpen(false);
     } else {
-      setGeneralEditPanelOpen(false);
-      setParticlePanelOpen(false);
-      editorRef.current?.trigger('keyboard', 'actions.find', null);
+      if (!stackTools) {
+        setGeneralEditPanelOpen(false);
+        setParticlePanelOpen(false);
+      }
+      if (useNativeWidget) editorRef.current?.trigger('keyboard', 'actions.find', null);
       setFindWidgetOpen(true);
       setReplaceWidgetOpen(false);
     }
@@ -2802,13 +3422,17 @@ function App() {
 
   const handleReplace = () => {
     if (!isEditorTab(activeTabRef.current)) return;
+    const useNativeWidget = shellVariant === 'vscode';
+    const stackTools = shellVariant === 'visualstudio';
     if (replaceWidgetOpen) {
-      editorRef.current?.trigger('keyboard', 'closeFindWidget', null);
+      if (useNativeWidget) editorRef.current?.trigger('keyboard', 'closeFindWidget', null);
       setReplaceWidgetOpen(false);
     } else {
-      setGeneralEditPanelOpen(false);
-      setParticlePanelOpen(false);
-      editorRef.current?.trigger('keyboard', 'editor.action.startFindReplaceAction', null);
+      if (!stackTools) {
+        setGeneralEditPanelOpen(false);
+        setParticlePanelOpen(false);
+      }
+      if (useNativeWidget) editorRef.current?.trigger('keyboard', 'editor.action.startFindReplaceAction', null);
       setReplaceWidgetOpen(true);
       setFindWidgetOpen(false);
     }
@@ -2816,6 +3440,7 @@ function App() {
 
   const handleCompareFiles = () => console.log('Compare Files');
 
+  handleNewRef.current = handleNew;
   handleOpenRef.current = handleOpen;
   handleSaveRef.current = () => {
     void handleSave();
@@ -2879,11 +3504,28 @@ function App() {
 
   const handleGeneralEdit = () => {
     if (!isEditorTab(activeTabRef.current)) return;
-    setFindWidgetOpen(false);
-    setReplaceWidgetOpen(false);
-    setParticlePanelOpen(false);
-    editorRef.current?.trigger('keyboard', 'closeFindWidget', null);
+    // VS shell can show multiple tool windows simultaneously (different
+    // docks); other shells display one at a time and need the others
+    // closed first.
+    if (shellVariant !== 'visualstudio') {
+      setFindWidgetOpen(false);
+      setReplaceWidgetOpen(false);
+      setParticlePanelOpen(false);
+      editorRef.current?.trigger('keyboard', 'closeFindWidget', null);
+    }
     setGeneralEditPanelOpen(!generalEditPanelOpen);
+  };
+
+  // VS-shell-only toggles for the lightweight material-override insert
+  // tool windows. The classic in-General-Edit-panel modal still works
+  // unchanged — these are the dockable panel variants.
+  const handleTextureInsert = () => {
+    if (!isEditorTab(activeTabRef.current)) return;
+    setTextureInsertOpen(prev => !prev);
+  };
+  const handleMaterialInsert = () => {
+    if (!isEditorTab(activeTabRef.current)) return;
+    setMaterialInsertOpen(prev => !prev);
   };
 
   // Handle content change from General Edit Panel (undoable, preserves cursor/scroll)
@@ -2963,12 +3605,14 @@ function App() {
   const handleSettings = () => setShowSettingsDialog(true);
   const handleAbout = () => setShowAboutDialog(true);
 
-  // Helper to check if current file is a bin file
+  // Helper to check if the active tab is a bin (or .py sidecar) file —
+  // i.e. ritobin content. Used to gate particle/material/skin tools so
+  // they don't show up on markdown / json / plain-text tabs.
   const isBinFileOpen = (): boolean => {
     if (!activeTab) return false;
     if (!isEditorTab(activeTab)) return false;
-    const fileName = activeTab.fileName.toLowerCase();
-    return fileName.endsWith('.bin');
+    const name = (activeTab.filePath ?? activeTab.fileName).toLowerCase();
+    return name.endsWith('.bin') || name.endsWith('.py');
   };
 
   // Particle Editor handlers
@@ -2976,10 +3620,12 @@ function App() {
     // Only allow opening if a bin file is loaded
     if (!isBinFileOpen()) return;
 
-    setFindWidgetOpen(false);
-    setReplaceWidgetOpen(false);
-    setGeneralEditPanelOpen(false);
-    editorRef.current?.trigger('keyboard', 'closeFindWidget', null);
+    if (shellVariant !== 'visualstudio') {
+      setFindWidgetOpen(false);
+      setReplaceWidgetOpen(false);
+      setGeneralEditPanelOpen(false);
+      editorRef.current?.trigger('keyboard', 'closeFindWidget', null);
+    }
     setParticlePanelOpen(prev => !prev);
   };
 
@@ -3447,9 +4093,10 @@ function App() {
 
   // Build status message
   const statusText = `${statusMessage}${activeTab?.isModified ? ' (Modified)' : ''}`;
-  // Only block opening bins when hashes are actually unavailable.
-  // Background check/update must not lock the Open action once hashes exist.
-  const openFileDisabled = !hashesReady;
+  // Hash updates run in the background and never gate file opening.
+  // Bins still parse without hashes — fields just display as hex IDs
+  // until the hash files land on disk.
+  const openFileDisabled = false;
   const activeDiffEntries = activeTab?.tabType === 'quartz-diff' && activeTab.diffSourceFilePath
     ? getQuartzEntriesForFile(activeTab.diffSourceFilePath)
     : [];
@@ -3457,295 +4104,107 @@ function App() {
     ? Math.max(0, activeDiffEntries.findIndex((entry) => entry.id === activeTab.diffEntryId))
     : 0;
 
+  // Build the value passed down to whichever shell is active.
+  // Adding new chrome data means adding a field here AND on the
+  // ShellContextValue type — TS will flag any mismatch.
+  const shellCtx: ShellContextValue = {
+    // -- Active shell variant
+    shellVariant,
+
+    // -- Window
+    appIcon, isMaximized, isDragging, cigaretteMode,
+    onMinimize: handleMinimize, onMaximize: handleMaximize, onClose: handleClose,
+
+    // -- Tabs
+    tabs, activeTabId, activeTab, isEditorTab, isBinFileOpen,
+    onTabSelect: handleTabSelect, onTabClose: handleTabClose,
+    onTabCloseAll: handleTabCloseAll, onTabPin: handleTabPin,
+
+    // -- Status / metrics
+    statusText, lineCount, caretPosition, appMemoryBytes, setStatusMessage,
+
+    // -- Panel state
+    findWidgetOpen, replaceWidgetOpen,
+    generalEditPanelOpen, particlePanelOpen,
+    textureInsertOpen, materialInsertOpen,
+    setGeneralEditPanelOpen, setParticlePanelOpen,
+    setTextureInsertOpen, setMaterialInsertOpen,
+
+    // -- Recent files
+    recentFiles, openFileDisabled, openFileFromPath,
+
+    // -- File ops
+    onNew: handleNew, onOpen: handleOpen, onSave: handleSave,
+    onSaveAs: handleSaveAs, onOpenLog: handleOpenLog,
+
+    // -- Edit ops
+    onUndo: handleUndo, onRedo: handleRedo,
+    onCut: handleCut, onCopy: handleCopy, onPaste: handlePaste,
+    onFind: handleFind, onReplace: handleReplace,
+    onCompareFiles: handleCompareFiles, onSelectAll: handleSelectAll,
+
+    // -- Tools
+    onGeneralEdit: handleGeneralEdit, onParticlePanel: handleParticlePanel,
+    onTextureInsert: handleTextureInsert, onMaterialInsert: handleMaterialInsert,
+    onParticleEditor: handleParticleEditor, onMaterialLibrary: handleMaterialLibrary,
+    onThemes: handleThemes, onSettings: handleSettings,
+    onPreferences: handlePreferences, onAbout: handleAbout,
+    onSendToQuartz: handleSendToQuartz,
+
+    // -- Editor wiring
+    editorTheme, editorFontFamily, perfPrefs, bigFileLines: BIG_FILE_LINES,
+    handleBeforeMount, handleEditorMount, handleEditorChange,
+    editorRef, monacoModelsRef, monacoRef,
+
+    // -- Edit panel callbacks
+    handleGeneralEditContentChange, handleScrollToLine,
+    recordJadelibInsert, mdWrapSelection, mdPrefixLines, mdInsertAtCaret,
+
+    // -- Markdown preview
+    mdPreviewContent,
+
+    // -- Quartz diff
+    activeDiffRevisionIndex,
+    activeDiffEntriesLength: activeDiffEntries.length,
+    switchQuartzDiffRevision,
+    handleAcceptQuartzHistory, handleRejectQuartzHistory,
+
+    // -- Texture preview
+    reloadingTexTabId,
+    handleTexEditImage, handleTexShowInExplorer, handleTexReload,
+
+    // -- Texture hover popup
+    texPopup, closeTexPopup, handleTexOpenFull, isOverTexPopupRef,
+
+    // -- Editor context menu
+    ctxMenu, setCtxMenu,
+    foldAllEmitters, unfoldAllEmitters, hasEmitters,
+
+    // -- Dialogs
+    showAboutDialog, setShowAboutDialog,
+    showThemesDialog, setShowThemesDialog,
+    showMaterialLibrary, setShowMaterialLibrary,
+    showSettingsDialog, setShowSettingsDialog,
+    showPreferencesDialog, setShowPreferencesDialog,
+    showQuartzInstallModal, setShowQuartzInstallModal,
+    showNewFileDialog, setShowNewFileDialog,
+    particleDialogOpen, setParticleDialogOpen,
+    handleThemeApplied, handleCreateNewFile,
+
+    // -- Toasts
+    updateToastVersion, setUpdateToastVersion,
+    fileLoading, hashSyncToast, setHashSyncToast,
+    hashToastHideTimeoutRef, hashToastDismissedRef,
+
+    // -- Preferences side-effects
+    emitterHintsEnabled, syntaxCheckingEnabled,
+    updateEmitterNameDecorations, updateSyntaxMarkers,
+  };
+
   return (
-    <div className={`app-container ${isDragging ? 'dragging' : ''}`}>
-      <TitleBar
-        appIcon={appIcon}
-        isMaximized={isMaximized}
-        onThemes={handleThemes}
-        onPreferences={handlePreferences}
-        onSettings={handleSettings}
-        onAbout={handleAbout}
-        onMinimize={handleMinimize}
-        onMaximize={handleMaximize}
-        onClose={handleClose}
-        onParticleEditor={handleParticleEditor}
-        onMaterialLibrary={handleMaterialLibrary}
-        onQuartzAction={handleSendToQuartz}
-      />
-
-      <MenuBar
-        findActive={findWidgetOpen}
-        replaceActive={replaceWidgetOpen}
-        generalEditActive={generalEditPanelOpen}
-        particlePanelActive={particlePanelOpen}
-        onOpenFile={handleOpen}
-        onSaveFile={handleSave}
-        onSaveFileAs={handleSaveAs}
-        onOpenLog={handleOpenLog}
-        onExit={handleClose}
-        onUndo={handleUndo}
-        onRedo={handleRedo}
-        onCut={handleCut}
-        onCopy={handleCopy}
-        onPaste={handlePaste}
-        onFind={handleFind}
-        onReplace={handleReplace}
-        onCompareFiles={handleCompareFiles}
-        onSelectAll={handleSelectAll}
-        onGeneralEdit={handleGeneralEdit}
-        onParticlePanel={handleParticlePanel}
-        onThemes={handleThemes}
-        onSettings={handleSettings}
-        onAbout={handleAbout}
-        onMaterialLibrary={handleMaterialLibrary}
-        recentFiles={recentFiles}
-        onOpenRecentFile={openFileFromPath}
-        openFileDisabled={openFileDisabled}
-      />
-
-      {tabs.length > 0 && (
-        <TabBar
-          tabs={tabs}
-          activeTabId={activeTabId}
-          onTabSelect={handleTabSelect}
-          onTabClose={handleTabClose}
-          onTabCloseAll={handleTabCloseAll}
-          onTabPin={handleTabPin}
-        />
-      )}
-
-      {tabs.length === 0 && <WelcomeScreen onOpenFile={handleOpen} openFileDisabled={openFileDisabled} recentFiles={recentFiles} onOpenRecentFile={openFileFromPath} onMaterialLibrary={handleMaterialLibrary} appIcon={appIcon} />}
-
-      {/* Keep the editor container (and Monaco) always mounted.
-          Unmounting Monaco while a requestAnimationFrame render is in-flight
-          causes "Cannot read properties of undefined (reading 'domNode')".
-          We hide it with display:none when there are no tabs instead. */}
-      {/* Texture-preview tab: shown instead of Monaco when active tab is a texture */}
-      {activeTab?.tabType === 'texture-preview' && activeTab.filePath && (
-        <TexturePreviewTab
-          filePath={activeTab.filePath}
-          imageDataUrl={activeTab.textureDataUrl ?? null}
-          texWidth={activeTab.textureWidth ?? 0}
-          texHeight={activeTab.textureHeight ?? 0}
-          format={activeTab.textureFormat ?? 0}
-          error={activeTab.textureError ?? null}
-          isReloading={reloadingTexTabId === activeTab.id}
-          onEditImage={() => handleTexEditImage(activeTab.filePath)}
-          onShowInExplorer={() => handleTexShowInExplorer(activeTab.filePath)}
-          onReload={handleTexReload}
-        />
-      )}
-      {activeTab?.tabType === 'quartz-diff' && (
-        <QuartzDiffTab
-          fileName={activeTab.diffSourceFilePath ? getFileName(activeTab.diffSourceFilePath) : activeTab.fileName}
-          mode={activeTab.diffMode ?? 'paint'}
-          status={activeTab.diffStatus ?? 'pending'}
-          originalContent={activeTab.diffOriginalContent ?? ''}
-          modifiedContent={activeTab.diffModifiedContent ?? ''}
-          revisionIndex={activeDiffRevisionIndex}
-          revisionCount={Math.max(1, activeDiffEntries.length)}
-          onPrevRevision={() => switchQuartzDiffRevision(activeTab.id, 'prev')}
-          onNextRevision={() => switchQuartzDiffRevision(activeTab.id, 'next')}
-          onAccept={() => {
-            if (activeTab.diffEntryId) {
-              handleAcceptQuartzHistory(activeTab.diffEntryId);
-            }
-          }}
-          onReject={() => {
-            if (activeTab.diffEntryId) {
-              handleRejectQuartzHistory(activeTab.diffEntryId);
-            }
-          }}
-        />
-      )}
-
-      <div
-        className="editor-container"
-        style={
-          tabs.length === 0 || !isEditorTab(activeTab)
-            ? { display: 'none' }
-            : undefined
-        }
-      >
-        <Editor
-          height="100%"
-          defaultLanguage={RITOBIN_LANGUAGE_ID}
-          theme={editorTheme}
-          beforeMount={handleBeforeMount}
-          onMount={handleEditorMount}
-          onChange={handleEditorChange}
-          options={{
-            minimap: { enabled: true },
-            glyphMargin: true,
-            fontSize: 14,
-            scrollBeyondLastLine: false,
-            automaticLayout: true,
-            fontFamily: "'JetBrains Mono', 'Fira Code', Consolas, monospace",
-            lineNumbersMinChars: 6,
-            fixedOverflowWidgets: true,
-            contextmenu: false,
-            find: {
-              addExtraSpaceOnTop: false,
-              autoFindInSelection: 'never',
-              seedSearchStringFromSelection: 'always',
-            },
-            ...({
-              "bracketPairColorization.enabled": true,
-              "suggest.maxVisibleSuggestions": 5,
-              "semanticHighlighting.enabled": false,
-            } as any),
-          }}
-        />
-        {activeTab && isEditorTab(activeTab) && (
-          <GeneralEditPanel
-            isOpen={generalEditPanelOpen}
-            onClose={() => setGeneralEditPanelOpen(false)}
-            editorContent={editorRef.current?.getValue() || activeTab.content}
-            onContentChange={handleGeneralEditContentChange}
-            filePath={activeTab.filePath ?? undefined}
-            onLibraryInsert={recordJadelibInsert}
-          />
-        )}
-        {activeTab && isEditorTab(activeTab) && (
-          <ParticleEditorPanel
-            isOpen={particlePanelOpen}
-            onClose={() => setParticlePanelOpen(false)}
-            editorContent={editorRef.current?.getValue() || activeTab.content}
-            onContentChange={handleGeneralEditContentChange}
-            onScrollToLine={handleScrollToLine}
-            onStatusUpdate={setStatusMessage}
-          />
-        )}
-      </div>
-
-      {ctxMenu && (
-        <EditorContextMenu
-          x={ctxMenu.x}
-          y={ctxMenu.y}
-          onClose={() => setCtxMenu(null)}
-          onCut={handleCut}
-          onCopy={handleCopy}
-          onPaste={handlePaste}
-          onSelectAll={handleSelectAll}
-          onFoldEmitters={foldAllEmitters}
-          onUnfoldEmitters={unfoldAllEmitters}
-          hasEmitters={hasEmitters()}
-        />
-      )}
-
-      {/* Texture hover popup */}
-      {texPopup && (
-        <TexHoverPopup
-          top={texPopup.top}
-          left={texPopup.left}
-          above={texPopup.above}
-          rawPath={texPopup.rawPath}
-          resolvedPath={texPopup.resolvedPath}
-          imageDataUrl={texPopup.imageDataUrl}
-          texWidth={texPopup.texWidth}
-          texHeight={texPopup.texHeight}
-          formatName={texPopup.formatStr}
-          error={texPopup.error}
-          onOpenFull={handleTexOpenFull}
-          onEditImage={() => handleTexEditImage(texPopup.resolvedPath)}
-          onShowInExplorer={() => handleTexShowInExplorer(texPopup.resolvedPath)}
-          onClose={closeTexPopup}
-          onMouseEnter={() => { isOverTexPopupRef.current = true; }}
-          onMouseLeave={() => { isOverTexPopupRef.current = false; }}
-        />
-      )}
-
-      <StatusBar
-        status={statusText}
-        lineCount={lineCount}
-        caretLine={caretPosition.line}
-        caretColumn={caretPosition.column}
-        ramUsage="0 MB"
-      />
-
-      <AboutDialog
-        isOpen={showAboutDialog}
-        onClose={() => setShowAboutDialog(false)}
-      />
-
-      <ThemesDialog
-        isOpen={showThemesDialog}
-        onClose={() => setShowThemesDialog(false)}
-        onThemeApplied={handleThemeApplied}
-      />
-
-      {showMaterialLibrary && (
-        <MaterialLibraryBrowser
-          onClose={() => setShowMaterialLibrary(false)}
-        />
-      )}
-
-      <SettingsDialog
-        isOpen={showSettingsDialog}
-        onClose={() => setShowSettingsDialog(false)}
-      />
-
-      <PreferencesDialog
-        isOpen={showPreferencesDialog}
-        onClose={() => setShowPreferencesDialog(false)}
-        onEmitterHintsChange={(enabled) => {
-          emitterHintsEnabled.current = enabled;
-          if (editorRef.current) updateEmitterNameDecorations(editorRef.current);
-        }}
-        onSyntaxCheckingChange={(enabled) => {
-          syntaxCheckingEnabled.current = enabled;
-          if (editorRef.current) updateSyntaxMarkers(editorRef.current);
-        }}
-      />
-
-      {updateToastVersion && (
-        <UpdateToast
-          version={updateToastVersion}
-          onOpenSettings={() => setShowSettingsDialog(true)}
-          onDismiss={() => setUpdateToastVersion(null)}
-        />
-      )}
-
-      {hashSyncToast?.visible && (
-        <HashSyncToast
-          status={hashSyncToast.status}
-          message={hashSyncToast.message}
-          onDismiss={() => {
-            if (hashToastHideTimeoutRef.current) {
-              clearTimeout(hashToastHideTimeoutRef.current);
-              hashToastHideTimeoutRef.current = null;
-            }
-            setHashSyncToast((prev) => prev ? { ...prev, visible: false } : prev);
-          }}
-        />
-      )}
-
-      {activeTab && isEditorTab(activeTab) && particleDialogOpen && (
-        <ParticleEditorDialog
-          isOpen={particleDialogOpen}
-          onClose={() => setParticleDialogOpen(false)}
-          editorContent={editorRef.current?.getValue() || activeTab.content}
-          onContentChange={handleGeneralEditContentChange}
-          onScrollToLine={handleScrollToLine}
-          onStatusUpdate={setStatusMessage}
-        />
-      )}
-
-      <QuartzInstallModal
-        isOpen={showQuartzInstallModal}
-        onClose={() => setShowQuartzInstallModal(false)}
-        onDownload={async () => {
-          try {
-            await invoke('open_url', { url: 'https://github.com/LeagueToolkit/Quartz/releases' });
-          } catch {
-            window.open('https://github.com/LeagueToolkit/Quartz/releases', '_blank', 'noopener,noreferrer');
-          }
-        }}
-      />
-
-      <SmokeOverlay active={cigaretteMode} />
-    </div>
+    <ShellProvider value={shellCtx}>
+      <ShellHost />
+    </ShellProvider>
   );
 }
 

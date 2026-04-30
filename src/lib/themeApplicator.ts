@@ -2,8 +2,10 @@
 // Applies themes dynamically to the application
 
 import { getTheme, getSyntaxColors, getBracketColors } from './themes';
-import type { SyntaxColors, BracketColors } from './themes';
+import type { SyntaxColors, BracketColors, FontSettings, FontLibraryEntry } from './themes';
 import type { Monaco } from '@monaco-editor/react';
+
+export type { FontSettings, FontLibraryEntry };
 
 interface CustomSyntaxOptions {
     customSyntax?: SyntaxColors;
@@ -31,6 +33,86 @@ interface CustomBackgroundOptions {
     positionX?: number;
     positionY?: number;
     zoom?: number;
+    backgroundSize?: string;   // CSS background-size value, defaults to 'cover'
+    backgroundColor?: string;  // CSS background-color behind the image, defaults to 'transparent'
+}
+
+// Each bundled preset font file — loaded via FontFace API (same path as imported fonts)
+// so they work regardless of WebView2's CSS @font-face URL handling.
+const BUNDLED_FONTS: { name: string; url: string; weight: string; format?: string; mimeType?: string }[] = [
+    { name: 'Cascadia Code',   url: '/fonts/cascadia-code-400.woff2',   weight: '400' },
+    { name: 'Cascadia Code',   url: '/fonts/cascadia-code-700.woff2',   weight: '700' },
+    { name: 'Fira Code',       url: '/fonts/fira-code-400.woff2',       weight: '400' },
+    { name: 'Fira Code',       url: '/fonts/fira-code-700.woff2',       weight: '700' },
+    { name: 'Hack',            url: '/fonts/hack-400.woff2',            weight: '400' },
+    { name: 'Hack',            url: '/fonts/hack-700.woff2',            weight: '700' },
+    { name: 'Inconsolata',     url: '/fonts/inconsolata-400.woff2',     weight: '400' },
+    { name: 'JetBrains Mono',  url: '/fonts/jetbrains-mono-400.woff2',  weight: '400' },
+    { name: 'JetBrains Mono',  url: '/fonts/jetbrains-mono-700.woff2',  weight: '700' },
+    { name: 'Roboto Mono',     url: '/fonts/roboto-mono-400.woff2',     weight: '400' },
+    { name: 'Source Code Pro', url: '/fonts/source-code-pro-400.woff2', weight: '400' },
+    { name: 'Ubuntu Mono',     url: '/fonts/ubuntu-mono-400.woff2',     weight: '400' },
+    { name: 'Ubuntu Mono',     url: '/fonts/ubuntu-mono-700.woff2',     weight: '700' },
+    { name: 'Lovelt__',        url: '/fonts/Lovelt__.ttf',              weight: '400', format: 'truetype', mimeType: 'font/ttf' },
+    { name: 'Play-Regular',    url: '/fonts/Play-Regular.ttf',          weight: '400', format: 'truetype', mimeType: 'font/ttf' },
+];
+
+// Shared load promises — keyed by "name:weight" so concurrent callers await the same fetch
+const _bundledFontPromises = new Map<string, Promise<void>>();
+
+// Inject a single @font-face CSS rule via style.textContent.
+// Using textContent (not insertRule) avoids the CSSOM sheet being null/unready after append.
+// Using a blob URL (not base64) keeps the CSS small and lets the browser fetch it normally.
+async function _loadFontFace(name: string, url: string, weight: string, format = 'woff2', mimeType = 'font/woff2'): Promise<void> {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`font fetch failed: ${response.status} ${url}`);
+    const buffer = await response.arrayBuffer();
+
+    const blobUrl = URL.createObjectURL(new Blob([buffer], { type: mimeType }));
+
+    let style = document.getElementById('jade-preset-fonts') as HTMLStyleElement | null;
+    if (!style) {
+        style = document.createElement('style');
+        style.id = 'jade-preset-fonts';
+        document.head.appendChild(style);
+    }
+    style.textContent = (style.textContent ?? '') +
+        `\n@font-face { font-family: "${name}"; src: url("${blobUrl}") format("${format}"); font-weight: ${weight}; font-display: block; }`;
+
+    // Wait for the browser to decode the font so it's ready before Monaco measures
+    try { await document.fonts.load(`${weight} 16px "${name}"`); } catch { /* ignore */ }
+}
+
+/** Fire-and-forget: start fetching all bundled preset fonts in the background at startup. */
+/** Start loading all bundled fonts. Returns a promise that resolves when all are ready. */
+export function preloadBundledFonts(): Promise<void> {
+    const promises: Promise<void>[] = [];
+    for (const { name, url, weight, format, mimeType } of BUNDLED_FONTS) {
+        const key = `${name}:${weight}`;
+        if (!_bundledFontPromises.has(key)) {
+            _bundledFontPromises.set(key, _loadFontFace(name, url, weight, format, mimeType).catch(() => {}));
+        }
+        promises.push(_bundledFontPromises.get(key)!);
+    }
+    return Promise.all(promises).then(() => {});
+}
+
+/**
+ * Ensure all weights of a preset font are loaded into document.fonts before Monaco
+ * measures. No-ops immediately for fonts not in the bundled list (system fonts like
+ * Comic Sans, Consolas, etc.) or if already loaded.
+ */
+export async function ensurePresetFontLoaded(fontName: string): Promise<void> {
+    if (!fontName) return;
+    const entries = BUNDLED_FONTS.filter(f => f.name === fontName);
+    if (entries.length === 0) return; // system font — always available
+    await Promise.all(entries.map(({ name, url, weight, format, mimeType }) => {
+        const key = `${name}:${weight}`;
+        if (!_bundledFontPromises.has(key)) {
+            _bundledFontPromises.set(key, _loadFontFace(name, url, weight, format, mimeType).catch(() => {}));
+        }
+        return _bundledFontPromises.get(key)!;
+    }));
 }
 
 /**
@@ -81,6 +163,19 @@ function makeTextAccent(hex: string): string {
 }
 
 /**
+ * Pull the first hex / rgb color out of a CSS gradient string. Used so
+ * shell surfaces (sticky scroll, etc.) can paint with the same color the
+ * theme's gradient begins with. Returns null if no color can be parsed.
+ */
+function extractFirstColor(gradient: string): string | null {
+    const hexMatch = gradient.match(/#[0-9A-Fa-f]{3,8}\b/);
+    if (hexMatch) return hexMatch[0];
+    const rgbMatch = gradient.match(/rgba?\([^)]+\)/);
+    if (rgbMatch) return rgbMatch[0];
+    return null;
+}
+
+/**
  * Calculate scrollbar colors based on theme
  */
 function calculateScrollbarColors(selectedTab: string, _editorBg: string): { thumb: string; thumbHover: string } {
@@ -122,6 +217,15 @@ export function applyTheme(themeId: string, customColors?: CustomThemeColors) {
         root.style.setProperty('--border-color', `color-mix(in srgb, ${customColors.text} 25%, ${customColors.windowBg})`);
         root.style.setProperty('--text-muted', `color-mix(in srgb, ${customColors.text} 55%, ${customColors.windowBg})`);
 
+        // Custom themes have no per-theme text or gradient overrides
+        root.style.removeProperty('--status-bar-text');
+        root.style.removeProperty('--title-bar-text');
+        root.style.removeProperty('--chrome-fg');
+        root.style.removeProperty('--window-gradient');
+        root.removeAttribute('data-theme-gradient');
+        root.style.removeProperty('--title-bar-accent-overlay');
+        root.style.setProperty('--gradient-top', customColors.editorBg);
+
         // Update Monaco editor background
         updateMonacoBackground(customColors.editorBg);
     } else {
@@ -150,6 +254,55 @@ export function applyTheme(themeId: string, customColors?: CustomThemeColors) {
             root.style.setProperty('--border-color', `color-mix(in srgb, ${theme.text} 25%, ${theme.windowBg})`);
             root.style.setProperty('--text-muted', `color-mix(in srgb, ${theme.text} 55%, ${theme.windowBg})`);
 
+            // Per-theme status bar text override (falls back to --text-color when absent)
+            if (theme.statusBarText) {
+                root.style.setProperty('--status-bar-text', theme.statusBarText);
+            } else {
+                root.style.removeProperty('--status-bar-text');
+            }
+
+            // Per-theme title bar text override (falls back to --text-color when absent)
+            if (theme.titleBarText) {
+                root.style.setProperty('--title-bar-text', theme.titleBarText);
+            } else {
+                root.style.removeProperty('--title-bar-text');
+            }
+
+            // One-shot override for every chrome foreground (window controls,
+            // toolbar buttons, menu triggers, menu icons). Light themes set
+            // this so icons stay readable on bright bars; per-element CSS
+            // vars (--title-bar-btn-fg etc.) still win when overridden.
+            if (theme.chromeForeground) {
+                root.style.setProperty('--chrome-fg', theme.chromeForeground);
+            } else {
+                root.style.removeProperty('--chrome-fg');
+            }
+
+            // Per-theme window background gradient
+            if (theme.windowGradient) {
+                root.style.setProperty('--window-gradient', theme.windowGradient);
+                root.setAttribute('data-theme-gradient', 'true');
+                // Pull the first color stop out of the gradient string so
+                // sticky-scroll / similar surfaces can paint with the same
+                // top-edge color the gradient starts with. Falls back to
+                // editorBg when extraction fails (handles rare gradient
+                // forms we don't parse here).
+                const topColor = extractFirstColor(theme.windowGradient) ?? theme.editorBg;
+                root.style.setProperty('--gradient-top', topColor);
+            } else {
+                root.style.removeProperty('--window-gradient');
+                root.removeAttribute('data-theme-gradient');
+                root.style.setProperty('--gradient-top', theme.editorBg);
+            }
+
+            // Per-theme title bar accent gradient (adds colored wash over flat title-bar-bg)
+            if (theme.titleBarGradient) {
+                root.style.setProperty('--title-bar-accent-overlay', theme.titleBarGradient);
+                root.style.setProperty('--border-color', `color-mix(in srgb, ${theme.statusBar} 25%, ${theme.windowBg})`);
+            } else {
+                root.style.removeProperty('--title-bar-accent-overlay');
+            }
+
             // Update Monaco editor background
             updateMonacoBackground(theme.editorBg);
         }
@@ -174,7 +327,8 @@ export function applyTheme(themeId: string, customColors?: CustomThemeColors) {
 function updateMonacoBackground(bgColor: string) {
     const isModern = document.documentElement.getAttribute('data-ui-mode') === 'modern';
     const hasCustomBg = document.documentElement.getAttribute('data-custom-background') === 'true';
-    const bg = (isModern || hasCustomBg) ? 'transparent' : bgColor;
+    const hasThemeGradient = document.documentElement.getAttribute('data-theme-gradient') === 'true';
+    const bg = (isModern || hasCustomBg || hasThemeGradient) ? 'transparent' : bgColor;
 
     const selectors = [
         '.monaco-editor',
@@ -244,6 +398,8 @@ export function applyCustomBackground(options: CustomBackgroundOptions) {
         root.style.removeProperty('--custom-bg-vignette');
         root.style.removeProperty('--custom-bg-position');
         root.style.removeProperty('--custom-bg-origin');
+        root.style.removeProperty('--custom-bg-size');
+        root.style.removeProperty('--custom-bg-color');
         // Refresh Monaco so it reverts to its solid editor background.
         const editorBg =
             root.style.getPropertyValue('--editor-bg') ||
@@ -276,6 +432,8 @@ export function applyCustomBackground(options: CustomBackgroundOptions) {
     root.style.setProperty('--custom-bg-vignette', vignette.toFixed(2));
     root.style.setProperty('--custom-bg-position', `${posX}% ${posY}%`);
     root.style.setProperty('--custom-bg-origin', `${posX}% ${posY}%`);
+    root.style.setProperty('--custom-bg-size', options.backgroundSize ?? 'cover');
+    root.style.setProperty('--custom-bg-color', options.backgroundColor ?? 'transparent');
 
     // Make Monaco transparent so the background image shows through.
     updateMonacoBackground('transparent');
@@ -289,10 +447,12 @@ export function createMonacoTheme(monaco: Monaco, themeId: string, syntaxThemeId
     const brackets = getBracketColors(syntaxThemeId, syntaxOpts?.customBrackets);
     const theme = getTheme(themeId);
 
-    // Expose syntax colors as CSS variables so non-Monaco UI (e.g. texture
-    // preview filename) can stay in sync with the active syntax theme.
-    document.documentElement.style.setProperty('--syntax-string-color', colors.stringColor);
+    // Expose syntax colors as CSS variables so non-Monaco UI and the font
+    // injection system can stay in sync with the active syntax theme.
+    document.documentElement.style.setProperty('--syntax-keyword-color', colors.keyword);
     document.documentElement.style.setProperty('--syntax-comment-color', colors.comment);
+    document.documentElement.style.setProperty('--syntax-string-color', colors.stringColor);
+    document.documentElement.style.setProperty('--syntax-number-color', colors.number);
     document.documentElement.style.setProperty('--syntax-property-color', colors.propertyColor);
 
     const editorBg = theme?.editorBg || '#1E1E1E';
@@ -323,9 +483,13 @@ export function createMonacoTheme(monaco: Monaco, themeId: string, syntaxThemeId
             { token: 'type.identifier', foreground: colors.propertyColor.replace('#', '') },
             { token: 'variable', foreground: colors.propertyColor.replace('#', '') },
             { token: 'identifier', foreground: colors.propertyColor.replace('#', '') },
+            { token: 'delimiter', foreground: (colors.symbolColor ?? textColor).replace('#', '') },
             { token: 'delimiter.bracket', foreground: brackets.color1.replace('#', '') },
             { token: 'delimiter.square', foreground: brackets.color2.replace('#', '') },
             { token: 'delimiter.parenthesis', foreground: brackets.color3.replace('#', '') },
+            { token: 'identifier', foreground: (colors.symbolColor ?? textColor).replace('#', '') },
+            { token: 'operator', foreground: (colors.symbolColor ?? textColor).replace('#', '') },
+            { token: '', foreground: (colors.symbolColor ?? textColor).replace('#', '') },
         ],
         colors: {
             'editor.background': editorBg,
@@ -398,7 +562,10 @@ export function applyMonacoTheme(
 
     // Monaco resets inline background styles during setTheme, so we
     // re-apply transparency on the next animation frame after Monaco settles.
-    if (document.documentElement.getAttribute('data-ui-mode') === 'modern') {
+    const needsTransparency =
+        document.documentElement.getAttribute('data-ui-mode') === 'modern' ||
+        document.documentElement.getAttribute('data-theme-gradient') === 'true';
+    if (needsTransparency) {
         const editorBg =
             document.documentElement.style.getPropertyValue('--editor-bg') ||
             getComputedStyle(document.documentElement).getPropertyValue('--editor-bg').trim() ||
@@ -422,6 +589,7 @@ export async function loadSavedTheme(
         const syntaxTheme = await invoke('get_preference', { key: 'SyntaxTheme', defaultValue: 'Default' }) as string;
         const overrideSyntax = await invoke('get_preference', { key: 'OverrideSyntax', defaultValue: 'false' }) as string;
         const useCustomBackground = await invoke('get_preference', { key: 'UseCustomBackgroundImage', defaultValue: 'false' }) as string;
+        const useThemeBackground = await invoke('get_preference', { key: 'UseThemeBackground', defaultValue: 'true' }) as string;
         // Background image bytes are stored in a real file in the config
         // dir (not inlined in preferences.json). Pull the data URL from
         // the dedicated command — returns null when no file is present.
@@ -468,7 +636,7 @@ export async function loadSavedTheme(
             applyTheme(theme);
         }
 
-        // Apply user background image + effect settings.
+        // Apply background: priority is custom image > theme default > none
         const parsedBlur = Number.parseInt(customBackgroundBlurRaw, 10);
         const customBackgroundBlur = Number.isFinite(parsedBlur)
             ? Math.min(40, Math.max(0, parsedBlur))
@@ -477,18 +645,47 @@ export async function loadSavedTheme(
             const v = Number.parseInt(raw, 10);
             return Number.isFinite(v) ? Math.min(100, Math.max(0, v)) / 100 : fallback;
         };
-        applyCustomBackground({
-            enabled: useCustomBackground === 'true',
-            imageDataUrl: customBackgroundImage,
-            blur: customBackgroundBlur,
-            brightness: parsePercent(customBackgroundBrightnessRaw, 1),
-            saturation: parsePercent(customBackgroundSaturationRaw, 1),
-            opacity: parsePercent(customBackgroundOpacityRaw, 1),
-            vignette: parsePercent(customBackgroundVignetteRaw, 0),
-            positionX: Number.isFinite(Number.parseFloat(customBackgroundPosXRaw)) ? Number.parseFloat(customBackgroundPosXRaw) : 50,
-            positionY: Number.isFinite(Number.parseFloat(customBackgroundPosYRaw)) ? Number.parseFloat(customBackgroundPosYRaw) : 50,
-            zoom: Number.isFinite(Number.parseFloat(customBackgroundZoomRaw)) ? Math.max(1, Number.parseFloat(customBackgroundZoomRaw)) : 1,
-        });
+        const hasCustomBg = useCustomBackground === 'true' && customBackgroundImage.length > 0;
+        const bgTheme = activeThemeId !== 'Custom' ? getTheme(activeThemeId) : undefined;
+        const hasThemeBg = useThemeBackground !== 'false' && !!bgTheme?.defaultBackground;
+        if (hasCustomBg) {
+            applyCustomBackground({
+                enabled: true,
+                imageDataUrl: customBackgroundImage,
+                blur: customBackgroundBlur,
+                brightness: parsePercent(customBackgroundBrightnessRaw, 1),
+                saturation: parsePercent(customBackgroundSaturationRaw, 1),
+                opacity: parsePercent(customBackgroundOpacityRaw, 1),
+                vignette: parsePercent(customBackgroundVignetteRaw, 0),
+                positionX: Number.isFinite(Number.parseFloat(customBackgroundPosXRaw)) ? Number.parseFloat(customBackgroundPosXRaw) : 50,
+                positionY: Number.isFinite(Number.parseFloat(customBackgroundPosYRaw)) ? Number.parseFloat(customBackgroundPosYRaw) : 50,
+                zoom: Number.isFinite(Number.parseFloat(customBackgroundZoomRaw)) ? Math.max(1, Number.parseFloat(customBackgroundZoomRaw)) : 1,
+            });
+        } else if (hasThemeBg) {
+            // Theme-supplied default background. Blur is user-controllable
+            // (default 4px) so loud branded logos can be softened without
+            // touching the theme files; opacity stays at full so the
+            // image keeps its intended color.
+            const hasGradient = !!bgTheme?.windowGradient;
+            const themeBgBlurRaw = await invoke('get_preference', { key: 'ThemeBackgroundBlur', defaultValue: '4' }) as string;
+            const themeBgBlur = Math.max(0, Math.min(40, Number.parseInt(themeBgBlurRaw, 10) || 0));
+            applyCustomBackground({
+                enabled: true,
+                imageDataUrl: bgTheme!.defaultBackground!,
+                blur: themeBgBlur,
+                brightness: 1,
+                saturation: 1,
+                opacity: 1,
+                vignette: 0,
+                zoom: 1,
+                backgroundSize: bgTheme?.themeBackgroundSize ?? (hasGradient ? 'contain' : 'auto'),
+                positionX: bgTheme?.themeBackgroundPositionX ?? 50,
+                positionY: bgTheme?.themeBackgroundPositionY ?? 50,
+                backgroundColor: hasGradient ? 'transparent' : (bgTheme?.windowBg ?? '#000000'),
+            });
+        } else {
+            applyCustomBackground({ enabled: false, imageDataUrl: '', blur: 0 });
+        }
 
         // Load custom syntax theme if enabled
         const useCustomSyntax = await invoke('get_preference', { key: 'UseCustomSyntaxTheme', defaultValue: 'false' }) as string;
@@ -519,6 +716,9 @@ export async function loadSavedTheme(
             applyMonacoTheme(monaco, activeThemeId, activeSyntaxTheme, customSyntaxOpts);
         }
 
+        // Apply font preferences after theme so syntax color CSS vars are set.
+        await loadSavedFonts(invoke);
+
         return {
             theme,
             useCustom: useCustom === 'true',
@@ -539,5 +739,118 @@ export async function loadSavedTheme(
         }
 
         return { theme: 'Default', useCustom: false, roundedCorners: true, modernUI: true };
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Font system
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Strip the font file extension to get the CSS font-family name. */
+export function fontFileNameToFamily(fileName: string): string {
+    return fileName.replace(/\.(ttf|otf|woff2?)$/i, '');
+}
+
+// Track FontFace objects added via FontFace API so we can remove them on refresh.
+const _loadedFontFaces: FontFace[] = [];
+
+/**
+ * Load font files as FontFace objects (ensures fonts are truly ready for DOM
+ * measurement before Monaco uses them) and register them with document.fonts.
+ * Previous entries are removed and replaced on each call.
+ */
+export async function injectFontFaces(fonts: { name: string; dataUrl: string }[]): Promise<void> {
+    // Remove previously registered FontFace entries
+    for (const ff of _loadedFontFaces) {
+        try { document.fonts.delete(ff); } catch { }
+    }
+    _loadedFontFaces.length = 0;
+
+    if (fonts.length === 0) return;
+
+    // Load each font via FontFace constructor — ff.load() resolves only when the
+    // font is fully decoded and ready for glyph measurement in DOM elements.
+    await Promise.all(fonts.map(async ({ name, dataUrl }) => {
+        try {
+            const ff = new FontFace(name, `url("${dataUrl}")`);
+            await ff.load();
+            document.fonts.add(ff);
+            _loadedFontFaces.push(ff);
+        } catch { /* skip if font fails to load */ }
+    }));
+}
+
+/**
+ * Apply the UI (chrome) font by setting the --ui-font CSS variable on :root.
+ * When fontName is empty the variable is removed and CSS falls back to the
+ * Inter/Avenir/Helvetica stack defined in App.css.
+ */
+export function applyUIFont(fontName: string): void {
+    const root = document.documentElement;
+    if (fontName) {
+        root.style.setProperty('--ui-font', `"${fontName}", sans-serif`);
+    } else {
+        root.style.removeProperty('--ui-font');
+    }
+}
+
+/**
+ * Load font library from disk, inject @font-face rules, apply UI and editor
+ * fonts.
+ */
+export async function loadSavedFonts(
+    invoke: (cmd: string, args?: any) => Promise<any>
+): Promise<void> {
+    try {
+        // Load stored font files and inject @font-face
+        const storedFonts = await invoke('get_stored_fonts') as string[];
+        if (storedFonts.length > 0) {
+            const fontData = await Promise.all(
+                storedFonts.map(async (fileName) => {
+                    try {
+                        const dataUrl = await invoke('get_font_data_url', { fileName }) as string;
+                        return { name: fontFileNameToFamily(fileName), dataUrl };
+                    } catch {
+                        return null;
+                    }
+                })
+            );
+            // await ensures all fonts are truly decoded before Monaco measures them
+            await injectFontFaces(fontData.filter((f): f is { name: string; dataUrl: string } => f !== null));
+        }
+
+        // Load font assignment preferences
+        const uiFont      = await invoke('get_preference', { key: 'UIFont',    defaultValue: '' }) as string;
+        const editorFont  = await invoke('get_preference', { key: 'EditorFont', defaultValue: '' }) as string;
+
+        // Start fetching all bundled preset fonts in the background
+        preloadBundledFonts();
+
+        // Default is the app's classic stack (JetBrains Mono → Fira Code →
+        // Consolas). A theme's `font` is exposed in the picker as a
+        // "Theme Fonts" suggestion the user can opt into, but doesn't
+        // auto-override the editor — themes shouldn't force a display font
+        // on people. User-set EditorFont / UIFont prefs win when present.
+        const activeUIFont = uiFont || '';
+        const activeFont   = editorFont || '';
+
+        // Ensure bundled fonts are loaded before applying
+        if (activeUIFont) await ensurePresetFontLoaded(activeUIFont);
+        applyUIFont(activeUIFont);
+
+        // Ensure the chosen preset font is loaded before telling Monaco to use it
+        if (activeFont && activeFont !== activeUIFont) await ensurePresetFontLoaded(activeFont);
+
+        // Notify App.tsx to update Monaco's fontFamily. When no font is
+        // selected we dispatch an empty string so Monaco falls back to
+        // its built-in default (matches the look the app had before the
+        // font system was added).
+        const resolvedEditorFont = activeFont
+            ? `"${activeFont}", monospace`
+            : "";
+        window.dispatchEvent(new CustomEvent('jade-editor-font-changed', { detail: resolvedEditorFont }));
+
+    } catch (error) {
+        console.error('[Fonts] Failed to load saved fonts:', error);
     }
 }

@@ -38,7 +38,7 @@
 
 .title-text {
   font-size: 12px;
-  color: var(--text-color);
+  color: var(--title-bar-name-fg);
   font-weight: 400;
 }
 
@@ -103,7 +103,9 @@
   background: transparent;
   border: 1px solid #3e3e42;
   border-radius: var(--border-radius);
-  color: #cccccc;
+  /* Per-element variable so each theme can tweak just the toolbar btns
+     if needed; falls all the way back to the classic VS Code grey. */
+  color: var(--title-bar-btn-fg);
   font-size: 14px;
   font-family: 'Segoe UI Emoji', sans-serif;
   cursor: pointer;
@@ -117,18 +119,18 @@
 
 .toolbar-btn:hover {
   background: #2a2d2e;
-  border-color: #007acc;
+  border-color: var(--jade-accent, #007acc);
 }
 
 .toolbar-btn:active {
-  background: #094771;
+  background: color-mix(in srgb, var(--jade-accent, #007acc) 40%, black);
   color: white;
 }
 
 .toolbar-btn.active {
-  background: #0e639c;
+  background: var(--jade-accent, #0e639c);
   color: white;
-  border-color: #0e639c;
+  border-color: var(--jade-accent, #0e639c);
 }
 
 .toolbar-separator {
@@ -158,7 +160,7 @@
   height: 32px;
   background: transparent;
   border: none;
-  color: #cccccc;
+  color: var(--window-control-fg);
   font-size: 10px;
   font-family: 'Segoe MDL2 Assets', sans-serif;
   cursor: pointer;

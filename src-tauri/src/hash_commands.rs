@@ -155,8 +155,7 @@ fn local_file_state(path: &PathBuf) -> Option<LocalFileState> {
     })
 }
 
-async fn probe_remote_file(url: &str, previous: Option<&HashFileMeta>) -> RemoteProbe {
-    let client = reqwest::Client::new();
+async fn probe_remote_file(client: &reqwest::Client, url: &str, previous: Option<&HashFileMeta>) -> RemoteProbe {
     let mut req = client.head(url).header(reqwest::header::USER_AGENT, "Jade-HashManager/1.0");
 
     if let Some(prev) = previous {
@@ -250,7 +249,6 @@ pub async fn download_hashes(app: tauri::AppHandle, use_binary: bool) -> Result<
 
     let mut metadata = read_hashes_meta(&hash_dir);
     let mut downloaded = Vec::new();
-    let mut skipped_count = 0usize;
     let total = HASH_FILES.len();
 
     emit_hash_progress(
@@ -263,80 +261,98 @@ pub async fn download_hashes(app: tauri::AppHandle, use_binary: bool) -> Result<
         "",
         "Checking hash updates...",
     );
-    
-    for (idx, filename) in HASH_FILES.iter().enumerate() {
-        let url = format!("{}{}", BASE_URL, filename);
-        let txt_path = hash_dir.join(filename);
 
-        let previous = metadata.files.get(*filename).cloned();
-        let local = local_file_state(&txt_path);
-        let remote = probe_remote_file(&url, previous.as_ref()).await;
+    let client = reqwest::Client::new();
 
-        let mut up_to_date = false;
-        if let Some(local_state) = &local {
-            if remote.not_modified {
-                up_to_date = true;
-            } else if let Some(remote_mtime) = parse_http_time_millis(&remote.last_modified) {
-                if local_state.mtime_ms >= remote_mtime {
-                    up_to_date = true;
-                }
+    // Probe all remote files in parallel — 5 sequential HEADs were the slow path.
+    let probes: Vec<(String, Option<HashFileMeta>, Option<LocalFileState>, RemoteProbe)> = {
+        let futs = HASH_FILES.iter().map(|filename| {
+            let url = format!("{}{}", BASE_URL, filename);
+            let txt_path = hash_dir.join(filename);
+            let previous = metadata.files.get(*filename).cloned();
+            let local = local_file_state(&txt_path);
+            let client_ref = &client;
+            let prev_ref = previous.clone();
+            async move {
+                let remote = probe_remote_file(client_ref, &url, prev_ref.as_ref()).await;
+                ((*filename).to_string(), previous, local, remote)
             }
-        }
+        });
+        futures::future::join_all(futs).await
+    };
 
-        if up_to_date && txt_path.exists() {
-            let p = previous.unwrap_or_default();
+    // Decide which files need a real GET. The fast skip path: if the remote's
+    // Last-Modified or ETag matches what we last saw and the file is on disk,
+    // there is nothing to do — no bytes to fetch, no metadata churn.
+    let mut to_download: Vec<(String, HashFileMeta, Option<LocalFileState>, RemoteProbe)> = Vec::new();
+    let mut skipped_count = 0usize;
+
+    for (filename, previous, local, remote) in probes {
+        let txt_path = hash_dir.join(&filename);
+        let prev = previous.clone().unwrap_or_default();
+        let url = format!("{}{}", BASE_URL, &filename);
+
+        let same_etag = !remote.etag.is_empty() && remote.etag == prev.etag;
+        let same_last_modified = !remote.last_modified.is_empty() && remote.last_modified == prev.last_modified;
+        let local_newer_or_equal = match (local.as_ref(), parse_http_time_millis(&remote.last_modified)) {
+            (Some(state), Some(remote_mtime)) => state.mtime_ms >= remote_mtime,
+            _ => false,
+        };
+
+        let up_to_date = txt_path.exists()
+            && (remote.not_modified || same_etag || same_last_modified || local_newer_or_equal);
+
+        if up_to_date {
             skipped_count += 1;
             metadata.files.insert(
-                filename.to_string(),
+                filename.clone(),
                 HashFileMeta {
                     url: url.clone(),
-                    etag: if !remote.etag.is_empty() { remote.etag } else { p.etag },
-                    last_modified: if !remote.last_modified.is_empty() { remote.last_modified } else { p.last_modified },
+                    etag: if !remote.etag.is_empty() { remote.etag.clone() } else { prev.etag.clone() },
+                    last_modified: if !remote.last_modified.is_empty() { remote.last_modified.clone() } else { prev.last_modified.clone() },
                     last_checked_at: chrono::Utc::now().to_rfc3339(),
-                    local_mtime_ms: local.as_ref().map(|s| s.mtime_ms).unwrap_or(0),
-                    local_size: local.as_ref().map(|s| s.size).unwrap_or(0),
+                    local_mtime_ms: local.as_ref().map(|s| s.mtime_ms).unwrap_or(prev.local_mtime_ms),
+                    local_size: local.as_ref().map(|s| s.size).unwrap_or(prev.local_size),
                 },
             );
             emit_hash_progress(
                 &app,
                 "downloading",
-                idx + 1,
-                total,
-                downloaded.len(),
                 skipped_count,
-                filename,
-                &format!(
-                    "Up to date: {} ({}/{})",
-                    filename,
-                    downloaded.len() + skipped_count,
-                    total
-                ),
+                total,
+                0,
+                skipped_count,
+                &filename,
+                &format!("Up to date: {}", filename),
             );
             continue;
         }
 
+        to_download.push((filename, prev, local, remote));
+    }
+
+    // Sequentially fetch only the files that actually changed.
+    for (idx, (filename, prev, _local, _remote)) in to_download.iter().enumerate() {
+        let url = format!("{}{}", BASE_URL, filename);
+        let txt_path = hash_dir.join(filename);
+
         emit_hash_progress(
             &app,
             "downloading",
-            idx + 1,
+            skipped_count + idx + 1,
             total,
             downloaded.len(),
             skipped_count,
             filename,
-            &format!(
-                "Downloading {} ({}/{})",
-                filename,
-                downloaded.len() + skipped_count + 1,
-                total
-            ),
+            &format!("Downloading {}", filename),
         );
 
-        let response = reqwest::get(&url).await
+        let response = client.get(&url).send().await
             .map_err(|e| {
                 emit_hash_progress(
                     &app,
                     "error",
-                    idx + 1,
+                    skipped_count + idx + 1,
                     total,
                     downloaded.len(),
                     skipped_count,
@@ -349,7 +365,7 @@ pub async fn download_hashes(app: tauri::AppHandle, use_binary: bool) -> Result<
             emit_hash_progress(
                 &app,
                 "error",
-                idx + 1,
+                skipped_count + idx + 1,
                 total,
                 downloaded.len(),
                 skipped_count,
@@ -367,21 +383,20 @@ pub async fn download_hashes(app: tauri::AppHandle, use_binary: bool) -> Result<
              .map_err(|e| format!("Failed to write {}: {}", filename, e))?;
 
         let after = local_file_state(&txt_path).unwrap_or_default();
-        downloaded.push(filename.to_string());
-        let old = previous.unwrap_or_default();
+        downloaded.push(filename.clone());
         metadata.files.insert(
-            filename.to_string(),
+            filename.clone(),
             HashFileMeta {
                 url: url.clone(),
                 etag: headers
                     .get(reqwest::header::ETAG)
                     .and_then(|v| v.to_str().ok())
-                    .unwrap_or(&old.etag)
+                    .unwrap_or(&prev.etag)
                     .to_string(),
                 last_modified: headers
                     .get(reqwest::header::LAST_MODIFIED)
                     .and_then(|v| v.to_str().ok())
-                    .unwrap_or(&old.last_modified)
+                    .unwrap_or(&prev.last_modified)
                     .to_string(),
                 last_checked_at: chrono::Utc::now().to_rfc3339(),
                 local_mtime_ms: after.mtime_ms,
@@ -389,15 +404,14 @@ pub async fn download_hashes(app: tauri::AppHandle, use_binary: bool) -> Result<
             },
         );
     }
-    
+
     if use_binary {
         for filename in HASH_FILES {
              let txt_path = hash_dir.join(filename);
              let bin_path = hash_dir.join(filename.replace(".txt", ".bin"));
-             
+
              if txt_path.exists() {
                  convert_text_to_binary(&txt_path, &bin_path).map_err(|e| e.to_string())?;
-                 // C# behavior: Delete text file if binary conversion succeeds
                  let _ = fs::remove_file(txt_path);
              }
         }
@@ -405,13 +419,17 @@ pub async fn download_hashes(app: tauri::AppHandle, use_binary: bool) -> Result<
 
     write_hashes_meta(&hash_dir, metadata)?;
 
-    // Refresh both caches so changed hashes apply immediately without app restart.
-    let jade_count = jade_hashes::reload_cached_hashes();
-    let ltk_count = reload_cached_bin_hashes();
-    println!(
-        "[HashCommands] Hash cache reload complete (jade={}, ltk={})",
-        jade_count, ltk_count
-    );
+    // Only reload caches if something actually changed. The reload takes
+    // a brief write lock on the global hash maps and would otherwise stall
+    // an in-progress file open even when there's no new data to apply.
+    if !downloaded.is_empty() {
+        let jade_count = jade_hashes::reload_cached_hashes();
+        let ltk_count = reload_cached_bin_hashes();
+        println!(
+            "[HashCommands] Hash cache reload complete (jade={}, ltk={})",
+            jade_count, ltk_count
+        );
+    }
 
     emit_hash_progress(
         &app,
@@ -427,7 +445,7 @@ pub async fn download_hashes(app: tauri::AppHandle, use_binary: bool) -> Result<
             skipped_count
         ),
     );
-    
+
     Ok(downloaded)
 }
 
