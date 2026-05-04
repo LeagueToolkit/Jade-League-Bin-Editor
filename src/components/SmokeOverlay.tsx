@@ -80,32 +80,50 @@ export default function SmokeOverlay({ active }: SmokeOverlayProps) {
         resize();
         window.addEventListener('resize', resize);
 
+        // Per-frame deltas are doubled vs. the original 60fps version so
+        // the particles look the same speed at our 30fps throttle.
         const spawnParticle = (): Particle => {
             const numVerts = 7 + Math.floor(Math.random() * 5);
             const blobOffsets = Array.from({ length: numVerts }, () => 0.45 + Math.random() * 1.0);
             return {
                 x: Math.random() * canvas.width,
                 y: canvas.height + 25,
-                vx: (Math.random() - 0.5) * 0.7,
-                vy: -(Math.random() * 1.1 + 0.55),
+                vx: (Math.random() - 0.5) * 1.4,
+                vy: -(Math.random() * 2.2 + 1.10),
                 size: Math.random() * 45 + 25,
                 opacity: Math.random() * 0.28 + 0.14,
-                decay: Math.random() * 0.0005 + 0.0007,
-                growth: Math.random() * 0.55 + 0.2,
+                decay: Math.random() * 0.0010 + 0.0014,
+                growth: Math.random() * 1.10 + 0.40,
                 wobbleOffset: Math.random() * Math.PI * 2,
                 blobOffsets,
                 rotation: Math.random() * Math.PI * 2,
-                rotSpeed: (Math.random() - 0.5) * 0.006,
+                rotSpeed: (Math.random() - 0.5) * 0.012,
             };
         };
 
         const MAX_PARTICLES = 80;
         let frameCount = 0;
 
-        const animate = () => {
+        // Throttle the simulation + draw to ~30 fps. rAF still fires at
+        // the monitor's refresh rate (so the loop wakes up smoothly),
+        // but we only do work every TARGET_FRAME_MS so on a 240Hz screen
+        // we don't burn 4× the GPU/CPU drawing the same particles.
+        const TARGET_FPS = 30;
+        const TARGET_FRAME_MS = 1000 / TARGET_FPS;
+        let lastTickAt = 0;
+
+        const animate = (now: number) => {
+            animFrameRef.current = requestAnimationFrame(animate);
+
+            // Skip frame work until at least TARGET_FRAME_MS has passed
+            // since the last sim step. Catch up by snapping lastTickAt
+            // to the most recent grid boundary so we don't drift.
+            if (now - lastTickAt < TARGET_FRAME_MS) return;
+            lastTickAt = now - ((now - lastTickAt) % TARGET_FRAME_MS);
+
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            // Spawn one particle every 3 frames
+            // Spawn one particle every 3 (throttled) frames
             if (frameCount % 3 === 0 && particlesRef.current.length < MAX_PARTICLES) {
                 particlesRef.current.push(spawnParticle());
             }
@@ -113,11 +131,11 @@ export default function SmokeOverlay({ active }: SmokeOverlayProps) {
 
             particlesRef.current = particlesRef.current.filter(p => p.opacity > 0);
 
-            const now = Date.now() * 0.001;
+            const t = Date.now() * 0.001;
             ctx.filter = 'blur(6px)';
 
             for (const p of particlesRef.current) {
-                p.x += p.vx + Math.sin(now * 0.7 + p.wobbleOffset + p.y * 0.006) * 0.5;
+                p.x += p.vx + Math.sin(t * 0.7 + p.wobbleOffset + p.y * 0.006) * 0.5;
                 p.y += p.vy;
                 p.size += p.growth;
                 p.opacity -= p.decay;
@@ -127,10 +145,9 @@ export default function SmokeOverlay({ active }: SmokeOverlayProps) {
             }
 
             ctx.filter = 'none';
-            animFrameRef.current = requestAnimationFrame(animate);
         };
 
-        animate();
+        animFrameRef.current = requestAnimationFrame(animate);
 
         return () => {
             window.removeEventListener('resize', resize);

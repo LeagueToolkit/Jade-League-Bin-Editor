@@ -77,6 +77,7 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
     const [roundedCorners, setRoundedCorners] = useState(true);
     const [modernUI, setModernUI] = useState(true);
     const [cigaretteMode, setCigaretteMode] = useState(false);
+    const [jamesMode, setJamesMode] = useState(false);
     const [useCustomBackground, setUseCustomBackground] = useState(false);
     const [useThemeBackground, setUseThemeBackground] = useState(true);
     const [themeBgBlur, setThemeBgBlur] = useState(4);
@@ -310,6 +311,7 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
             const rounded    = await invoke<string>('get_preference', { key: 'RoundedCorners',  defaultValue: 'true'  });
             const modern     = await invoke<string>('get_preference', { key: 'ModernUI',        defaultValue: 'true'  });
             const cigarette  = await invoke<string>('get_preference', { key: 'CigaretteMode',   defaultValue: 'false' });
+            const james      = await invoke<string>('get_preference', { key: 'JamesMode',       defaultValue: 'false' });
             const useBackground = await invoke<string>('get_preference', { key: 'UseCustomBackgroundImage', defaultValue: 'false' });
             const useThemeBg = await invoke<string>('get_preference', { key: 'UseThemeBackground', defaultValue: 'true' });
             const themeBgBlurRaw = await invoke<string>('get_preference', { key: 'ThemeBackgroundBlur', defaultValue: '4' });
@@ -334,6 +336,7 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
             setRoundedCorners(rounded === 'true');
             setModernUI(modern !== 'false');
             setCigaretteMode(cigarette === 'true');
+            setJamesMode(james === 'true');
             setCustomBackgroundImage(backgroundImage);
             setCustomBackgroundName(backgroundName);
             setUseCustomBackground(useBackground === 'true' && backgroundImage.length > 0);
@@ -508,6 +511,7 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
             await invoke('set_preference', { key: 'RoundedCorners', value: roundedCorners.toString()  });
             await invoke('set_preference', { key: 'ModernUI',       value: modernUI.toString()         });
             await invoke('set_preference', { key: 'CigaretteMode',  value: cigaretteMode.toString()    });
+            await invoke('set_preference', { key: 'JamesMode',      value: jamesMode.toString()        });
             await invoke('set_preference', { key: 'UseCustomBackgroundImage', value: (useCustomBackground && customBackgroundImage.length > 0).toString() });
             await invoke('set_preference', { key: 'UseThemeBackground', value: useThemeBackground.toString() });
             await invoke('set_preference', { key: 'ThemeBackgroundBlur', value: String(themeBgBlur) });
@@ -606,6 +610,7 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
             window.dispatchEvent(new CustomEvent('jade-editor-font-changed', { detail: resolvedEditorFont }));
 
             window.dispatchEvent(new CustomEvent('cigarette-mode-changed', { detail: cigaretteMode }));
+            window.dispatchEvent(new CustomEvent('james-mode-changed', { detail: jamesMode }));
 
             onThemeApplied?.(useCustomTheme ? 'Custom' : selectedTheme);
         } catch (error) {
@@ -1286,6 +1291,13 @@ export default function ThemesDialog({ isOpen, onClose, onThemeApplied }: Themes
                         onChange={e => setCigaretteMode(e.target.checked)} />
                     <span>
                         <strong>Cigarette Mode</strong>
+                    </span>
+                </label>
+                <label className="checkbox-label">
+                    <input type="checkbox" checked={jamesMode}
+                        onChange={e => setJamesMode(e.target.checked)} />
+                    <span>
+                        <strong>James Mode</strong>
                     </span>
                 </label>
             </div>

@@ -47,3 +47,11 @@ windows = { version = "0.58", features = ["Win32_UI_WindowsAndMessaging", "Win32
 # League Toolkit for BIN file parsing (crates.io for compatible ltk_primitives version)
 ltk_meta = { version = "0.3.3", features = ["serde"] }
 ltk_ritobin = "0.1.4"
+
+# WAD extraction — LMDB-backed hashtable + zstd for the combined.zst download.
+heed = "0.20"
+zstd = "0.13"
+flate2 = "1.0"
+# Memory-mapped WAD reads — workers slice into a shared `&[u8]` instead
+# of opening the file once per chunk.
+memmap2 = "0.9"

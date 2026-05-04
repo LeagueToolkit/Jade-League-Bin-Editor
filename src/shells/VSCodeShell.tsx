@@ -81,7 +81,13 @@ export default function VSCodeShell() {
                     recentFiles={s.recentFiles}
                     onOpenRecentFile={s.openFileFromPath}
                     onMaterialLibrary={s.onMaterialLibrary}
+                    onThemes={s.onThemes}
+                    onSettings={s.onSettings}
                     appIcon={s.appIcon}
+                    onMinimize={s.onMinimize}
+                    onMaximize={s.onMaximize}
+                    onClose={s.onClose}
+                    isMaximized={s.isMaximized}
                 />
             )}
             {s.tabs.length === 0 && s.fileLoading && <div className="file-loading-backdrop" />}

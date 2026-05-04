@@ -123,6 +123,7 @@ const PreferencesDialog: React.FC<PreferencesDialogProps> = ({ isOpen, onClose, 
         onSyntaxCheckingChange?.(checked);
     };
 
+
     if (!isOpen) return null;
 
     const editorOptions: { value: string; label: string; available: boolean }[] = [

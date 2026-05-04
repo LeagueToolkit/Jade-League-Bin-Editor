@@ -1,279 +1,1542 @@
 /* ─────────────────────────────────────────────
-   Welcome Screen — Cursor-style landing card
-   Shown when no tabs are open. Uses theme variables
-   so it follows the user's theme and rounded-corners
-   setting.
+   Welcome / Start screen — MS-Word-inspired layout.
+   Full-viewport overlay with a left rail of square
+   nav buttons and a main pane that swaps between
+   Home and Extract.
    ───────────────────────────────────────────── */
 
-.welcome-screen {
+.welcome-screen-v2 {
+    /* Cover the whole window. Title bar across the top, rail down the
+       left, main + status to the right of the rail. The separating
+       line lives on .welcome-main's top edge so it spans only the
+       right column — never crosses over the rail. */
+    position: fixed;
+    inset: 0;
+    z-index: 1300;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    grid-template-columns: auto 1fr;
+    grid-template-areas:
+        "titlebar titlebar"
+        "rail     main"
+        "rail     status";
+    background: var(--editor-bg, #1e1e1e);
+    overflow: hidden;
+}
+
+/* Hide the shell's own title-bar contents while the welcome overlay
+   is mounted — we draw our own bar on top, no need for the underlying
+   one to fight for space. */
+body.welcome-active .title-bar > * {
+    visibility: hidden;
+}
+
+/* Welcome title bar — minimal Windows-style chrome with drag region
+   and three control buttons. Same --window-bg as the rail; no
+   border-bottom of its own (the line below the title bar lives on
+   .welcome-main's top edge instead, so it only spans the right
+   column and doesn't cross over the rail). */
+.welcome-titlebar {
+    grid-area: titlebar;
+    display: flex;
+    align-items: center;
+    height: 32px;
+    background: var(--window-bg, #252526);
+    -webkit-app-region: drag;
+    user-select: none;
+}
+.welcome-titlebar-brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px;
+    height: 100%;
+    -webkit-app-region: drag;
+}
+.welcome-titlebar-icon {
+    width: 18px;
+    height: 18px;
+    object-fit: contain;
+    border-radius: 3px;
+    display: block;
+}
+.welcome-titlebar-name {
+    display: inline-flex;
+    align-items: center;
+    font-size: 13px;
+    color: var(--title-bar-name-fg, var(--text-color, #cccccc));
+    font-weight: 500;
+    /* Tight line-height + flex align so the cap-line of "Jade" sits at
+       the same vertical center as the icon (without it the line box
+       leaves extra space below the descender area, pushing the text
+       optically high). */
+    line-height: 1;
+    height: 100%;
+}
+.welcome-titlebar-spacer {
     flex: 1 1 auto;
-    min-height: 0;
+    height: 100%;
+}
+.welcome-titlebar-controls {
+    display: flex;
+    align-items: stretch;
+    height: 100%;
+    -webkit-app-region: no-drag;
+}
+.welcome-titlebar-btn {
+    width: 46px;
+    height: 100%;
+    background: transparent;
+    border: 0;
+    color: var(--window-control-fg, var(--text-color, #cccccc));
+    cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: var(--editor-bg);
-    padding: 32px;
-    overflow-y: auto;
+    transition: background 0.12s;
+}
+.welcome-titlebar-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #ffffff;
+}
+.welcome-titlebar-btn-close:hover {
+    background: #e81123;
+    color: #ffffff;
 }
 
-.welcome-card {
-    width: 560px;
-    max-width: 95%;
-    background: var(--window-bg);
-    border: 1px solid #3E3E42;
-    border-radius: var(--border-radius);
-    padding: 32px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+
+/* ── Left rail: square Word-style nav buttons ── */
+.welcome-rail {
+    grid-area: rail;
+    width: 96px;
+    flex-shrink: 0;
+    background: var(--window-bg, #252526);
+    border-right: 1px solid var(--border-color, #3e3e42);
     display: flex;
     flex-direction: column;
-    gap: 24px;
+    /* Brand block lives in the title bar now, so the first nav item
+       sits flush near the top of the rail. */
+    padding: 8px 0 12px;
+    gap: 4px;
+    overflow-y: auto;
+    z-index: 2;
 }
 
-/* ── Header: logo + title ── */
-.welcome-card-header {
+/* Square nav button — icon stacked over label, ~80×72. */
+.welcome-rail-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    margin: 0 8px;
+    padding: 12px 4px;
+    height: 72px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    color: var(--text-color, #cccccc);
+    font-size: 11px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s;
+    text-align: center;
+}
+.welcome-rail-item > svg {
+    width: 24px;
+    height: 24px;
+    flex-shrink: 0;
+}
+.welcome-rail-item > span {
+    line-height: 1.15;
+}
+.welcome-rail-item:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.05);
+}
+.welcome-rail-item.active {
+    background: var(--selected-tab-bg, #1e1e1e);
+    border-left: 3px solid var(--jade-accent, #007acc);
+    border-radius: 0 4px 4px 0;
+    margin-left: 0;
+    padding-left: 1px;
+}
+.welcome-rail-item:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+/* Open BIN action button — matches the rest of the rail (no accent
+   tint) for consistent monochrome icon styling. */
+
+.welcome-rail-spacer {
+    flex: 1 1 auto;
+}
+
+/* ── Main pane ──
+   Less left padding so the content sits close to the rail (matches the
+   tight rail-to-content gap in MS Word). The pane itself does not
+   scroll — inner sections (Recent table, Extract list) own their own
+   scroll, so the greeting + Quick actions + search stay pinned at the
+   top while the file list flips through. */
+.welcome-main {
+    grid-area: main;
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 32px 36px 28px 24px;
+    background: var(--editor-bg, #1e1e1e);
+    /* 1px line that separates the title bar from the main pane.
+       Lives on main (right column only) so it never crosses the
+       rail — meets the rail's right-border at a clean corner. */
+    border-top: 1px solid var(--border-color, #3e3e42);
+}
+
+.welcome-greeting {
+    font-size: 28px;
+    font-weight: 400;
+    color: var(--text-color, #cccccc);
+    margin: 0 0 24px;
+}
+
+.welcome-subtitle-muted {
+    color: var(--text-muted, #8a8a8a);
+    font-size: 13px;
+    margin: 0 0 24px;
+    max-width: 640px;
+    line-height: 1.5;
+}
+
+/* Home view fills the main pane and lays out as a vertical stack:
+   greeting + Quick actions stay pinned, the recent-files section
+   takes the remaining space and its inner table scrolls. */
+.welcome-home {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+.welcome-home > .welcome-section:last-child {
+    /* Recent-files section grows to fill, table inside scrolls. */
+    flex: 1 1 auto;
+    min-height: 0;
+    margin-bottom: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.welcome-section {
+    margin-bottom: 32px;
+}
+.welcome-section-head {
     display: flex;
     align-items: center;
-    gap: 16px;
+    justify-content: space-between;
+    margin-bottom: 12px;
 }
-
-.welcome-logo {
-    width: 56px;
-    height: 56px;
-    border-radius: var(--border-radius);
-    object-fit: contain;
+.welcome-section-head-tabs {
+    border-bottom: 1px solid var(--border-color, #3e3e42);
+    padding-bottom: 6px;
+    margin-bottom: 0;
 }
-
-.welcome-title-block {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
-
-.welcome-title {
+.welcome-section-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-color, #cccccc);
     margin: 0;
-    font-size: 26px;
-    font-weight: 800;
-    letter-spacing: 0.04em;
-    color: var(--text-color);
-    line-height: 1;
+    text-transform: none;
+    letter-spacing: 0;
 }
 
-.welcome-subtitle {
-    font-size: 12px;
-    color: var(--text-muted);
-    letter-spacing: 0.02em;
-}
-
-/* ── Three action cards ── */
-.welcome-actions {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
+/* Action tiles row — cards with icon + label, like Word's "New" templates row. */
+.welcome-tiles {
+    display: flex;
+    flex-wrap: wrap;
     gap: 12px;
 }
-
-.welcome-action {
+.welcome-tile {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
+    justify-content: flex-end;
     gap: 6px;
-    padding: 16px 14px;
-    background: var(--tab-bg);
-    border: 1px solid #3E3E42;
-    border-radius: var(--border-radius);
-    color: var(--text-color);
+    width: 196px;
+    height: 156px;
+    padding: 18px 16px 16px;
+    background: var(--window-bg, #252526);
+    border: 1px solid var(--border-color, #3e3e42);
+    border-radius: 6px;
+    color: var(--text-color, #cccccc);
     cursor: pointer;
-    transition: all 0.15s ease;
-    font-family: inherit;
+    transition: border-color 0.12s, transform 0.08s;
     text-align: left;
-    min-height: 110px;
+    font-family: inherit;
 }
-
-.welcome-action:hover:not(:disabled) {
-    background: var(--selected-tab-bg);
-    border-color: var(--status-bar-bg);
+.welcome-tile:hover:not(:disabled) {
+    border-color: var(--jade-accent, #007acc);
     transform: translateY(-1px);
 }
-
-.welcome-action:disabled {
-    opacity: 0.5;
+.welcome-tile:disabled {
+    opacity: 0.45;
     cursor: not-allowed;
 }
-
-.welcome-action svg {
-    color: var(--text-color);
-    opacity: 0.85;
-    margin-bottom: 4px;
+.welcome-tile-icon {
+    display: inline-flex;
+    margin-bottom: 6px;
+    /* Inherits currentColor from the tile so icons stay
+       monochrome — white on dark themes, black on light. */
+}
+.welcome-tile-label {
+    font-size: 15px;
+    font-weight: 500;
+}
+.welcome-tile-sub {
+    font-size: 12px;
+    color: var(--text-muted, #8a8a8a);
 }
 
-.welcome-action-label {
+/* Search bar */
+.welcome-search-wrap {
+    margin-bottom: 12px;
+}
+.welcome-search {
+    width: 100%;
+    max-width: 480px;
+    height: 32px;
+    padding: 0 12px;
+    background: var(--window-bg, #252526);
+    border: 1px solid var(--border-color, #3e3e42);
+    border-radius: 4px;
+    color: var(--text-color, #cccccc);
     font-size: 13px;
-    font-weight: 600;
-    color: var(--text-color);
+    font-family: inherit;
+    box-sizing: border-box;
+}
+.welcome-search:focus {
+    outline: none;
+    border-color: var(--jade-accent, #007acc);
 }
 
-.welcome-action-desc {
+/* Tabs row above recent files */
+.welcome-tab {
+    display: inline-block;
+    padding: 6px 0;
+    margin-right: 18px;
+    font-size: 13px;
+    color: var(--text-muted, #8a8a8a);
+    cursor: pointer;
+}
+.welcome-tab.active {
+    color: var(--text-color, #cccccc);
+    border-bottom: 2px solid var(--jade-accent, #007acc);
+    margin-bottom: -7px;
+    padding-bottom: 6px;
+}
+
+/* Recent table — Word-style: format-coloured page icon on the left,
+   filename + folder path stacked in the middle, last-opened time on
+   the right. The table owns its own scroll so the greeting, quick
+   actions, and search bar above it stay pinned. */
+.welcome-recent-table {
+    display: flex;
+    flex-direction: column;
+    border-top: 1px solid var(--border-color, #3e3e42);
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+}
+.welcome-recent-row {
+    display: grid;
+    grid-template-columns: 44px 1fr 180px;
+    align-items: center;
+    gap: 14px;
+    padding: 4px 14px;
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid var(--border-color, #3e3e42);
+    color: var(--text-color, #cccccc);
+    font-size: 14px;
+    cursor: pointer;
+    text-align: left;
+    font-family: inherit;
+    min-height: 50px;
+}
+.welcome-recent-row:hover:not(.welcome-recent-row-header) {
+    background: rgba(255, 255, 255, 0.04);
+}
+.welcome-recent-row-header {
+    color: var(--text-muted, #8a8a8a);
     font-size: 11px;
-    color: var(--text-muted);
-    line-height: 1.3;
+    cursor: default;
+    padding-top: 10px;
+    padding-bottom: 10px;
+    min-height: 0;
+    border-bottom-color: var(--border-color, #3e3e42);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+.welcome-recent-row .col-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 100%;
 }
 
-/* ── Recent files ── */
-.welcome-recent {
+.welcome-recent-row .col-name {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 6px;
+    min-width: 0;
+    line-height: 1.2;
+}
+.welcome-recent-row .welcome-recent-name {
+    color: var(--text-color, #cccccc);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 14px;
+    font-weight: 500;
+}
+.welcome-recent-row .welcome-recent-path {
+    color: var(--text-muted, #8a8a8a);
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-left: 0;
+}
+.welcome-recent-row .col-modified {
+    color: var(--text-muted, #8a8a8a);
+    font-size: 13px;
+    text-align: right;
+}
+.welcome-recent-empty {
+    padding: 20px 8px;
+    color: var(--text-muted, #8a8a8a);
+    font-size: 13px;
+    text-align: center;
+}
+
+/* ── Extract view (Word-Open 3-column layout) ── */
+.welcome-extract {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    flex: 1 1 auto;
+}
+.welcome-extract-title {
+    font-size: 28px;
+    font-weight: 400;
+    color: var(--text-color, #cccccc);
+    margin: 0 0 24px;
+}
+
+.welcome-extract-cols {
+    display: grid;
+    /* Sources / files / preview. The preview gets ~1/3 of the available
+       width to match Word's Open dialog proportions; files takes the
+       remainder, sources stays at a fixed Word-style width. */
+    grid-template-columns: 220px 1fr minmax(420px, 36%);
+    gap: 18px;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+/* Sources column — Recent / League / This PC / Browse list, with the
+   Extract action section pinned to the bottom when a WAD is mounted.
+   `min-height: 0` keeps the col from blowing past its grid track when
+   the source list grows; `overflow-y: auto` only kicks in if it does. */
+.welcome-extract-sources-col {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-height: 0;
+    overflow-y: auto;
+}
+.welcome-source-actions {
+    /* Push to the bottom of the column so the Extract button sits in
+       its own visual zone, separated from the location list above. */
+    margin-top: auto;
+    padding-top: 18px;
+    border-top: 1px solid var(--border-color, #3e3e42);
     display: flex;
     flex-direction: column;
     gap: 8px;
 }
-
-.welcome-recent-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--text-muted);
-    padding-bottom: 4px;
-    border-bottom: 1px solid #3E3E42;
-}
-
-.welcome-recent-count {
-    text-transform: none;
-    letter-spacing: 0;
-    opacity: 0.7;
-}
-
-.welcome-recent-list {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    max-height: 240px;
-    overflow-y: auto;
-}
-
-.welcome-recent-row {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 7px 10px;
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: var(--border-radius);
-    color: var(--text-color);
-    cursor: pointer;
+.welcome-source-action-btn {
+    width: 100%;
+    padding: 10px 14px;
+    border-radius: 4px;
+    border: 1px solid var(--border-color, #3e3e42);
+    background: var(--bg-secondary, rgba(255,255,255,0.04));
+    color: var(--text-color, #cccccc);
     font-family: inherit;
-    text-align: left;
-    transition: background 0.12s ease, border-color 0.12s ease;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+.welcome-source-action-btn:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--jade-accent, #007acc) 16%, transparent);
+    border-color: var(--jade-accent, #007acc);
+}
+.welcome-source-action-btn.primary {
+    background: var(--jade-accent, #007acc);
+    border-color: var(--jade-accent, #007acc);
+    color: white;
+}
+.welcome-source-action-btn.primary:hover:not(:disabled) {
+    filter: brightness(1.1);
+}
+.welcome-source-action-btn.ghost {
+    background: transparent;
+}
+.welcome-source-action-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+.welcome-source-action-status {
+    font-size: 11.5px;
+    color: var(--text-muted, #8a8a8a);
+    line-height: 1.4;
+}
+/* Extract WAD row — primary button (flex-grows) sat next to a fixed
+   square cancel button. Keeps the cancel control in a permanent slot
+   so it can't shove neighbouring buttons around when it appears. */
+.welcome-source-action-row {
+    display: flex;
+    gap: 6px;
+    align-items: stretch;
+}
+.welcome-source-action-row > .welcome-source-action-btn {
+    flex: 1 1 auto;
     min-width: 0;
 }
-
-.welcome-recent-row:hover {
-    background: var(--selected-tab-bg);
-    border-color: #3E3E42;
+.welcome-source-action-cancel {
+    flex: 0 0 auto;
+    width: 36px;
+    height: auto;
+    border-radius: 4px;
+    border: 1px solid var(--border-color, #3e3e42);
+    background: var(--bg-secondary, rgba(255, 255, 255, 0.04));
+    color: var(--text-muted, #8a8a8a);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s;
+    padding: 0;
 }
-
-.welcome-recent-name {
-    font-size: 12px;
-    font-weight: 500;
+.welcome-source-action-cancel:disabled {
+    opacity: 0.35;
+    cursor: default;
+}
+.welcome-source-action-cancel:not(:disabled) {
+    color: var(--text-color, #cccccc);
+}
+.welcome-source-action-cancel:not(:disabled):hover {
+    background: color-mix(in srgb, #d65c5c 18%, transparent);
+    border-color: #d65c5c;
+    color: #ffffff;
+}
+[data-ui-mode="modern"] .welcome-source-action-cancel {
+    background: transparent;
+    border-color: var(--modern-glass-border);
+}
+[data-ui-mode="modern"] .welcome-source-action-cancel:not(:disabled):hover {
+    background: color-mix(in srgb, #d65c5c 22%, transparent);
+    border-color: #d65c5c;
+}
+[data-ui-mode="modern"] .welcome-source-actions {
+    border-top-color: var(--modern-glass-border);
+}
+[data-ui-mode="modern"] .welcome-source-action-btn {
+    background: transparent;
+    border-color: var(--modern-glass-border);
+}
+[data-ui-mode="modern"] .welcome-source-action-btn:hover:not(:disabled) {
+    background: var(--modern-accent-10);
+    border-color: var(--modern-accent);
+}
+[data-ui-mode="modern"] .welcome-source-action-btn.primary {
+    background: var(--modern-accent);
+    border-color: var(--modern-accent);
+}
+.welcome-source-section-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted, #8a8a8a);
+    padding: 8px 10px;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+.welcome-source-section-spaced {
+    margin-top: 18px;
+    border-top: 1px solid var(--border-color, #3e3e42);
+    padding-top: 14px;
+}
+.welcome-source-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 14px 14px;
+    background: transparent;
+    border: 0;
+    border-radius: 4px;
+    color: var(--text-color, #cccccc);
+    cursor: pointer;
+    text-align: left;
+    font-family: inherit;
+    min-height: 60px;
+}
+.welcome-source-row:hover:not(.welcome-source-disabled):not(:disabled) {
+    background: rgba(255, 255, 255, 0.05);
+}
+.welcome-source-row.active {
+    background: color-mix(in srgb, var(--jade-accent, #007acc) 16%, transparent);
+}
+.welcome-source-row > svg {
     flex-shrink: 0;
 }
-
-.welcome-recent-path {
-    font-size: 10px;
-    color: var(--text-muted);
+.welcome-source-row-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    line-height: 1.2;
+}
+.welcome-source-row-label {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-color, #cccccc);
+}
+.welcome-source-row-path {
+    font-size: 12px;
+    color: var(--text-muted, #8a8a8a);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    direction: rtl;
-    text-align: right;
-    flex: 1;
-    min-width: 0;
+}
+.welcome-source-disabled {
+    opacity: 0.5;
+    cursor: default;
 }
 
-/* ── Scrollbars (classic mode) ── */
-.welcome-screen::-webkit-scrollbar,
-.welcome-recent-list::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+/* Drop overlay — covers the Extract view while a `.wad.client` is
+   being dragged onto the window. Dimmed sheet + centered prompt;
+   `pointer-events: none` so the drag itself isn't intercepted by
+   the overlay (Tauri's drag-drop is window-wide regardless). */
+.welcome-extract-dropzone {
+    position: absolute;
+    inset: 0;
+    background: color-mix(in srgb, var(--jade-accent, #007acc) 14%, rgba(10, 14, 22, 0.7));
+    border: 2px dashed var(--jade-accent, #007acc);
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1500;
+    pointer-events: none;
+}
+.welcome-extract-dropzone-inner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    color: var(--text-color, #cccccc);
+    font-size: 16px;
+    font-weight: 500;
+    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
 }
 
-.welcome-screen::-webkit-scrollbar-track,
-.welcome-recent-list::-webkit-scrollbar-track {
+/* Extraction settings — pinned to the bottom of the sources column,
+   visually separated from the location list. The toggle row is
+   low-emphasis (muted text + chevron) so it doesn't compete with
+   the "Browse…" / location buttons; clicking expands an inline
+   panel of toggles below it. */
+.welcome-source-extract-settings {
+    margin-top: auto;
+    padding-top: 14px;
+    border-top: 1px solid var(--border-color, #3e3e42);
+    flex-shrink: 0;
+}
+.welcome-source-settings-toggle {
+    width: 100%;
     background: transparent;
-}
-
-.welcome-screen::-webkit-scrollbar-thumb,
-.welcome-recent-list::-webkit-scrollbar-thumb {
-    background: var(--scrollbar-thumb, rgba(255, 255, 255, 0.15));
+    border: 0;
+    padding: 8px 12px;
     border-radius: 3px;
+    color: var(--text-muted, #8a8a8a);
+    font-size: 11.5px;
+    font-family: inherit;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
 }
-
-.welcome-screen::-webkit-scrollbar-thumb:hover,
-.welcome-recent-list::-webkit-scrollbar-thumb:hover {
-    background: var(--scrollbar-thumb-hover, rgba(255, 255, 255, 0.25));
+.welcome-source-settings-toggle:hover {
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-color, #cccccc);
 }
-
-/* ─────────────────────────────────────────────
-   Modern UI overrides — applied when
-   data-ui-mode="modern" is set on <html>.
-   ───────────────────────────────────────────── */
-
-[data-ui-mode="modern"] .welcome-card {
-    background: var(--modern-dialog-bg) !important;
-    backdrop-filter: saturate(180%) blur(24px);
-    -webkit-backdrop-filter: saturate(180%) blur(24px);
-    /* Stronger outer edge so the card reads clearly even on dark themes. */
-    border: 1px solid rgba(255, 255, 255, 0.18) !important;
-    border-radius: 12px !important;
-    box-shadow:
-        0 32px 80px rgba(0, 0, 0, 0.60),
-        0 0 0 1px rgba(255, 255, 255, 0.06),
-        inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
+.welcome-source-settings-toggle svg {
+    flex-shrink: 0;
+    opacity: 0.7;
 }
-
-/* Action tiles — higher contrast than settings-rows so the three primary
-   CTAs pop. Base background is slightly darker, border is clearly visible
-   even on nearly-black themes. */
-[data-ui-mode="modern"] .welcome-action {
-    background: rgba(255, 255, 255, 0.05) !important;
-    border: 1px solid rgba(255, 255, 255, 0.18) !important;
-    border-radius: 10px !important;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
-    transition: background-color 0.18s ease, border-color 0.18s ease,
-        transform 0.18s ease, box-shadow 0.18s ease !important;
-}
-
-[data-ui-mode="modern"] .welcome-action:hover:not(:disabled) {
-    background: var(--modern-accent-20) !important;
-    border-color: var(--modern-accent-50) !important;
-    box-shadow:
-        0 8px 24px var(--modern-accent-20),
-        0 0 0 1px var(--modern-accent-40),
-        inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
-    transform: translateY(-2px);
-}
-
-/* Icons stay on text color so they remain readable regardless of how
-   dark/bright the theme's accent is. */
-[data-ui-mode="modern"] .welcome-action svg {
-    color: var(--text-color);
+.welcome-source-settings-toggle:hover svg {
     opacity: 1;
 }
-
-[data-ui-mode="modern"] .welcome-action:hover:not(:disabled) svg {
-    color: var(--text-color);
-    filter: drop-shadow(0 0 8px var(--modern-accent-45));
+[data-ui-mode="modern"] .welcome-source-extract-settings {
+    border-top-color: var(--modern-glass-border);
+}
+[data-ui-mode="modern"] .welcome-source-settings-toggle:hover {
+    background: var(--modern-accent-10);
 }
 
-[data-ui-mode="modern"] .welcome-recent-header {
-    border-bottom-color: rgba(255, 255, 255, 0.14) !important;
+/* Files column — toolbar + listing. */
+.welcome-extract-files-col {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 0;
+    min-width: 0;
+}
+.welcome-extract-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: var(--window-bg, #252526);
+    border: 1px solid var(--border-color, #3e3e42);
+    border-radius: 4px;
+    min-height: 44px;
+    flex-shrink: 0;
+    box-sizing: border-box;
+}
+.welcome-tool-btn {
+    width: 32px;
+    height: 28px;
+    background: transparent;
+    /* Always-on outline so the buttons read as buttons even at rest. */
+    border: 1px solid var(--border-color, #3e3e42);
+    border-radius: 3px;
+    color: var(--text-color, #cccccc);
+    cursor: pointer;
+    font-size: 16px;
+    font-family: inherit;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+.welcome-tool-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: var(--jade-accent, #007acc);
+}
+.welcome-tool-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+.welcome-breadcrumb {
+    flex: 1 1 auto;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: nowrap;
+    font-size: 13px;
+    color: var(--text-muted, #8a8a8a);
+    min-width: 0;
+    /* Windows-Explorer behavior: clip overflow with no scrollbar. The
+       left side gets truncated when the path is too long; user can
+       click an earlier breadcrumb segment to navigate back. The
+       useLayoutEffect on .welcome-breadcrumb in WelcomeScreen.tsx
+       still scrolls the active segment into view via scrollLeft, which
+       works under `overflow: hidden` programmatically. */
+    overflow: hidden;
+}
+.welcome-breadcrumb-segment {
+    flex-shrink: 0;
+}
+.welcome-breadcrumb-empty {
+    color: var(--text-muted, #8a8a8a);
+}
+.welcome-breadcrumb-segment {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+}
+.welcome-breadcrumb-btn {
+    background: transparent;
+    border: 0;
+    padding: 4px 8px;
+    border-radius: 3px;
+    color: var(--text-color, #cccccc);
+    font-size: 13px;
+    cursor: pointer;
+    font-family: inherit;
+}
+.welcome-breadcrumb-btn:hover {
+    background: rgba(255, 255, 255, 0.06);
 }
 
+/* Search bar — sits between the breadcrumb toolbar and the file list.
+   Filters the current folder by substring against the file name. */
+.welcome-extract-search {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 14px;
+    background: var(--window-bg, #252526);
+    border: 1px solid var(--border-color, #3e3e42);
+    border-radius: 4px;
+    height: 44px;
+    /* min-height is what actually wins inside a flex column — height
+       alone is just a "preferred" size that flex will shrink past. */
+    min-height: 44px;
+    flex-shrink: 0;
+    box-sizing: border-box;
+}
+.welcome-extract-search-icon {
+    display: inline-flex;
+    color: var(--text-muted, #8a8a8a);
+}
+.welcome-extract-search-input {
+    flex: 1 1 auto;
+    background: transparent;
+    border: 0;
+    outline: none;
+    color: var(--text-color, #cccccc);
+    font-size: 14px;
+    font-family: inherit;
+    height: 100%;
+}
+.welcome-extract-search-input::placeholder {
+    color: var(--text-muted, #8a8a8a);
+}
+.welcome-extract-search-input:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* Header + scrollable list combined into a table-style container.
+   Header lives OUTSIDE the scroll area so rows can never visually
+   clip through it — we no longer have to fight z-index/background
+   to keep the column labels readable in modern UI. */
+.welcome-extract-table {
+    flex: 1 1 auto;
+    min-height: 0;
+    background: var(--window-bg, #252526);
+    border: 1px solid var(--border-color, #3e3e42);
+    border-radius: 4px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.welcome-extract-table.wad-mode .welcome-extract-row {
+    grid-template-columns: 28px 24px 1fr 100px 110px;
+}
+.welcome-extract-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    background: transparent;
+    display: flex;
+    flex-direction: column;
+}
+.welcome-extract-empty {
+    padding: 24px;
+    color: var(--text-muted, #8a8a8a);
+    text-align: center;
+    font-size: 13px;
+}
+.welcome-extract-error {
+    color: #f48771;
+}
+.welcome-extract-row {
+    display: grid;
+    /* Default = disk mode: checkbox · icon · Name · Type · Size · Modified.
+       Single `1fr` for Name keeps the column labels close together —
+       using two `1fr`s would space "Name"/"Type" half a screen apart on
+       a wide window. */
+    grid-template-columns: 28px 24px 1fr 110px 100px 130px;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 16px;
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid var(--border-color, #3e3e42);
+    color: var(--text-color, #cccccc);
+    font-size: 13px;
+    cursor: pointer;
+    text-align: left;
+    font-family: inherit;
+    /* Fixed height (was min-height) so virtualised lists can compute
+       row offsets directly from `scrollTop / 52` without measuring
+       individual rows. The header overrides this with its own
+       compact height below. */
+    height: 52px;
+    min-height: 52px;
+    max-height: 52px;
+    flex-shrink: 0;
+    overflow: hidden;
+}
+/* WAD mode trims the trailing "Modified" column — chunks have no
+   per-file mtime, and the column would just be dead space inside a
+   mounted WAD. */
+.welcome-extract-list.wad-mode .welcome-extract-row {
+    grid-template-columns: 28px 24px 1fr 110px 100px;
+}
+.welcome-extract-row-checkbox {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    /* Stretch the checkbox cell to the full row height so the hover
+       state and the right-side divider read as a clear hit zone.
+       Vertical bleed into the row's padding is scoped to data rows
+       below — the header has no vertical padding, so applying it
+       there would push the cell (and its divider line) outside the
+       header bar. Padding stays symmetric (zero) so the input
+       centers on the *visual* cell midpoint — asymmetric padding
+       was pushing it noticeably right. */
+    align-self: stretch;
+    margin-left: -16px;
+    padding: 0;
+    cursor: pointer;
+    position: relative;
+    transition: background 0.1s;
+}
+.welcome-extract-row:not(.welcome-extract-row-header) .welcome-extract-row-checkbox {
+    margin-top: -14px;
+    margin-bottom: -14px;
+}
+/* Right-edge divider — sits at the cell's right edge (not floating in
+   the middle of the gap) so the file icon to its right has the full
+   14px gap of breathing room. */
+.welcome-extract-row-checkbox::after {
+    content: "";
+    position: absolute;
+    right: 0;
+    top: 8px;
+    bottom: 8px;
+    width: 1px;
+    background: var(--border-color, #3e3e42);
+    pointer-events: none;
+}
+.welcome-extract-row-checkbox:hover {
+    background: color-mix(in srgb, var(--text-color, #cccccc) 8%, transparent);
+}
+/* Empty checkbox cell — used by non-WAD disk rows and by the header
+   cell when no row is checkable. Keeps the divider visible so column
+   boundaries stay consistent, but disables the hover affordance so it
+   doesn't suggest interactivity. */
+.welcome-extract-row-checkbox-empty {
+    cursor: default;
+}
+.welcome-extract-row-checkbox-empty:hover {
+    background: transparent;
+}
+/* Pure visual — the cell handles all click logic so the input itself
+   shouldn't trap pointer events (avoids double-toggle). */
+.welcome-extract-row-checkbox input[type="checkbox"] {
+    pointer-events: none;
+    width: 14px;
+    height: 14px;
+    accent-color: var(--jade-accent, #007acc);
+}
+[data-ui-mode="modern"] .welcome-extract-row-checkbox::after {
+    background: var(--modern-glass-border);
+}
+[data-ui-mode="modern"] .welcome-extract-row-checkbox:hover {
+    background: var(--modern-accent-10);
+}
+/* Subtle name accent for rows that are checkbox-checked OR partially
+   selected (some descendants checked, for folders). Distinct from
+   `.selected` which marks the click-pinned preview row. */
+.welcome-extract-row.has-selection .welcome-extract-row-name {
+    font-weight: 500;
+    color: var(--text-color, #cccccc);
+}
+.welcome-extract-row:hover:not(.welcome-extract-row-header) {
+    background: rgba(255, 255, 255, 0.04);
+}
+.welcome-extract-row.selected {
+    background: color-mix(in srgb, var(--jade-accent, #007acc) 25%, transparent);
+}
+.welcome-extract-row-header {
+    color: var(--text-muted, #8a8a8a);
+    font-size: 11px;
+    cursor: default;
+    background: rgba(255, 255, 255, 0.03);
+    /* Header lives outside the scroll area now (see
+       `.welcome-extract-table` markup), so it can stay translucent
+       and pick up the modern UI's frosted feel without rows ever
+       being able to render *through* it. */
+    flex: 0 0 auto;
+    height: 32px;
+    min-height: 32px;
+    max-height: 32px;
+    padding-top: 0;
+    padding-bottom: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+.welcome-extract-row-icon {
+    display: inline-flex;
+}
+.welcome-extract-row-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 14px;
+}
+.welcome-extract-row-meta {
+    color: var(--text-muted, #8a8a8a);
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.welcome-extract-row-size {
+    text-align: right;
+}
+
+/* Preview pane on the right (the box you drew on the Word screenshot).
+   Top section is the Extract action strip; the body fills the rest. */
+.welcome-extract-preview {
+    background: var(--window-bg, #252526);
+    border: 1px solid var(--border-color, #3e3e42);
+    border-radius: 4px;
+    padding: 18px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    gap: 14px;
+}
+/* Actions sit at the bottom of the preview pane now — separator border
+   flips to `border-top` so the strip reads as anchored to the bottom of
+   the column rather than dividing the body from itself. */
+.welcome-preview-actions {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border-color, #3e3e42);
+}
+.welcome-preview-actions > .welcome-source-action-btn {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 9px 12px;
+    font-size: 12.5px;
+    /* Slim the buttons a touch so two stacked side-by-side fit
+       comfortably alongside the cancel square. */
+}
+.welcome-preview-actions > .welcome-source-action-cancel {
+    flex: 0 0 auto;
+    width: 36px;
+}
+[data-ui-mode="modern"] .welcome-preview-actions {
+    border-top-color: var(--modern-glass-border);
+}
+.welcome-preview-body {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+.welcome-preview-empty {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    color: var(--text-muted, #8a8a8a);
+    gap: 8px;
+}
+.welcome-preview-empty-sub {
+    font-size: 11px;
+    max-width: 240px;
+}
+.welcome-preview-detail {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+.welcome-preview-name {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-color, #cccccc);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-bottom: 14px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--border-color, #3e3e42);
+}
+.welcome-preview-row {
+    display: grid;
+    grid-template-columns: 96px 1fr;
+    gap: 12px;
+    align-items: baseline;
+    font-size: 13px;
+    padding: 6px 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--border-color, #3e3e42) 40%, transparent);
+}
+.welcome-preview-row:last-child {
+    border-bottom: 0;
+}
+.welcome-preview-key {
+    color: var(--text-muted, #8a8a8a);
+}
+.welcome-preview-val {
+    color: var(--text-color, #cccccc);
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.welcome-preview-val-path {
+    font-family: ui-monospace, 'Cascadia Mono', 'Consolas', monospace;
+    font-size: 11px;
+    word-break: break-all;
+    white-space: normal;
+}
+.welcome-preview-actions {
+    margin-top: 12px;
+    display: flex;
+    gap: 8px;
+}
+.welcome-preview-action {
+    flex: 1 1 auto;
+    padding: 8px 12px;
+    background: var(--jade-accent, #007acc);
+    border: 0;
+    border-radius: 4px;
+    color: #ffffff;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+}
+.welcome-preview-action:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.welcome-preview-action-secondary {
+    background: var(--bg-secondary, rgba(255, 255, 255, 0.06));
+    color: var(--text-color, #cccccc);
+    border: 1px solid var(--border-color, #3e3e42);
+}
+.welcome-preview-action-ghost {
+    background: transparent;
+    color: var(--text-color, #cccccc);
+    border: 1px solid var(--border-color, #3e3e42);
+}
+
+/* Image preview slot at the top of the detail pane. Aspect-ratio is
+   driven by the decoded texture so a tall DDS doesn't squash a wide
+   one — `object-fit: contain` keeps the whole image visible while a
+   max-height cap stops the preview from pushing the metadata rows
+   off-screen on small windows. */
+.welcome-preview-image {
+    width: 100%;
+    /* Larger preview slot — the metadata below is now a single line so
+       the image gets to breathe. Caps at the column height so very tall
+       textures still let the meta + actions stay visible. */
+    flex: 1 1 auto;
+    min-height: 280px;
+    max-height: min(540px, 70vh);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in srgb, var(--text-color, #cccccc) 4%, transparent);
+    border: 1px solid color-mix(in srgb, var(--border-color, #3e3e42) 60%, transparent);
+    border-radius: 4px;
+    margin-bottom: 12px;
+    overflow: hidden;
+    /* Subtle checker so transparent textures read as transparent — the
+       same trick the editor's TexturePreviewTab uses. */
+    background-image:
+        linear-gradient(45deg, rgba(255,255,255,0.03) 25%, transparent 25%),
+        linear-gradient(-45deg, rgba(255,255,255,0.03) 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, rgba(255,255,255,0.03) 75%),
+        linear-gradient(-45deg, transparent 75%, rgba(255,255,255,0.03) 75%);
+    background-size: 16px 16px;
+    background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+.welcome-preview-image img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    display: block;
+}
+.welcome-preview-image-loading,
+.welcome-preview-image-error {
+    flex: 0 0 auto;
+    min-height: 160px;
+    color: var(--text-muted, #8a8a8a);
+    font-size: 12px;
+    background-image: none;
+}
+.welcome-preview-image-error {
+    color: var(--error-color, #d65c5c);
+}
+/* Single-line metadata under the image — type · size · dims. The
+   detail rows are gone in WAD mode so the image gets the column. */
+.welcome-preview-meta-line {
+    font-size: 12px;
+    color: var(--text-muted, #8a8a8a);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Status text overlaid on the progress bar — left-aligned with the
+   same colour and weight as the editor's `.status-text`, so the
+   Extract view's status reads as a continuation of that idiom rather
+   than a heavier centred banner. `pointer-events: none` keeps the
+   bar passive even though it isn't interactive today. */
+.welcome-status-text {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    padding-left: 10px;
+    color: var(--status-bar-text, var(--text-color, #cccccc));
+    font-size: 11.5px;
+    pointer-events: none;
+    z-index: 1;
+}
+
+/* Windows-Explorer-style progress accent — a Microsoft-y green fill
+   with a single highlight streak that sweeps left-to-right while the
+   bar is filling, so a long extraction looks active rather than
+   stuck. The streak is a positioned ::after using transform anim so
+   it stays GPU-cheap. */
+.welcome-status-fill {
+    background: #06b025;
+    /* Subtle inner highlight at the top so the bar reads with depth
+       like the Win11 accent. */
+    background-image: linear-gradient(
+        180deg,
+        rgba(255, 255, 255, 0.18) 0%,
+        rgba(255, 255, 255, 0) 55%
+    );
+    background-color: #06b025;
+    position: relative;
+    overflow: hidden;
+}
+.welcome-status-fill::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 35%;
+    /* Diagonal highlight streak — translucent white, blurred via the
+       gradient stops so it reads as a soft sheen rather than a hard
+       line. */
+    background: linear-gradient(
+        100deg,
+        rgba(255, 255, 255, 0) 0%,
+        rgba(255, 255, 255, 0.55) 50%,
+        rgba(255, 255, 255, 0) 100%
+    );
+    /* Off-screen left → off-screen right; loops every 1.4s. The bar
+       always animates while it has any width — no pause states to
+       manage. */
+    animation: welcome-status-shimmer 1.4s linear infinite;
+    pointer-events: none;
+}
+@keyframes welcome-status-shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(360%); }
+}
+
+/* Status bar — mirrors the app's regular .status-bar exactly so it
+   reads as the same chrome the user already knows. Modern UI override
+   below picks up the glass + blur. The progress fill is a lighter
+   wash that runs left-to-right inside the bar. */
+.welcome-status {
+    grid-area: status;
+    height: 22px;
+    min-height: 22px;
+    background: var(--status-bar-bg);
+    border-top: 1px solid #1e1e1e;
+    color: var(--status-bar-text, var(--text-color));
+    user-select: none;
+    flex-shrink: 0;
+    overflow: hidden;
+    position: relative;
+}
+.welcome-status-fill {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.22);
+    transition: width 0.05s linear;
+    pointer-events: none;
+}
+[data-ui-mode="modern"] .welcome-status {
+    background: var(--modern-status-bg) !important;
+    backdrop-filter: var(--modern-blur);
+    -webkit-backdrop-filter: var(--modern-blur);
+    border-top: 1px solid var(--modern-glass-border) !important;
+    box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.25);
+}
+[data-ui-mode="modern"] .welcome-status-fill {
+    background: var(--modern-accent-30, rgba(255, 255, 255, 0.18));
+}
+
+/* ── Modern UI overrides ── */
+/* Modern UI: lean into the glass-and-gradient look the rest of the
+   app uses. The welcome overlay itself paints the same vertical
+   gradient as .app-container, so the main pane stays in sync with
+   the rest of the chrome instead of looking like a flat slab. The
+   rail + title bar pick up --modern-title-bg with a backdrop blur,
+   matching the regular title bar's frosted treatment. */
+[data-ui-mode="modern"] .welcome-screen-v2 {
+    background: var(--window-gradient, linear-gradient(
+        to bottom,
+        var(--editor-bg) 0%,
+        color-mix(in srgb, var(--editor-bg) 72%, black) 100%
+    ));
+}
+[data-ui-mode="modern"] .welcome-main {
+    /* Transparent so the welcome-screen-v2 gradient shows through. */
+    background: transparent;
+    border-top-color: var(--modern-glass-border);
+}
+[data-ui-mode="modern"] .welcome-titlebar {
+    background: var(--modern-title-bg) !important;
+    backdrop-filter: var(--modern-blur);
+    -webkit-backdrop-filter: var(--modern-blur);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+[data-ui-mode="modern"] .welcome-rail {
+    background: var(--modern-title-bg) !important;
+    backdrop-filter: var(--modern-blur);
+    -webkit-backdrop-filter: var(--modern-blur);
+    border-right-color: var(--modern-glass-border);
+}
+[data-ui-mode="modern"] .welcome-rail-item:hover:not(:disabled) {
+    background: var(--modern-accent-10);
+}
+[data-ui-mode="modern"] .welcome-rail-item.active {
+    background: var(--modern-glass-bg);
+    border-left-color: var(--modern-accent);
+}
+/* Quick-actions tiles — transparent fill so the welcome-screen
+   gradient shows through. Only the glass border + a subtle inset
+   highlight define them. Hover gets the accent ring without a
+   filled plate. */
+[data-ui-mode="modern"] .welcome-tile {
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border-color: var(--modern-glass-border);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+[data-ui-mode="modern"] .welcome-tile:hover:not(:disabled) {
+    background: var(--modern-accent-05, transparent);
+    border-color: var(--modern-accent);
+    box-shadow: 0 0 0 1px var(--modern-accent-20),
+                0 6px 18px var(--modern-accent-10);
+}
+[data-ui-mode="modern"] .welcome-source-row.active {
+    background: var(--modern-accent-10);
+    border-radius: 4px;
+}
+[data-ui-mode="modern"] .welcome-source-row:hover:not(.welcome-source-disabled):not(:disabled) {
+    background: var(--modern-accent-05, rgba(255, 255, 255, 0.04));
+}
+/* Extract view surfaces — let the welcome-screen gradient show
+   through. Only the borders define the surfaces; no solid panel
+   colour, no extra blur layer. Quick-actions tiles below stay
+   glass for emphasis. */
+[data-ui-mode="modern"] .welcome-extract-toolbar,
+[data-ui-mode="modern"] .welcome-extract-search,
+[data-ui-mode="modern"] .welcome-extract-list,
+[data-ui-mode="modern"] .welcome-extract-table,
+[data-ui-mode="modern"] .welcome-extract-preview {
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border-color: var(--modern-glass-border);
+}
+[data-ui-mode="modern"] .welcome-extract-row.selected {
+    background: var(--modern-accent-10);
+}
+[data-ui-mode="modern"] .welcome-extract-row:hover:not(.welcome-extract-row-header) {
+    background: var(--modern-accent-05, rgba(255, 255, 255, 0.04));
+}
+[data-ui-mode="modern"] .welcome-recent-row:hover:not(.welcome-recent-row-header) {
+    background: var(--modern-accent-05, rgba(255, 255, 255, 0.04));
+}
+[data-ui-mode="modern"] .welcome-search {
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border-color: var(--modern-glass-border);
+}
+[data-ui-mode="modern"] .welcome-search:focus {
+    border-color: var(--modern-accent);
+    box-shadow: 0 0 0 1px var(--modern-accent-20);
+}
+
+/* Title bar window controls — accent-tinted hover instead of flat
+   white-08 so they read as part of the modern UI palette. Close
+   button keeps the standard #e81123 red since that's a Windows
+   convention. */
+[data-ui-mode="modern"] .welcome-titlebar-btn:hover {
+    background: var(--modern-accent-10);
+    color: var(--text-color, #ffffff);
+}
+[data-ui-mode="modern"] .welcome-titlebar-btn-close:hover {
+    background: #e81123;
+    color: #ffffff;
+}
+
+/* Up-arrow tool button + breadcrumb buttons inside the extract
+   toolbar — accent tints instead of flat white-06. The tool button
+   keeps its always-on outline; in modern UI we swap it to the glass
+   border so it harmonises with the other surfaces. */
+[data-ui-mode="modern"] .welcome-tool-btn {
+    border-color: var(--modern-glass-border);
+}
+[data-ui-mode="modern"] .welcome-tool-btn:hover:not(:disabled) {
+    background: var(--modern-accent-10);
+    border-color: var(--modern-accent);
+}
+[data-ui-mode="modern"] .welcome-breadcrumb-btn:hover {
+    background: var(--modern-accent-10);
+}
+
+/* Recent tab indicator + Recent column dividers — pull from the
+   modern accent palette so they harmonise with the rest of the UI. */
+[data-ui-mode="modern"] .welcome-tab.active {
+    border-bottom-color: var(--modern-accent);
+}
 [data-ui-mode="modern"] .welcome-recent-row {
-    border-radius: 8px !important;
+    border-bottom-color: var(--modern-glass-border);
+}
+[data-ui-mode="modern"] .welcome-recent-row-header {
+    border-bottom-color: var(--modern-glass-border);
 }
 
-[data-ui-mode="modern"] .welcome-recent-row:hover {
-    background: rgba(255, 255, 255, 0.08) !important;
-    border-color: rgba(255, 255, 255, 0.18) !important;
+/* Extract list rows — same treatment as recent rows. */
+[data-ui-mode="modern"] .welcome-extract-row {
+    border-bottom-color: color-mix(in srgb, var(--modern-glass-border) 60%, transparent);
+}
+[data-ui-mode="modern"] .welcome-extract-row-header {
+    background: var(--modern-accent-05, rgba(255, 255, 255, 0.03));
+    border-bottom-color: var(--modern-glass-border);
+}
+
+/* Section dividers used inside the sources column. */
+[data-ui-mode="modern"] .welcome-source-section-spaced {
+    border-top-color: var(--modern-glass-border);
+}
+
+/* Preview pane: name divider + meta-row underlines pick up the
+   glass border so the info stack reads consistently with the rest
+   of the modern UI's separators. */
+[data-ui-mode="modern"] .welcome-preview-name {
+    border-bottom-color: var(--modern-glass-border);
+}
+[data-ui-mode="modern"] .welcome-preview-row {
+    border-bottom-color: color-mix(in srgb, var(--modern-glass-border) 50%, transparent);
+}
+[data-ui-mode="modern"] .welcome-preview-action:hover:not(:disabled) {
+    background: var(--modern-accent);
+    box-shadow: 0 0 0 1px var(--modern-accent-20),
+                0 6px 18px var(--modern-accent-10);
+}
+
+[data-ui-mode="modern"] .welcome-preview-action {
+    background: var(--modern-accent);
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   WAD extraction UI — hash banner, mounted-WAD navigator, action bar.
+   The mounted view replaces the 3-col disk layout entirely so it can
+   stretch full-width inside welcome-main.
+   ───────────────────────────────────────────────────────────────── */
+
+.welcome-hash-banner {
+    margin: 0 24px 12px;
+    padding: 10px 14px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--accent-color, #4a90e2) 8%, transparent);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.welcome-hash-banner-text {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 12.5px;
+    line-height: 1.4;
+}
+.welcome-hash-banner-text strong {
+    font-size: 13px;
+}
+.welcome-hash-banner-btn {
+    flex-shrink: 0;
+    padding: 7px 14px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-secondary, rgba(255,255,255,0.04));
+    color: inherit;
+    font-size: 12.5px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+.welcome-hash-banner-btn:hover:not(:disabled) {
+    background: var(--accent-color, #4a90e2);
+    border-color: var(--accent-color, #4a90e2);
+    color: white;
+}
+.welcome-hash-banner-btn:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+[data-ui-mode="modern"] .welcome-hash-banner {
+    border-color: var(--modern-glass-border);
+    background: color-mix(in srgb, var(--modern-accent) 10%, transparent);
+}
+[data-ui-mode="modern"] .welcome-hash-banner-btn {
+    border-color: var(--modern-glass-border);
+    background: transparent;
+}
+[data-ui-mode="modern"] .welcome-hash-banner-btn:hover:not(:disabled) {
+    background: var(--modern-accent);
+    border-color: var(--modern-accent);
+}
+
+/* Highlight .wad files in the disk list — tinted name hints that
+   clicking will mount + browse instead of selecting. */
+.welcome-extract-row.wad-file .welcome-extract-row-name {
+    color: var(--accent-color, #4a90e2);
+    font-weight: 500;
+}
+
+/* Unknown / hex-only entries inside a WAD — dimmed + monospace so
+   they visually separate from resolved paths. */
+.welcome-extract-row.wad-unknown .welcome-extract-row-name {
+    opacity: 0.7;
+    font-family: var(--mono-font, ui-monospace, SFMono-Regular, monospace);
+    font-size: 12px;
 }

@@ -161,6 +161,7 @@ function App() {
   const [recentFiles, setRecentFiles] = useState<string[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [cigaretteMode, setCigaretteMode] = useState(false);
+  const [jamesMode, setJamesMode] = useState(false);
   const [shellVariant, setShellVariant] = useState<ShellVariant>('vscode');
   // Mirror in a ref so long-lived listeners (Monaco mutation observer)
   // see the current variant without re-binding when it changes.
@@ -377,10 +378,10 @@ function App() {
   useEffect(() => {
     loadCustomIcon();
     restoreWindowState();
-    // Always auto-sync hashes first, then preload them.
-    autoDownloadHashesOnStartup().then(() => {
-      preloadHashesIfEnabled();
-    });
+    // Auto-sync hashes in the background. Preload-into-RAM was removed
+    // — LMDB lookups are cheap enough on demand that the spike at startup
+    // wasn't earning its cost.
+    autoDownloadHashesOnStartup();
     loadRecentFiles(); // Just load the list, don't open files
     if (!monacoInstance) {
       loadSavedTheme(invoke);
@@ -388,6 +389,9 @@ function App() {
 
     invoke<string>('get_preference', { key: 'CigaretteMode', defaultValue: 'false' })
       .then(val => setCigaretteMode(val === 'true'))
+      .catch(() => {});
+    invoke<string>('get_preference', { key: 'JamesMode', defaultValue: 'false' })
+      .then(val => setJamesMode(val === 'true'))
       .catch(() => {});
     invoke<string>('get_preference', { key: 'CommunicateWithQuartz', defaultValue: 'True' })
       .then(val => setQuartzInteropEnabled(val === 'True'))
@@ -423,6 +427,9 @@ function App() {
     const handleCigaretteModeChanged = (e: Event) => {
       setCigaretteMode((e as CustomEvent<boolean>).detail);
     };
+    const handleJamesModeChanged = (e: Event) => {
+      setJamesMode((e as CustomEvent<boolean>).detail);
+    };
     const handleQuartzInteropChanged = (e: Event) => {
       setQuartzInteropEnabled((e as CustomEvent<boolean>).detail !== false);
     };
@@ -435,6 +442,7 @@ function App() {
       setEditorFontFamily(fontFamily);
     };
     window.addEventListener('cigarette-mode-changed', handleCigaretteModeChanged);
+    window.addEventListener('james-mode-changed', handleJamesModeChanged);
     window.addEventListener('quartz-interop-changed', handleQuartzInteropChanged);
     window.addEventListener('shell-changed', handleShellChanged);
     window.addEventListener('jade-editor-font-changed', handleEditorFontChanged);
@@ -836,6 +844,7 @@ function App() {
       window.removeEventListener('icon-changed', handleIconChange);
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('cigarette-mode-changed', handleCigaretteModeChanged);
+      window.removeEventListener('james-mode-changed', handleJamesModeChanged);
       window.removeEventListener('quartz-interop-changed', handleQuartzInteropChanged);
       window.removeEventListener('shell-changed', handleShellChanged);
       window.removeEventListener('jade-editor-font-changed', handleEditorFontChanged);
@@ -959,18 +968,26 @@ function App() {
   };
 
   // Auto-download/update hashes on startup, gated by the user's chosen
-  // schedule (every launch / every 7 days / never). The whole flow is
+  // schedule (every launch / every 3 days / never). The whole flow is
   // background work — file opening is never blocked by this.
+  //
+  // The "fingerprint" check is one HTTPS round-trip to the lmdb-hashes
+  // releases API — it returns the latest tag and we compare to whatever
+  // we stored in `hashes-meta.json`. Only an actual mismatch triggers a
+  // real download.
   const autoDownloadHashesOnStartup = async () => {
     // Reset the toast dismissed latch for this new session.
     hashToastDismissedRef.current = false;
     try {
-      const preStatus = await invoke<{ all_present: boolean }>('check_hashes').catch(() => ({ all_present: false }));
-
-      const mode = await invoke<string>('get_preference', {
+      const rawMode = await invoke<string>('get_preference', {
         key: 'HashUpdateMode',
         defaultValue: 'every_launch'
       }).catch(() => 'every_launch');
+      // Migrate the old 7-day pref value silently — schedule is now 3 days.
+      const mode = rawMode === 'every_7_days' ? 'every_3_days' : rawMode;
+      if (rawMode === 'every_7_days') {
+        await invoke('set_preference', { key: 'HashUpdateMode', value: 'every_3_days' }).catch(() => {});
+      }
 
       // "never" — skip the network entirely.
       if (mode === 'never') {
@@ -978,53 +995,67 @@ function App() {
         return;
       }
 
-      // "every_7_days" — skip if we've checked within the past week and
-      // hashes are present on disk.
-      if (mode === 'every_7_days') {
+      // "every_3_days" — skip the fingerprint check itself if we've
+      // already pinged the API within the past 3 days. Saves a network
+      // round-trip on busy users who relaunch Jade often.
+      if (mode === 'every_3_days') {
         const lastCheckedStr = await invoke<string>('get_preference', {
           key: 'LastHashCheckAt',
           defaultValue: '0'
         }).catch(() => '0');
         const lastChecked = parseInt(lastCheckedStr, 10) || 0;
-        const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
-        if (preStatus?.all_present && (Date.now() - lastChecked) < sevenDaysMs) {
+        const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
+        if ((Date.now() - lastChecked) < threeDaysMs) {
           setHashSyncBusy(false);
           return;
         }
       }
 
       setHashSyncBusy(true);
-      const useBinaryFormat = await invoke<string>('get_preference', {
-        key: 'UseBinaryHashFormat',
-        defaultValue: 'False'
-      }) === 'True';
 
       showHashToast({
         visible: true,
         status: 'checking',
-        message: 'Checking hash updates...'
+        message: 'Checking hash fingerprint...'
       });
 
       allowHashStatusUpdateRef.current = false; // Block hash preload updates during download
-      setStatusMessage('Auto-downloading latest hash files...');
-      statusMessageRef.current = 'Auto-downloading latest hash files...';
+      setStatusMessage('Comparing hash fingerprint...');
+      statusMessageRef.current = 'Comparing hash fingerprint...';
       try {
-        showHashToast({
-          visible: true,
-          status: 'downloading',
-          message: 'Updating hash files...'
-        });
+        // Fingerprint round-trip: ask the backend for the latest GitHub
+        // release tag and compare it to what we have stored locally.
+        // Falls back gracefully when the LMDB layout isn't on disk yet —
+        // in that case `up_to_date` is false and we trigger the full
+        // combined.zst download below.
+        const fp = await invoke<{
+          up_to_date: boolean;
+          current_tag: string;
+          latest_tag: string;
+          layout_present: boolean;
+        }>('wad_check_for_hash_update').catch(() => null);
 
-        const downloaded = await invoke<string[]>('download_hashes', { useBinary: useBinaryFormat });
-        const downloadedCount = Array.isArray(downloaded) ? downloaded.length : 0;
-
-        showHashToast({
-          visible: true,
-          status: 'success',
-          message: downloadedCount > 0
-            ? `Downloaded/updated ${downloadedCount} file(s).`
-            : 'Hashes are already up to date.'
-        });
+        if (fp && fp.up_to_date) {
+          showHashToast({
+            visible: true,
+            status: 'success',
+            message: `Hashes are up to date (${fp.current_tag}).`
+          });
+        } else {
+          showHashToast({
+            visible: true,
+            status: 'downloading',
+            message: fp?.layout_present
+              ? `New release ${fp.latest_tag} — downloading...`
+              : 'Downloading combined LMDB hashes...'
+          });
+          await invoke('wad_download_hashes', { force: true });
+          showHashToast({
+            visible: true,
+            status: 'success',
+            message: 'Hashes updated.'
+          });
+        }
 
         if (hashToastHideTimeoutRef.current) {
           clearTimeout(hashToastHideTimeoutRef.current);
@@ -1033,9 +1064,11 @@ function App() {
           setHashSyncToast((prev) => prev ? { ...prev, visible: false } : prev);
         }, 4200);
 
-        setStatusMessage('Latest hash files downloaded');
-        statusMessageRef.current = 'Latest hash files downloaded';
+        setStatusMessage('Hashes ready');
+        statusMessageRef.current = 'Hashes ready';
         setHashSyncBusy(false);
+        // Reload the BIN converter's hash manager so it picks up the new
+        // LMDB layout (or refreshed text fallback).
         await invoke('set_preference', { key: 'LastHashCheckAt', value: String(Date.now()) }).catch(() => {});
         // Re-enable hash status updates after a short delay
         setTimeout(() => {
@@ -1065,108 +1098,10 @@ function App() {
     }
   };
 
-  // Helper to check if current status is safe to override with hash preload status
-  const isStatusSafeToOverride = (currentStatus: string): boolean => {
-    const lowerStatus = currentStatus.toLowerCase();
-    // Don't override if status contains important operations
-    const importantKeywords = [
-      'opening', 'opened', 'switched to', 'saved', 'loading', 'loaded',
-      'failed', 'error', 'updated', 'set bindweight', 'scaled'
-    ];
-    return !importantKeywords.some(keyword => lowerStatus.includes(keyword));
-  };
-
-  // Preload hashes in background if setting is enabled
-  const preloadHashesIfEnabled = async () => {
-    try {
-      const preloadEnabled = await invoke<string>('get_preference', {
-        key: 'PreloadHashes',
-        defaultValue: 'False'
-      });
-
-      if (preloadEnabled === 'True') {
-        // Check status first to see if hashes are already loaded
-        const status = await invoke<{ loaded: boolean; loading: boolean; fnv_count: number; xxh_count: number; memory_bytes: number }>('get_preload_status');
-
-        if (status.loaded) {
-          // Hashes are already loaded, always update status to show correct info
-          // (even if current status is "Preloading hashes..." - we need to correct it)
-          const totalHashes = status.fnv_count + status.xxh_count;
-          const newStatus = `Ready (${totalHashes} hashes preloaded)`;
-
-          // Force update the status - always update when hashes are already loaded
-          // This corrects any incorrect "Preloading hashes..." status
-          setStatusMessage(currentStatus => {
-            const lowerCurrent = currentStatus.toLowerCase();
-            // Always update if current status is hash-related or generic (to correct wrong status)
-            const isHashRelated = lowerCurrent.includes('preloading hashes') ||
-              lowerCurrent.includes('hashes preloaded') ||
-              lowerCurrent.includes('hash');
-            const isGeneric = lowerCurrent === 'ready' ||
-              lowerCurrent.includes('latest hash files downloaded');
-
-            if (isHashRelated || isGeneric || isStatusSafeToOverride(currentStatus)) {
-              statusMessageRef.current = newStatus;
-              allowHashStatusUpdateRef.current = true;
-              console.log(`[App] Updating status from "${currentStatus}" to "${newStatus}" (hashes already loaded)`);
-              return newStatus;
-            }
-            // Only keep current status if it's an important operation
-            console.log(`[App] Keeping current status "${currentStatus}" (important operation)`);
-            allowHashStatusUpdateRef.current = false;
-            return currentStatus;
-          });
-        } else if (!status.loading) {
-          // Hashes are not loaded and not currently loading, start preloading
-          // Only set preloading status if current status is safe to override
-          setStatusMessage(currentStatus => {
-            statusMessageRef.current = currentStatus;
-            if (isStatusSafeToOverride(currentStatus)) {
-              allowHashStatusUpdateRef.current = true;
-              return 'Preloading hashes...';
-            }
-            allowHashStatusUpdateRef.current = false;
-            return currentStatus;
-          });
-
-          // Run preload in background - don't await
-          invoke<{ loaded: boolean; fnv_count: number; xxh_count: number; memory_bytes: number }>('preload_hashes')
-            .then((preloadStatus) => {
-              if (preloadStatus.loaded) {
-                const totalHashes = preloadStatus.fnv_count + preloadStatus.xxh_count;
-                const newStatus = `Ready (${totalHashes} hashes preloaded)`;
-                // Always update if current status is hash-related
-                setStatusMessage(currentStatus => {
-                  statusMessageRef.current = currentStatus;
-                  const lowerCurrent = currentStatus.toLowerCase();
-                  if (lowerCurrent.includes('preloading hashes') ||
-                    (allowHashStatusUpdateRef.current && isStatusSafeToOverride(currentStatus))) {
-                    return newStatus;
-                  }
-                  return currentStatus;
-                });
-              }
-            })
-            .catch((error) => {
-              console.error('[App] Failed to preload hashes:', error);
-              // Only update status if it's safe to do so
-              setStatusMessage(currentStatus => {
-                statusMessageRef.current = currentStatus;
-                const lowerCurrent = currentStatus.toLowerCase();
-                if (lowerCurrent.includes('preloading hashes') ||
-                  (allowHashStatusUpdateRef.current && isStatusSafeToOverride(currentStatus))) {
-                  return 'Ready';
-                }
-                return currentStatus;
-              });
-            });
-        }
-        // If status.loading is true, hashes are currently being loaded, don't do anything
-      }
-    } catch (error) {
-      console.error('[App] Failed to check preload preference:', error);
-    }
-  };
+  // Hash preload is gone — LMDB lookups are fast enough that draining
+  // the table into RAM at startup gave a memory spike with no perceived
+  // speedup. The legacy text engine still loads on first BIN open
+  // (~1–3 s); the LMDB engine pays microseconds per lookup.
 
   // Recent files management
   const loadRecentFiles = async () => {
@@ -4112,7 +4047,7 @@ function App() {
     shellVariant,
 
     // -- Window
-    appIcon, isMaximized, isDragging, cigaretteMode,
+    appIcon, isMaximized, isDragging, cigaretteMode, jamesMode,
     onMinimize: handleMinimize, onMaximize: handleMaximize, onClose: handleClose,
 
     // -- Tabs

@@ -60,6 +60,7 @@ Quartz-main/
 vscode-main/
 Ritobin/
 ritobin_test/
+other apps/
 
 # Local testing - .NET build artifacts
 src-tauri/BinCli.deps.json

@@ -2,8 +2,6 @@ use std::fs;
 use std::path::PathBuf;
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
-use byteorder::{WriteBytesExt, LittleEndian};
-use std::io::Write;
 use tauri::Emitter;
 use crate::core::hash::get_frogtools_hash_dir;
 use crate::core::bin::{get_cached_bin_hashes, are_hashes_loaded, estimate_ltk_hash_memory, reload_cached_bin_hashes};
@@ -206,33 +204,36 @@ fn parse_http_time_millis(value: &str) -> Option<u64> {
 #[tauri::command]
 pub async fn check_hashes() -> Result<HashStatus, String> {
     let hash_dir = get_hash_dir()?;
-    
+
+    // The combined LMDB layout is the primary source today; legacy text
+    // files only matter as a fallback for users without LMDB. Report
+    // "LMDB" when the layout is present, otherwise list any missing
+    // text files so the UI can prompt for a download.
+    let lmdb_present = !matches!(
+        crate::core::wad::detect_layout(&hash_dir),
+        crate::core::wad::HashLayout::Missing,
+    );
+
+    if lmdb_present {
+        return Ok(HashStatus {
+            all_present: true,
+            missing: Vec::new(),
+            format: "LMDB".to_string(),
+        });
+    }
+
     let mut missing = Vec::new();
     let mut txt_count = 0;
-    let mut bin_count = 0;
-
     for filename in HASH_FILES {
         let txt_path = hash_dir.join(filename);
-        let bin_path = hash_dir.join(filename.replace(".txt", ".bin"));
-        
-        if bin_path.exists() {
-            bin_count += 1;
-        } else if txt_path.exists() {
+        if txt_path.exists() {
             txt_count += 1;
         } else {
             missing.push(filename.to_string());
         }
     }
 
-    let format = if bin_count > 0 && txt_count == 0 {
-        "Binary"
-    } else if txt_count > 0 && bin_count == 0 {
-        "Text"
-    } else if bin_count > 0 && txt_count > 0 {
-        "Mixed"
-    } else {
-        "None"
-    };
+    let format = if txt_count > 0 { "Text" } else { "None" };
 
     Ok(HashStatus {
         all_present: missing.is_empty(),
@@ -242,7 +243,7 @@ pub async fn check_hashes() -> Result<HashStatus, String> {
 }
 
 #[tauri::command]
-pub async fn download_hashes(app: tauri::AppHandle, use_binary: bool) -> Result<Vec<String>, String> {
+pub async fn download_hashes(app: tauri::AppHandle) -> Result<Vec<String>, String> {
     let hash_dir = get_hash_dir()?;
     fs::create_dir_all(&hash_dir)
         .map_err(|e| format!("Failed to create hash dir {}: {}", hash_dir.display(), e))?;
@@ -405,18 +406,6 @@ pub async fn download_hashes(app: tauri::AppHandle, use_binary: bool) -> Result<
         );
     }
 
-    if use_binary {
-        for filename in HASH_FILES {
-             let txt_path = hash_dir.join(filename);
-             let bin_path = hash_dir.join(filename.replace(".txt", ".bin"));
-
-             if txt_path.exists() {
-                 convert_text_to_binary(&txt_path, &bin_path).map_err(|e| e.to_string())?;
-                 let _ = fs::remove_file(txt_path);
-             }
-        }
-    }
-
     write_hashes_meta(&hash_dir, metadata)?;
 
     // Only reload caches if something actually changed. The reload takes
@@ -456,67 +445,12 @@ pub async fn open_hashes_folder() -> Result<(), String> {
         .map_err(|e| format!("Failed to open folder: {}", e))
 }
 
-fn convert_text_to_binary(txt_path: &PathBuf, bin_path: &PathBuf) -> std::io::Result<()> {
-    let content = fs::read_to_string(txt_path)?;
-    let mut fnv1a = Vec::new();
-    let mut xxh64 = Vec::new();
-    
-    for line in content.lines() {
-         if line.trim().is_empty() { continue; }
-         if let Some((hash_part, value_part)) = line.split_once(' ') {
-             let hash_hex = hash_part;
-             if hash_hex.len() == 16 {
-                 if let Ok(h) = u64::from_str_radix(hash_hex, 16) {
-                     xxh64.push((h, value_part.to_string()));
-                 }
-             } else if hash_hex.len() == 8 {
-                 if let Ok(h) = u32::from_str_radix(hash_hex, 16) {
-                     fnv1a.push((h, value_part.to_string()));
-                 }
-             }
-         }
-    }
-    
-    let mut file = fs::File::create(bin_path)?;
-    file.write_all(b"HHSH")?;
-    file.write_i32::<LittleEndian>(1)?; // version
-    file.write_i32::<LittleEndian>(fnv1a.len() as i32)?;
-    file.write_i32::<LittleEndian>(xxh64.len() as i32)?;
-    
-    for (hash, val) in fnv1a {
-        file.write_u32::<LittleEndian>(hash)?;
-        write_string(&mut file, &val)?;
-    }
-    
-    for (hash, val) in xxh64 {
-        file.write_u64::<LittleEndian>(hash)?;
-        write_string(&mut file, &val)?;
-    }
-    
-    Ok(())
-}
-
-fn write_string(writer: &mut impl Write, value: &str) -> std::io::Result<()> {
-    let bytes = value.as_bytes();
-    let mut val = bytes.len() as u32;
-    
-    // Write 7-bit encoded int
-    loop {
-        let mut byte = (val & 0x7F) as u8;
-        val >>= 7;
-        if val != 0 {
-            byte |= 0x80;
-        }
-        writer.write_u8(byte)?;
-        if val == 0 { break; }
-    }
-    
-    writer.write_all(bytes)?;
-    Ok(())
-}
-
-/// Preload hashes into RAM for instant bin file conversion.
-/// Only loads the active engine's cache to avoid double memory usage.
+/// Touch the active engine's cached hash manager so it's loaded.
+///
+/// In LMDB mode this is a near-noop (lookups are cheap enough that we
+/// don't pre-drain the LMDB into RAM). In text-fallback mode it forces
+/// the legacy in-memory parser to run, which keeps the first BIN open
+/// from blocking on a multi-second text load.
 #[tauri::command]
 pub async fn preload_hashes() -> Result<PreloadStatus, String> {
     if is_jade_engine() {
@@ -588,28 +522,3 @@ pub async fn unload_hashes() -> Result<(), String> {
     Ok(())
 }
 
-/// Convert existing text hash files to binary format
-#[tauri::command]
-pub async fn convert_hashes_to_binary() -> Result<Vec<String>, String> {
-    let hash_dir = get_hash_dir()?;
-    let mut converted = Vec::new();
-    
-    for filename in HASH_FILES {
-        let txt_path = hash_dir.join(filename);
-        let bin_path = hash_dir.join(filename.replace(".txt", ".bin"));
-        
-        // Only convert if text file exists and binary doesn't
-        if txt_path.exists() && !bin_path.exists() {
-            convert_text_to_binary(&txt_path, &bin_path)
-                .map_err(|e| format!("Failed to convert {}: {}", filename, e))?;
-            
-            // Delete text file after successful conversion
-            fs::remove_file(&txt_path)
-                .map_err(|e| format!("Failed to delete text file {}: {}", filename, e))?;
-            
-            converted.push(filename.to_string());
-        }
-    }
-    
-    Ok(converted)
-}

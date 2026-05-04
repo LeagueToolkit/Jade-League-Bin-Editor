@@ -46,6 +46,7 @@ export interface ShellContextValue {
     isMaximized: boolean;
     isDragging: boolean;
     cigaretteMode: boolean;
+    jamesMode: boolean;
     onMinimize: () => void;
     onMaximize: () => void;
     onClose: () => void;

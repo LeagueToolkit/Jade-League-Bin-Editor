@@ -821,3 +821,179 @@ fn extract_asset_relative(path: &str) -> String {
     // Fallback: return the full path
     path.to_string()
 }
+
+// ============================================================
+// File Browser commands (Welcome screen Extract Files view)
+// ============================================================
+
+/// One item inside a directory listing — used by the welcome screen's
+/// extract-files browser to render rows. Sizes are bytes, modified is a
+/// unix-seconds timestamp (0 if metadata couldn't be read).
+#[derive(Serialize)]
+pub struct DirEntry {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+    pub size: u64,
+    pub modified: i64,
+    pub extension: String,
+}
+
+#[tauri::command]
+pub fn list_directory(path: String) -> Result<Vec<DirEntry>, String> {
+    let p = std::path::Path::new(&path);
+    if !p.exists() {
+        return Err(format!("Path does not exist: {}", path));
+    }
+    if !p.is_dir() {
+        return Err(format!("Not a directory: {}", path));
+    }
+    let mut out: Vec<DirEntry> = Vec::new();
+    let read = std::fs::read_dir(p).map_err(|e| e.to_string())?;
+    for entry in read.flatten() {
+        let entry_path = entry.path();
+        let name = entry.file_name().to_string_lossy().into_owned();
+        // Skip hidden / system entries on Windows by leading dot or
+        // attribute. Cheap filter — we don't need to be exhaustive.
+        if name.starts_with('.') {
+            continue;
+        }
+        let metadata = entry.metadata().ok();
+        let is_dir = metadata.as_ref().map(|m| m.is_dir()).unwrap_or(false);
+        let size = if is_dir { 0 } else { metadata.as_ref().map(|m| m.len()).unwrap_or(0) };
+        let modified = metadata
+            .as_ref()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        let extension = entry_path
+            .extension()
+            .map(|e| e.to_string_lossy().into_owned().to_lowercase())
+            .unwrap_or_default();
+        out.push(DirEntry {
+            name,
+            path: entry_path.to_string_lossy().into_owned(),
+            is_dir,
+            size,
+            modified,
+            extension,
+        });
+    }
+    // Folders first, then alphabetical within each group.
+    out.sort_by(|a, b| match (a.is_dir, b.is_dir) {
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+    });
+    Ok(out)
+}
+
+#[tauri::command]
+pub fn get_home_directory() -> Option<String> {
+    if let Some(home) = std::env::var_os("USERPROFILE") {
+        return Some(home.to_string_lossy().into_owned());
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        return Some(home.to_string_lossy().into_owned());
+    }
+    None
+}
+
+/// Read the parent directory of `path`, or return the same path when it
+/// has no parent (drive root). Helps the file browser implement "go up".
+#[tauri::command]
+pub fn parent_directory(path: String) -> String {
+    let p = std::path::Path::new(&path);
+    p.parent()
+        .map(|pp| pp.to_string_lossy().into_owned())
+        .unwrap_or(path)
+}
+
+/// Open a directory in Windows Explorer. Different from
+/// `show_in_explorer`, which uses `/select` to highlight a single file
+/// inside its parent — here we want to open the folder itself so the
+/// user sees its contents.
+#[tauri::command]
+pub fn open_folder_in_explorer(path: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        let native = path.replace('/', "\\");
+        std::process::Command::new("explorer.exe")
+            // 0x08000000 = CREATE_NO_WINDOW — no flash of cmd window.
+            .raw_arg(format!("\"{}\"", native))
+            .spawn()
+            .map_err(|e| format!("Failed to open Explorer: {}", e))?;
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Best-effort cross-platform: rely on `xdg-open` / `open`.
+        let cmd = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+        std::process::Command::new(cmd)
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("Failed to open file manager: {}", e))?;
+    }
+    Ok(())
+}
+
+/// Probe a few common locations for a League of Legends install. Returns
+/// the deepest mod-relevant subdirectory: <install>/Game/DATA/FINAL when
+/// it exists (that's where every moddable asset lives), falling back to
+/// the install root otherwise. The Riot Client sits in a different
+/// directory and isn't matched by this probe.
+#[tauri::command]
+pub fn detect_league_install() -> Option<String> {
+    detect_riot_install(&[
+        r"C:\Riot Games\League of Legends",
+        r"D:\Riot Games\League of Legends",
+        r"E:\Riot Games\League of Legends",
+        r"F:\Riot Games\League of Legends",
+        r"C:\Program Files\Riot Games\League of Legends",
+        r"C:\Program Files (x86)\Riot Games\League of Legends",
+    ])
+}
+
+/// Same probe as [`detect_league_install`] but for the public-beta
+/// client. Riot installs PBE under "League of Legends (PBE)" by
+/// default; some users rename it slightly so we cover the common
+/// permutations.
+#[tauri::command]
+pub fn detect_league_pbe_install() -> Option<String> {
+    detect_riot_install(&[
+        r"C:\Riot Games\League of Legends (PBE)",
+        r"D:\Riot Games\League of Legends (PBE)",
+        r"E:\Riot Games\League of Legends (PBE)",
+        r"F:\Riot Games\League of Legends (PBE)",
+        r"C:\Riot Games\League of Legends PBE",
+        r"D:\Riot Games\League of Legends PBE",
+        r"E:\Riot Games\League of Legends PBE",
+        r"F:\Riot Games\League of Legends PBE",
+        r"C:\Program Files\Riot Games\League of Legends (PBE)",
+        r"C:\Program Files (x86)\Riot Games\League of Legends (PBE)",
+    ])
+}
+
+/// Walk a list of candidate Riot install dirs and return the deepest
+/// mod-relevant subdirectory found — `<install>/Game/DATA/FINAL` if it
+/// exists, the install root otherwise. Pulled out as a helper so the
+/// Live and PBE probes don't drift apart.
+fn detect_riot_install(candidates: &[&str]) -> Option<String> {
+    for path in candidates {
+        let p = std::path::Path::new(path);
+        if !p.is_dir() {
+            continue;
+        }
+        // Confirm it's a real install — Game folder or League exe.
+        if !(p.join("Game").is_dir() || p.join("League of Legends.exe").exists()) {
+            continue;
+        }
+        let final_path = p.join("Game").join("DATA").join("FINAL");
+        if final_path.is_dir() {
+            return Some(final_path.to_string_lossy().into_owned());
+        }
+        return Some(path.to_string());
+    }
+    None
+}

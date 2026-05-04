@@ -25,14 +25,6 @@ interface UpdateInfo {
 
 type UpdateCheckState = 'idle' | 'checking' | 'up-to-date' | 'available' | 'downloading' | 'ready' | 'installing' | 'error';
 
-interface PreloadStatus {
-    loaded: boolean;
-    loading: boolean;
-    fnv_count: number;
-    xxh_count: number;
-    memory_bytes: number;
-}
-
 type NavSection = 'hashes' | 'converter' | 'behavior' | 'library' | 'performance' | 'updates';
 
 const NAV_ITEMS: { id: NavSection; label: string; icon: React.ReactNode }[] = [
@@ -174,8 +166,6 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose }) => {
     const [downloadStatus, setDownloadStatus] = useState<string>('');
     const [isDownloading, setIsDownloading] = useState(false);
     const [hashStatus, setHashStatus] = useState<HashStatus | null>(null);
-    const [preloadStatus, setPreloadStatus] = useState<PreloadStatus | null>(null);
-    const [isPreloading, setIsPreloading] = useState(false);
 
     const [autoCheckUpdates, setAutoCheckUpdates] = useState(true);
     const [autoDownloadUpdates, setAutoDownloadUpdates] = useState(false);
@@ -185,9 +175,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose }) => {
     const [updateError, setUpdateError] = useState('');
     const [downloadProgress, setDownloadProgress] = useState<{ downloaded: number; total: number } | null>(null);
     const unlistenRef = useRef<(() => void) | null>(null);
-    const [preloadHash, setPreloadHash] = useState(false);
-    const [binaryFormat, setBinaryFormat] = useState(false);
-    const [hashUpdateMode, setHashUpdateMode] = useState<'every_launch' | 'every_7_days' | 'never'>('every_launch');
+    const [hashUpdateMode, setHashUpdateMode] = useState<'every_launch' | 'every_3_days' | 'never'>('every_launch');
     const [lastHashCheckAt, setLastHashCheckAt] = useState<number>(0);
     const [perfPrefs, setPerfPrefs] = useState<Record<PerfKey, PerfMode>>(PERF_DEFAULT);
     const [minimizeToTray, setMinimizeToTray] = useState(false);
@@ -210,7 +198,6 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose }) => {
         if (isOpen) {
             loadPreferences();
             checkHashStatus();
-            checkPreloadStatus();
             loadLibraryData();
             // Restore cached update info from broadcast if we have it
             if (!updateInfo && cachedUpdateRef.current) {
@@ -237,17 +224,20 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose }) => {
         return () => window.removeEventListener('update-check-result', handler);
     }, []);
 
-    const checkPreloadStatus = async () => {
-        try { setPreloadStatus(await invoke<PreloadStatus>('get_preload_status')); }
-        catch (e) { console.error(e); }
-    };
-
     const loadPreferences = async () => {
         try {
-            setPreloadHash((await invoke<string>('get_preference', { key: 'PreloadHashes', defaultValue: 'False' })) === 'True');
-            setBinaryFormat((await invoke<string>('get_preference', { key: 'UseBinaryHashFormat', defaultValue: 'False' })) === 'True');
             const mode = await invoke<string>('get_preference', { key: 'HashUpdateMode', defaultValue: 'every_launch' });
-            setHashUpdateMode(mode === 'every_7_days' || mode === 'never' ? mode : 'every_launch');
+            // Migrate the old `every_7_days` value silently — the schedule
+            // is now expressed in 3-day windows (cheap fingerprint check).
+            const normalized = mode === 'every_3_days' || mode === 'every_7_days'
+                ? 'every_3_days'
+                : mode === 'never'
+                    ? 'never'
+                    : 'every_launch';
+            setHashUpdateMode(normalized);
+            if (mode === 'every_7_days') {
+                await invoke('set_preference', { key: 'HashUpdateMode', value: 'every_3_days' }).catch(() => {});
+            }
             const lastCheckedStr = await invoke<string>('get_preference', { key: 'LastHashCheckAt', defaultValue: '0' });
             setLastHashCheckAt(parseInt(lastCheckedStr, 10) || 0);
             const loadedPerf: Record<PerfKey, PerfMode> = { ...PERF_DEFAULT };
@@ -279,14 +269,25 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose }) => {
         catch (e) { console.error(e); }
     };
 
-    const handleDownloadHashes = async () => {
+    const handleDownloadLmdbHashes = async () => {
         setIsDownloading(true);
-        setDownloadStatus('Downloading hash files from CommunityDragon…');
+        setDownloadStatus('Downloading combined LMDB hashes from lmdb-hashes…');
         try {
-            await invoke('download_hashes', { useBinary: binaryFormat });
-            setDownloadStatus('Hash files downloaded successfully.');
+            await invoke('wad_download_hashes', { force: true });
+            setDownloadStatus('LMDB hashes ready.');
             checkHashStatus();
-        } catch (e) { setDownloadStatus(`Error: ${e}`); }
+        } catch (e) { setDownloadStatus(`LMDB download failed: ${e}`); }
+        finally { setIsDownloading(false); }
+    };
+
+    const handleDownloadTextHashes = async () => {
+        setIsDownloading(true);
+        setDownloadStatus('Downloading text hashes from CommunityDragon…');
+        try {
+            await invoke('download_hashes');
+            setDownloadStatus('Text hashes ready.');
+            checkHashStatus();
+        } catch (e) { setDownloadStatus(`Text download failed: ${e}`); }
         finally { setIsDownloading(false); }
     };
 
@@ -295,24 +296,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose }) => {
         catch (e) { console.error(e); }
     };
 
-    const togglePreloadHash = async () => {
-        const next = !preloadHash;
-        setPreloadHash(next);
-        savePref('PreloadHashes', next);
-        if (next) {
-            setIsPreloading(true);
-            try { setPreloadStatus(await invoke<PreloadStatus>('preload_hashes')); }
-            catch (e) { console.error(e); }
-            finally { setIsPreloading(false); }
-        } else {
-            try {
-                await invoke('unload_hashes');
-                setPreloadStatus({ loaded: false, loading: false, fnv_count: 0, xxh_count: 0, memory_bytes: 0 });
-            } catch (e) { console.error(e); }
-        }
-    };
-
-    const handleHashUpdateModeChange = async (mode: 'every_launch' | 'every_7_days' | 'never') => {
+    const handleHashUpdateModeChange = async (mode: 'every_launch' | 'every_3_days' | 'never') => {
         setHashUpdateMode(mode);
         try { await invoke('set_preference', { key: 'HashUpdateMode', value: mode }); }
         catch (e) { console.error(e); }
@@ -324,20 +308,6 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose }) => {
         catch (e) { console.error(e); }
         // Broadcast so App.tsx applies the new option to Monaco live.
         window.dispatchEvent(new CustomEvent('perf-pref-changed', { detail: { key, mode } }));
-    };
-
-    const toggleBinaryFormat = async () => {
-        const next = !binaryFormat;
-        setBinaryFormat(next);
-        savePref('UseBinaryHashFormat', next);
-        if (next && hashStatus?.format === 'Text') {
-            setDownloadStatus('Converting text hashes to binary format…');
-            try {
-                await invoke('convert_hashes_to_binary');
-                setDownloadStatus('Hashes converted to binary format.');
-                checkHashStatus();
-            } catch (e) { setDownloadStatus(`Error: ${e}`); }
-        }
     };
 
     const handleCheckForUpdate = async () => {
@@ -454,8 +424,21 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose }) => {
             <p className="settings-section-subtitle">Hash files convert hex values into readable names.</p>
 
             <div className="settings-btn-group">
-                <button className="action-button blue" onClick={handleDownloadHashes} disabled={isDownloading}>
-                    {isDownloading ? 'Downloading…' : 'Download Hashes'}
+                <button
+                    className="action-button blue"
+                    onClick={handleDownloadLmdbHashes}
+                    disabled={isDownloading}
+                    title="Pulls lol-hashes-combined.zst from lmdb-hashes releases. ~50 MB, shared with Quartz."
+                >
+                    {isDownloading ? 'Downloading…' : 'Download LMDB hashes'}
+                </button>
+                <button
+                    className="action-button gray"
+                    onClick={handleDownloadTextHashes}
+                    disabled={isDownloading}
+                    title="Pulls the legacy CommunityDragon text files. Used as a fallback when LMDB isn't available."
+                >
+                    Download text hashes
                 </button>
                 <button className="action-button gray" onClick={handleOpenHashesFolder}>
                     Open Folder
@@ -478,27 +461,6 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose }) => {
             )}
 
             <div className="settings-divider" />
-            <ToggleRow
-                label={isPreloading ? 'Preloading…' : 'Preload hashes on startup'}
-                description="Load hash tables into memory at startup so the first file opens instantly. Without this, hashes load on first use."
-                checked={preloadHash}
-                disabled={isPreloading}
-                onChange={togglePreloadHash}
-            />
-            {preloadHash && preloadStatus?.loaded && (
-                <div className="preload-status">
-                    {preloadStatus.fnv_count + preloadStatus.xxh_count} hashes in RAM
-                    ({Math.round(preloadStatus.memory_bytes / 1024 / 1024)} MB)
-                </div>
-            )}
-            <ToggleRow
-                label="Binary hash format"
-                description="Use a compact binary format instead of plain text. Faster to load; will auto-convert existing text files."
-                checked={binaryFormat}
-                onChange={toggleBinaryFormat}
-            />
-
-            <div className="settings-divider" />
 
             <h3 className="settings-section-title" style={{ fontSize: 16 }}>Update Schedule</h3>
             <p className="settings-section-subtitle">When should Jade check for hash file updates? Updates always run in the background and never block opening files.</p>
@@ -511,10 +473,10 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose }) => {
                     Every launch
                 </button>
                 <button
-                    className={`engine-option${hashUpdateMode === 'every_7_days' ? ' active' : ''}`}
-                    onClick={() => handleHashUpdateModeChange('every_7_days')}
+                    className={`engine-option${hashUpdateMode === 'every_3_days' ? ' active' : ''}`}
+                    onClick={() => handleHashUpdateModeChange('every_3_days')}
                 >
-                    Every 7 days
+                    Every 3 days
                 </button>
                 <button
                     className={`engine-option${hashUpdateMode === 'never' ? ' active' : ''}`}
@@ -525,8 +487,8 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose }) => {
             </div>
 
             <p className="settings-match-mode-desc">
-                {hashUpdateMode === 'every_launch' && 'Check and update hashes silently each time Jade starts.'}
-                {hashUpdateMode === 'every_7_days' && 'Only check once a week. Less network traffic.'}
+                {hashUpdateMode === 'every_launch' && 'Compare the release fingerprint each launch. Re-downloads only when a new lmdb-hashes release is published.'}
+                {hashUpdateMode === 'every_3_days' && 'Same fingerprint check, throttled to once every three days. Less network traffic.'}
                 {hashUpdateMode === 'never' && 'Don’t auto-update. Use the Download Hashes button above when you want fresh hashes.'}
             </p>
 

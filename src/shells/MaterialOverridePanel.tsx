@@ -10,6 +10,16 @@ interface AutoMaterialResult {
     textures: string[];
 }
 
+// Mirrors GeneralEditPanel's library snippet shape — name, materialName,
+// userSlots, and the ritobin text we splice in.
+interface MaterialSnippet {
+    id: string;
+    name: string;
+    materialName: string;
+    userSlots: { name: string; kind: string; description: string }[];
+    snippet: string;
+}
+
 interface MaterialOverridePanelProps {
     /** `'texture'`: insert `texture: string = "..."`.
      *  `'material'`: insert `material: link = "..."`. */
@@ -168,23 +178,256 @@ export default function MaterialOverridePanel({ entryType, onClose }: MaterialOv
         onClose();
     }, [insertEntry, entryType, onClose]);
 
-    const onSubmitWithLibrary = useCallback((
+    /** Insert a `SkinMeshDataProperties_MaterialOverride` entry into the
+     *  current bin's `materialOverride: list[embed]`. Returns the modified
+     *  string (does NOT write to the editor — caller stitches together
+     *  override + snippet first so Ctrl+Z collapses both into one undo). */
+    const applyOverrideEntry = useCallback((
+        content: string,
+        path: string,
+        submesh: string,
+        type: 'texture' | 'material',
+    ): string => {
+        let lines = content.split('\n');
+        if (!content.includes('materialOverride:')) {
+            const next: string[] = [];
+            let added = false;
+            for (let i = 0; i < lines.length; i++) {
+                next.push(lines[i]);
+                if (
+                    !added &&
+                    lines[i].includes('skinMeshProperties:') &&
+                    lines[i].includes('embed') &&
+                    lines[i].includes('SkinMeshDataProperties')
+                ) {
+                    let indent = '        ';
+                    if (i + 1 < lines.length) {
+                        const m2 = lines[i + 1].match(/^(\s*)/);
+                        if (m2) indent = m2[1];
+                    }
+                    next.push(`${indent}materialOverride: list[embed] = {`);
+                    next.push(`${indent}}`);
+                    added = true;
+                }
+            }
+            lines = next;
+        }
+
+        let matIdx = -1;
+        for (let i = 0; i < lines.length; i++) {
+            if (lines[i].includes('materialOverride:') && lines[i].includes('list[embed]')) {
+                matIdx = i;
+                break;
+            }
+        }
+        if (matIdx === -1) return content;
+
+        let depth = 0;
+        let insertIdx = -1;
+        for (let j = matIdx; j < lines.length; j++) {
+            for (const c of lines[j]) {
+                if (c === '{') depth++;
+                else if (c === '}') depth--;
+            }
+            if (depth === 0 && j > matIdx) { insertIdx = j; break; }
+        }
+        if (insertIdx === -1) return content;
+
+        let indent = '            ';
+        if (matIdx + 1 < lines.length && lines[matIdx + 1].trim()) {
+            const m2 = lines[matIdx + 1].match(/^(\s*)/);
+            if (m2) indent = m2[1];
+        }
+
+        const propType = type === 'texture' ? 'string' : 'link';
+        const propName = type === 'texture' ? 'texture' : 'material';
+        const block = [
+            `${indent}SkinMeshDataProperties_MaterialOverride {`,
+            `${indent}    ${propName}: ${propType} = "${path}"`,
+            `${indent}    Submesh: string = "${submesh}"`,
+            `${indent}}`,
+        ];
+
+        const out: string[] = [];
+        for (let i = 0; i < lines.length; i++) {
+            if (i === insertIdx) out.push(...block);
+            out.push(lines[i]);
+        }
+        return out.join('\n');
+    }, []);
+
+    /** Splice a StaticMaterialDef snippet into the bin's top-level
+     *  entries map, anchored after the SkinCharacterDataProperties entry
+     *  (or before ResourceResolver as a fallback). Stacks below any
+     *  existing jadelib_* entries so multiple library inserts queue up
+     *  in author order. */
+    const injectMaterialDefSnippet = useCallback((content: string, snippetText: string): string => {
+        const lines = content.split('\n');
+        const entryRe = /^(\s*)("[^"]+"|0x[0-9a-fA-F]+)\s*=\s*(\w+)\s*\{/;
+        type Entry = { start: number; end: number; indent: string; className: string };
+        const entries: Entry[] = [];
+        for (let i = 0; i < lines.length; i++) {
+            const m = entryRe.exec(lines[i]);
+            if (!m) continue;
+            let depth = 0;
+            let end = -1;
+            for (let j = i; j < lines.length; j++) {
+                for (const ch of lines[j]) {
+                    if (ch === '{') depth++;
+                    else if (ch === '}') depth--;
+                }
+                if (depth <= 0) { end = j; break; }
+            }
+            if (end === -1) continue;
+            entries.push({ start: i, end, indent: m[1], className: m[3] });
+            i = end;
+        }
+
+        let insertIdx = -1;
+        let anchorIndent = '    ';
+        const skinChar = entries.find(e => e.className === 'SkinCharacterDataProperties');
+        if (skinChar) {
+            insertIdx = skinChar.end + 1;
+            anchorIndent = skinChar.indent;
+            for (const e of entries) {
+                if (e.start < insertIdx) continue;
+                if (e.className !== 'StaticMaterialDef') break;
+                const nameMatch = lines[e.start].match(/"(jadelib_[^"]+)"/);
+                if (!nameMatch) break;
+                insertIdx = e.end + 1;
+            }
+        } else {
+            const res = entries.find(e => e.className === 'ResourceResolver');
+            if (res) { insertIdx = res.start; anchorIndent = res.indent; }
+        }
+
+        if (insertIdx === -1) return content + '\n' + snippetText + '\n';
+
+        const indented = snippetText
+            .split('\n')
+            .map(l => (l.length > 0 ? anchorIndent + l : l))
+            .join('\n');
+        return [
+            ...lines.slice(0, insertIdx),
+            indented,
+            ...lines.slice(insertIdx),
+        ].join('\n');
+    }, []);
+
+    const onSubmitWithLibrary = useCallback(async (
         _path: string,
         submesh: string,
         library: LibraryPairResult,
     ) => {
-        // Library pairing inserts both an override entry AND the
-        // StaticMaterialDef snippet — that flow is owned by the
-        // GeneralEditPanel today (resolves SKN user slots, etc.).
-        // For the standalone panel we insert the override row only;
-        // the user can drop the full snippet via General Editing
-        // when they need it.
-        insertEntry(library.materialName, submesh, 'material');
-        if (filePath) {
-            s.recordJadelibInsert(filePath, library.materialPath, library.materialId);
+        // Full library-pairing flow: matches the classic GeneralEditPanel
+        // flow exactly. Loads the cached snippet, auto-increments the
+        // material name on collision, swaps the Diffuse_Texture
+        // placeholder, applies BOTH the override entry and the snippet
+        // in one editor update, and copies the library textures to the
+        // user's mod folder.
+        s.setStatusMessage(`Inserting ${library.materialName}…`);
+        try {
+            const snippet = await invoke<MaterialSnippet | null>('library_get_cached_material', {
+                path: library.materialPath,
+            });
+            if (!snippet) {
+                s.setStatusMessage(`Library material ${library.materialPath} not cached`);
+                onClose();
+                return;
+            }
+
+            // Auto-increment the material name if jadelib_<id> is already
+            // somewhere in this bin so duplicate inserts stack cleanly.
+            const baseName = snippet.materialName;
+            const escapedBase = baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const existingRe = new RegExp(`"${escapedBase}(?:_\\d+)?"\\s*=`, 'g');
+            const existingNames = new Set<string>();
+            const content0 = editorContent();
+            let m: RegExpExecArray | null;
+            while ((m = existingRe.exec(content0)) !== null) {
+                const nameMatch = m[0].match(/"([^"]+)"/);
+                if (nameMatch) existingNames.add(nameMatch[1]);
+            }
+            let finalName = baseName;
+            if (existingNames.has(finalName)) {
+                let suffix = 2;
+                while (existingNames.has(`${baseName}_${suffix}`)) suffix++;
+                finalName = `${baseName}_${suffix}`;
+            }
+
+            let snippetText = snippet.snippet;
+            if (finalName !== baseName) {
+                const escBase = baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                snippetText = snippetText.replace(new RegExp(`"${escBase}"`, 'g'), `"${finalName}"`);
+            }
+
+            // Replace the Diffuse_Texture placeholder. Prefer the texture
+            // the user picked in the dialog; fall back to SKN auto-resolve.
+            if (library.texture) {
+                const phRe = /(texturePath:\s*string\s*=\s*")[^"]*YOURCHAMP[^"]*(")/;
+                snippetText = snippetText.replace(phRe, `$1${library.texture}$2`);
+            } else if (filePath) {
+                const simpleSkinPath = extractFirst('simpleSkin');
+                const texturePath = extractFirst('texture');
+                if (simpleSkinPath && texturePath) {
+                    try {
+                        const matchModeStr = await invoke<string>('get_preference', {
+                            key: 'MaterialMatchMode', defaultValue: '3',
+                        });
+                        const matchMode = parseInt(matchModeStr, 10) || 3;
+                        const result = await invoke<AutoMaterialResult>('auto_material_override', {
+                            binFilePath: filePath, simpleSkinPath, texturePath, matchMode,
+                        });
+                        const submeshLower = submesh.toLowerCase();
+                        const matched = result.matches.find(mm => mm.material.toLowerCase() === submeshLower);
+                        if (matched && matched.texture) {
+                            const fbRe = /(texturePath:\s*string\s*=\s*")[^"]*YOURCHAMP[^"]*(")/g;
+                            snippetText = snippetText.replace(fbRe, `$1${matched.texture}$2`);
+                        }
+                    } catch (e) {
+                        console.warn('SKN auto-resolve failed:', e);
+                    }
+                }
+            }
+
+            // Single editor update so override + snippet undo as one step.
+            let next = editorContent();
+            next = applyOverrideEntry(next, finalName, submesh, 'material');
+            next = injectMaterialDefSnippet(next, snippetText);
+            s.handleGeneralEditContentChange(next);
+
+            // Copy the library's textures next to the bin so the embedded
+            // assets/jadelib/<id>/<file> paths actually resolve on disk.
+            try {
+                const modInfo = await invoke<{ mod_root: string | null }>(
+                    'library_detect_mod_folder',
+                    { binPath: filePath },
+                );
+                if (modInfo.mod_root) {
+                    const copied = await invoke<string[]>('library_copy_textures_to_mod', {
+                        materialPath: library.materialPath,
+                        modRoot: modInfo.mod_root,
+                    });
+                    if (filePath) s.recordJadelibInsert(filePath, modInfo.mod_root, snippet.id);
+                    s.setStatusMessage(
+                        `Inserted ${finalName} · copied ${copied.length} texture${copied.length === 1 ? '' : 's'} to assets/jadelib/${snippet.id}/`,
+                    );
+                } else {
+                    s.setStatusMessage(
+                        `Inserted ${finalName} — couldn't find a mod root (need META/info.json, a WAD/ folder, or DATA + ASSETS siblings). Textures not copied.`,
+                    );
+                }
+            } catch (e) {
+                console.warn('Texture copy failed:', e);
+                s.setStatusMessage(`Inserted ${finalName} (texture copy failed: ${e})`);
+            }
+        } catch (e) {
+            console.error('Library insert failed:', e);
+            s.setStatusMessage(`Library insert failed: ${e}`);
         }
         onClose();
-    }, [insertEntry, filePath, s, onClose]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [filePath, applyOverrideEntry, injectMaterialDefSnippet, onClose]);
 
     return (
         <MaterialOverrideDockPanel

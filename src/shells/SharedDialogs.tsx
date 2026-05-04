@@ -13,6 +13,7 @@ import QuartzInstallModal from '../components/QuartzInstallModal';
 import TexHoverPopup from '../components/TexHoverPopup';
 import EditorContextMenu from '../components/EditorContextMenu';
 import SmokeOverlay from '../components/SmokeOverlay';
+import JamesOverlay from '../components/JamesOverlay';
 import { useShell } from './ShellContext';
 
 /**
@@ -153,6 +154,7 @@ export default function SharedDialogs() {
             />
 
             <SmokeOverlay active={s.cigaretteMode} />
+            <JamesOverlay active={s.jamesMode} />
         </>
     );
 }

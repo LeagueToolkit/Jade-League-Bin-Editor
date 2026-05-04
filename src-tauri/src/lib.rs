@@ -3,6 +3,8 @@ mod app_commands;
 mod hash_commands;
 mod extra_commands;
 mod library_commands;
+mod wad_commands;
+mod taskbar_progress;
 mod core;
 mod error;
 
@@ -230,7 +232,6 @@ pub fn run() {
             hash_commands::preload_hashes,
             hash_commands::get_preload_status,
             hash_commands::unload_hashes,
-            hash_commands::convert_hashes_to_binary,
             // New commands
             extra_commands::register_bin_association,
             extra_commands::unregister_bin_association,
@@ -241,6 +242,12 @@ pub fn run() {
             extra_commands::start_update_download,
             extra_commands::run_installer,
             extra_commands::auto_material_override,
+            extra_commands::list_directory,
+            extra_commands::get_home_directory,
+            extra_commands::parent_directory,
+            extra_commands::detect_league_install,
+            extra_commands::detect_league_pbe_install,
+            extra_commands::open_folder_in_explorer,
             // Texture preview
             app_commands::get_file_mtime,
             app_commands::read_file_base64,
@@ -276,6 +283,24 @@ pub fn run() {
             library_commands::library_set_update_mode,
             library_commands::library_get_status,
             library_commands::library_trigger_background_update,
+            // WAD extraction (Phase 1: hashtable plumbing)
+            wad_commands::wad_hash_status,
+            wad_commands::wad_download_hashes,
+            wad_commands::wad_check_for_hash_update,
+            wad_commands::wad_get_preload_status,
+            wad_commands::wad_unload_hashes,
+            wad_commands::wad_resolve_hash,
+            // WAD extraction (Phase 2: mount + listing)
+            wad_commands::wad_open,
+            wad_commands::wad_close,
+            wad_commands::wad_list_entries,
+            wad_commands::wad_list_mounted,
+            // WAD extraction (Phase 3: decompress + write)
+            wad_commands::wad_extract,
+            wad_commands::wad_cancel_extract,
+            wad_commands::wad_read_chunk_b64,
+            // Taskbar progress reporting (Windows ITaskbarList3)
+            taskbar_progress::set_taskbar_progress,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -11,7 +11,7 @@ pub fn unhash(bin: &mut Bin, hashes: &HashManager) {
 fn unhash_fnv1a(h: &mut FNV1a, hashes: &HashManager) {
     if h.string.is_none() && h.hash != 0 {
         if let Some(name) = hashes.get_fnv1a(h.hash) {
-            h.string = Some(name.to_string());
+            h.string = Some(name.into_owned());
         }
     }
 }
@@ -19,7 +19,7 @@ fn unhash_fnv1a(h: &mut FNV1a, hashes: &HashManager) {
 fn unhash_xxh64(h: &mut XXH64, hashes: &HashManager) {
     if h.string.is_none() && h.hash != 0 {
         if let Some(name) = hashes.get_xxh64(h.hash) {
-            h.string = Some(name.to_string());
+            h.string = Some(name.into_owned());
         }
     }
 }

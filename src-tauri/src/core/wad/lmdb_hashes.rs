@@ -1,0 +1,233 @@
+//! LMDB hash lookup for WAD path hashes (xxh64 u64) and BIN names (FNV1a u32).
+//!
+//! Two on-disk layouts are supported transparently:
+//!
+//! - **Split layout** — Quartz's: `hashes-wad.lmdb/data.mdb` (named DB
+//!   `"wad"`) and `hashes-bin.lmdb/data.mdb` (named DB `"bin"`). When this
+//!   exists in the FrogTools dir we reuse it without downloading.
+//!
+//! - **Combined layout** — what `lol-hashes-combined.zst` decompresses to:
+//!   `hashes-combined.lmdb/data.mdb` with both `"wad"` and `"bin"` named
+//!   DBs in the same env.
+//!
+//! Lookup is layout-agnostic — it always opens by name (`"wad"` or
+//! `"bin"`) inside whichever env was loaded. Envs are opened lazily on
+//! the first lookup and cached process-wide; subsequent reads reuse a
+//! cheap per-call `read_txn()` (sub-microsecond on a warm env).
+
+use heed::types::{Bytes, Str};
+use heed::EnvOpenOptions;
+use parking_lot::Mutex;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
+
+use super::hash_downloader::{detect_layout, HashLayout};
+
+struct EnvCache {
+    wad: Option<Arc<heed::Env>>,
+    bin: Option<Arc<heed::Env>>,
+    /// Path the envs were opened from. Used to invalidate the cache if a
+    /// different `hash_dir` is queried (rare — only matters during tests).
+    layout_root: PathBuf,
+}
+
+static ENV_CACHE: OnceLock<Mutex<Option<EnvCache>>> = OnceLock::new();
+
+fn cache_slot() -> &'static Mutex<Option<EnvCache>> {
+    ENV_CACHE.get_or_init(|| Mutex::new(None))
+}
+
+fn open_env(lmdb_dir: &Path) -> Option<Arc<heed::Env>> {
+    if !lmdb_dir.join("data.mdb").exists() {
+        return None;
+    }
+    // 1 GB virtual address reservation; the OS pages in only what we touch.
+    // max_dbs(2) lets the combined env open both "wad" and "bin" by name.
+    let result = unsafe {
+        EnvOpenOptions::new()
+            .map_size(1024 * 1024 * 1024)
+            .max_dbs(2)
+            .open(lmdb_dir)
+    };
+    match result {
+        Ok(env) => Some(Arc::new(env)),
+        Err(e) => {
+            eprintln!("[WadHashes] Failed to open LMDB at {}: {}", lmdb_dir.display(), e);
+            None
+        }
+    }
+}
+
+/// Open whichever layout is on disk, caching both envs. Returns `true`
+/// when at least one env was loaded; `false` if neither layout is present
+/// (caller should trigger [`super::download_combined_hashes`]).
+pub fn preload_envs(hash_dir: &Path) -> bool {
+    let (wad, bin) = match detect_layout(hash_dir) {
+        HashLayout::Split => {
+            let wad = open_env(&hash_dir.join("hashes-wad.lmdb"));
+            let bin = open_env(&hash_dir.join("hashes-bin.lmdb"));
+            (wad, bin)
+        }
+        HashLayout::Combined => {
+            let env = open_env(&hash_dir.join("hashes-combined.lmdb"));
+            (env.clone(), env)
+        }
+        HashLayout::Missing => (None, None),
+    };
+
+    if wad.is_none() && bin.is_none() {
+        return false;
+    }
+
+    let mut g = cache_slot().lock();
+    *g = Some(EnvCache {
+        wad,
+        bin,
+        layout_root: hash_dir.to_path_buf(),
+    });
+    true
+}
+
+/// Drop the cached envs. Next lookup re-opens lazily; the on-disk hash
+/// dir is untouched. Call this before overwriting `data.mdb` on Windows
+/// so the memory map is released.
+pub fn unload_envs() {
+    let mut g = cache_slot().lock();
+    *g = None;
+}
+
+fn ensure_loaded(hash_dir: &Path) -> bool {
+    {
+        let g = cache_slot().lock();
+        if let Some(c) = g.as_ref() {
+            if c.layout_root == hash_dir {
+                return c.wad.is_some() || c.bin.is_some();
+            }
+        }
+    }
+    preload_envs(hash_dir)
+}
+
+fn clone_wad_env(hash_dir: &Path) -> Option<Arc<heed::Env>> {
+    if !ensure_loaded(hash_dir) {
+        return None;
+    }
+    let g = cache_slot().lock();
+    g.as_ref()?.wad.clone()
+}
+
+fn clone_bin_env(hash_dir: &Path) -> Option<Arc<heed::Env>> {
+    if !ensure_loaded(hash_dir) {
+        return None;
+    }
+    let g = cache_slot().lock();
+    g.as_ref()?.bin.clone()
+}
+
+/// Resolve a single WAD path hash. Falls back to 16-char hex when not
+/// found or no env is loaded.
+pub fn resolve_wad(hash: u64, hash_dir: &Path) -> String {
+    let Some(env) = clone_wad_env(hash_dir) else {
+        return format!("{:016x}", hash);
+    };
+    let Ok(rtxn) = env.read_txn() else {
+        return format!("{:016x}", hash);
+    };
+    let Ok(Some(db)) = env.open_database::<Bytes, Str>(&rtxn, Some("wad")) else {
+        return format!("{:016x}", hash);
+    };
+    db.get(&rtxn, &hash.to_be_bytes()[..])
+        .ok()
+        .flatten()
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| format!("{:016x}", hash))
+}
+
+/// Bulk WAD hash resolution — single read txn for the whole batch. Returns
+/// a `HashMap<hash, path>` so callers can dedupe + index in O(1).
+#[allow(dead_code)] // Used by the WAD tree builder in `mount.rs`.
+pub fn resolve_wad_bulk(hashes: &[u64], hash_dir: &Path) -> HashMap<u64, String> {
+    let mut out: HashMap<u64, String> = HashMap::with_capacity(hashes.len());
+
+    let Some(env) = clone_wad_env(hash_dir) else {
+        for &h in hashes {
+            out.entry(h).or_insert_with(|| format!("{:016x}", h));
+        }
+        return out;
+    };
+    let Ok(rtxn) = env.read_txn() else {
+        for &h in hashes {
+            out.entry(h).or_insert_with(|| format!("{:016x}", h));
+        }
+        return out;
+    };
+    let db = match env.open_database::<Bytes, Str>(&rtxn, Some("wad")) {
+        Ok(Some(db)) => db,
+        _ => {
+            for &h in hashes {
+                out.entry(h).or_insert_with(|| format!("{:016x}", h));
+            }
+            return out;
+        }
+    };
+
+    for &h in hashes {
+        if out.contains_key(&h) {
+            continue;
+        }
+        let resolved = db
+            .get(&rtxn, &h.to_be_bytes()[..])
+            .ok()
+            .flatten()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| format!("{:016x}", h));
+        out.insert(h, resolved);
+    }
+    out
+}
+
+/// Resolve a single BIN name hash (FNV1a u32). Returns the resolved name
+/// if known, else `None` so callers can fall through to a text-based
+/// hashtable.
+pub fn lookup_bin(hash: u32, hash_dir: &Path) -> Option<Arc<str>> {
+    let env = clone_bin_env(hash_dir)?;
+    let rtxn = env.read_txn().ok()?;
+    let db = env
+        .open_database::<Bytes, Str>(&rtxn, Some("bin"))
+        .ok()
+        .flatten()?;
+    let bytes = db.get(&rtxn, &hash.to_be_bytes()[..]).ok().flatten()?;
+    Some(Arc::from(bytes))
+}
+
+/// Resolve a single WAD path hash via LMDB, returning `None` when unknown
+/// rather than the hex fallback. Used by the BIN converter for xxh64
+/// lookups so it can fall through to the text-file table.
+pub fn lookup_wad(hash: u64, hash_dir: &Path) -> Option<Arc<str>> {
+    let env = clone_wad_env(hash_dir)?;
+    let rtxn = env.read_txn().ok()?;
+    let db = env
+        .open_database::<Bytes, Str>(&rtxn, Some("wad"))
+        .ok()
+        .flatten()?;
+    let bytes = db.get(&rtxn, &hash.to_be_bytes()[..]).ok().flatten()?;
+    Some(Arc::from(bytes))
+}
+
+/// Snapshot of which named DBs are currently cached. Driven by the UI to
+/// show a "hashes ready" indicator without forcing a load.
+#[derive(Debug, Clone, Copy)]
+pub struct LoadedStats {
+    pub wad_loaded: bool,
+    pub bin_loaded: bool,
+}
+
+pub fn loaded_stats(hash_dir: &Path) -> LoadedStats {
+    let g = cache_slot().lock();
+    let cache = g.as_ref().filter(|c| c.layout_root == hash_dir);
+    LoadedStats {
+        wad_loaded: cache.map_or(false, |c| c.wad.is_some()),
+        bin_loaded: cache.map_or(false, |c| c.bin.is_some()),
+    }
+}
