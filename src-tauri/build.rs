@@ -5,7 +5,9 @@ fn main() {
     // via LoadImageW(hinstance, MAKEINTRESOURCE(id), ...). Must run before
     // tauri_build::build() so the linker sees both resource sets.
     #[cfg(target_os = "windows")]
-    embed_resource::compile("icons/extra_icons.rc", embed_resource::NONE);
+    embed_resource::compile("icons/extra_icons.rc", embed_resource::NONE)
+        .manifest_required()
+        .unwrap();
 
     tauri_build::build()
 }

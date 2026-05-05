@@ -11,7 +11,10 @@ crate-type = ["cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
-embed-resource = "2"
+# v3 to match the version `tauri-winres → tauri-build` already pulls
+# in transitively, so we don't compile two copies of embed-resource +
+# its `vswhom` build helper.
+embed-resource = "3"
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
@@ -24,16 +27,26 @@ serde_json = "1"
 tokio = { version = "1", features = ["rt", "macros"] }
 libloading = "0.8"
 opener = "0.7"
-image = "0.25"
+# Slimmed image features — we only decode PNG/JPG/BMP from disk; DDS/TEX
+# are decoded in JS via lib/texFormat.ts. Defaults pull AVIF/EXR/HDR/WEBP
+# decoders + their massive dep chains (ravif, dav1d, zune-*) we never use.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp"] }
 base64 = "0.22"
-reqwest = { version = "0.12", features = ["json", "stream"] }
+# Slimmed reqwest features — only used for one HTTPS GET to GitHub.
+# `default-features = false` drops openssl (we use rustls), encoding_rs
+# (no charset negotiation needed), HTTP/2 (GitHub serves over h1 fine),
+# and macOS system-config helpers. Still keep json + stream.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
 byteorder = "1.5"
 parking_lot = "0.12"
 
 # Parallel processing for hash loading
 rayon = "1.10"
 futures = "0.3"
-chrono = { version = "0.4", features = ["clock"] }
+# Slimmed chrono — we only call `Utc::now().to_rfc3339()`. Default
+# features pull serde + js-sys + wasmbind. `clock` keeps the
+# now()/local timestamp helpers; `std` keeps the Display impls.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 
 # Error handling
 thiserror = "2"
