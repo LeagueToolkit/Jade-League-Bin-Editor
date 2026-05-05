@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import TabBar from '../components/TabBar';
 import StatusBar from '../components/StatusBar';
-import WelcomeScreen from '../components/WelcomeScreen';
+import { WelcomeScreenWithExit } from '../components/WelcomeScreen';
 import GeneralEditPanel from '../components/GeneralEditPanel';
 import ParticleEditorPanel from '../components/ParticleEditorPanel';
 import MarkdownEditPanel from '../components/MarkdownEditPanel';
@@ -558,22 +558,21 @@ export default function VisualStudioShell() {
                     )}
 
                     <div className={`vs-shell-editor${editorFloating ? ' editor-popped-out' : ''}`}>
-                        {s.tabs.length === 0 && !s.fileLoading && (
-                            <WelcomeScreen
-                                onOpenFile={s.onOpen}
-                                openFileDisabled={s.openFileDisabled}
-                                recentFiles={s.recentFiles}
-                                onOpenRecentFile={s.openFileFromPath}
-                                onMaterialLibrary={s.onMaterialLibrary}
-                                onThemes={s.onThemes}
-                                onSettings={s.onSettings}
-                                appIcon={s.appIcon}
-                                onMinimize={s.onMinimize}
-                                onMaximize={s.onMaximize}
-                                onClose={s.onClose}
-                                isMaximized={s.isMaximized}
-                            />
-                        )}
+                        <WelcomeScreenWithExit
+                            visible={s.tabs.length === 0 && !s.fileLoading}
+                            onOpenFile={s.onOpen}
+                            openFileDisabled={s.openFileDisabled}
+                            recentFiles={s.recentFiles}
+                            onOpenRecentFile={s.openFileFromPath}
+                            onMaterialLibrary={s.onMaterialLibrary}
+                            onThemes={s.onThemes}
+                            onSettings={s.onSettings}
+                            appIcon={s.appIcon}
+                            onMinimize={s.onMinimize}
+                            onMaximize={s.onMaximize}
+                            onClose={s.onClose}
+                            isMaximized={s.isMaximized}
+                        />
                         {s.tabs.length === 0 && s.fileLoading && <div className="file-loading-backdrop" />}
                         <EditorPane />
                     </div>

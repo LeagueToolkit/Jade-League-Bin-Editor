@@ -5,9 +5,20 @@ import {
     LibraryIcon, PaletteIcon, SettingsIcon, ChevronRightIcon, SearchIcon,
     MinimizeIcon, MaximizeIcon, RestoreIcon, CloseIcon,
 } from './Icons';
-import { FormatIcon, extractExtension } from './FormatIcons';
+import { FormatIcon, extractExtension, getFormatConfig } from './FormatIcons';
 import { texBufferToDataURL, ddsBufferToDataURL, ddsFormatName, formatName as texFormatName } from '../lib/texFormat';
 import ExtractionSettingsDialog from './ExtractionSettingsDialog';
+import Editor from '@monaco-editor/react';
+import {
+    RITOBIN_LANGUAGE_ID, RITOBIN_THEME_ID,
+    registerRitobinLanguage, registerRitobinTheme,
+} from '../lib/ritobinLanguage';
+import {
+    Folder as LucideFolder,
+    FolderOpen as LucideFolderOpen,
+    Package as LucidePackage,
+    PackageOpen as LucidePackageOpen,
+} from 'lucide-react';
 import './WelcomeScreen.css';
 
 interface WelcomeScreenProps {
@@ -26,6 +37,12 @@ interface WelcomeScreenProps {
     onMaximize?: () => void;
     onClose?: () => void;
     isMaximized?: boolean;
+    /** True while the parent has decided to unmount the welcome screen
+     *  but is keeping it in the DOM long enough for the slide-away
+     *  transition to play. The wrapper component owns this — leaf
+     *  callers normally use `WelcomeScreenWithExit` instead of touching
+     *  it directly. */
+    isClosing?: boolean;
 }
 
 interface DirEntry {
@@ -86,6 +103,24 @@ interface WadExtractResult {
     elapsed_ms: number;
     output_dir: string;
     cancelled: boolean;
+}
+
+interface WadHashScanProgressEvent {
+    action_id: string;
+    phase: 'preparing' | 'scanning' | 'merging' | 'complete' | 'error';
+    current: number;
+    total: number;
+    message: string;
+}
+
+interface WadHashScanResult {
+    action_id: string;
+    wad_paths_added: number;
+    bin_names_added: number;
+    wad_paths_scanned: number;
+    bin_names_scanned: number;
+    total_chunks: number;
+    elapsed_ms: number;
 }
 
 type WelcomeView = 'home' | 'extract';
@@ -154,6 +189,7 @@ export default function WelcomeScreen({
     onMaximize,
     onClose,
     isMaximized = false,
+    isClosing = false,
 }: WelcomeScreenProps) {
     const [view, setView] = useState<WelcomeView>('home');
     const [search, setSearch] = useState('');
@@ -239,7 +275,7 @@ export default function WelcomeScreen({
     }, []);
 
     return (
-        <div className="welcome-screen-v2">
+        <div className={`welcome-screen-v2${isClosing ? ' welcome-screen-v2-closing' : ''}`}>
             {(onMinimize || onMaximize || onClose) && (
                 <div className="welcome-titlebar" data-tauri-drag-region>
                     <div className="welcome-titlebar-brand">
@@ -368,6 +404,49 @@ export default function WelcomeScreen({
             )}
         </div>
     );
+}
+
+/** Animation wrapper — keeps the welcome screen mounted long enough to
+ *  play its slide-away exit when `visible` flips to false, then drops
+ *  it from the tree. Snappy: a quick lateral slide + fade, no
+ *  cushioning easing.
+ *
+ *  Duration matches the CSS transition on `.welcome-screen-v2`
+ *  (`WelcomeScreen.css` — keep them in sync, otherwise the unmount
+ *  catches the animation mid-frame).
+ */
+const WELCOME_EXIT_MS = 200;
+
+export function WelcomeScreenWithExit({
+    visible,
+    ...props
+}: WelcomeScreenProps & { visible: boolean }) {
+    const [shouldRender, setShouldRender] = useState(visible);
+    const [isExiting, setIsExiting] = useState(false);
+
+    useEffect(() => {
+        if (visible) {
+            setShouldRender(true);
+            setIsExiting(false);
+            return;
+        }
+        if (!shouldRender) return;
+        // Defer the closing class to the next frame so React's commit
+        // never paints "open + closing" simultaneously — without the
+        // RAF the transition occasionally skips and snaps to the end.
+        const raf = requestAnimationFrame(() => setIsExiting(true));
+        const t = setTimeout(() => {
+            setShouldRender(false);
+            setIsExiting(false);
+        }, WELCOME_EXIT_MS);
+        return () => {
+            cancelAnimationFrame(raf);
+            clearTimeout(t);
+        };
+    }, [visible, shouldRender]);
+
+    if (!shouldRender) return null;
+    return <WelcomeScreen {...props} isClosing={isExiting} />;
 }
 
 /* ────────────────── Home view ────────────────── */
@@ -609,6 +688,50 @@ function ExtractView({
     // and threads cleanly into the extraction commands.
     const [extractionSettingsOpen, setExtractionSettingsOpen] = useState(false);
     const [useRenamePattern, setUseRenamePattern] = useState(true);
+    // BIN preview controls — font size + a ref to the Monaco instance
+    // so the toolbar buttons (Find / A+ / A-) can act on it without
+    // bouncing through state on every keystroke.
+    const BIN_FONT_MIN = 8;
+    const BIN_FONT_MAX = 22;
+    const BIN_FONT_DEFAULT = 11;
+    const [binFontSize, setBinFontSize] = useState(BIN_FONT_DEFAULT);
+    // Monaco's editor instance — typed loosely as `any` because the
+    // `editor.IStandaloneCodeEditor` type isn't worth pulling in just
+    // for the two methods we call. Set in `onMount`.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const binEditorRef = useRef<any>(null);
+    const triggerBinFind = () => {
+        const ed = binEditorRef.current;
+        if (!ed) return;
+        ed.focus();
+        // Built-in Monaco action — same Ctrl+F dialog the editor tab
+        // uses. The widget hides its Replace tab automatically when
+        // the editor is in `readOnly` mode, so users can't accidentally
+        // try to edit a preview.
+        ed.getAction('actions.find')?.run();
+    };
+    const bumpBinFont = (delta: number) => {
+        setBinFontSize(prev => Math.max(BIN_FONT_MIN, Math.min(BIN_FONT_MAX, prev + delta)));
+    };
+    // Image preview zoom — driven by the wheel handler on the image
+    // container. Reset whenever the previewed file changes so a zoomed
+    // texture doesn't carry over to the next click.
+    const IMAGE_ZOOM_MIN = 0.25;
+    const IMAGE_ZOOM_MAX = 6;
+    const [imageZoom, setImageZoom] = useState(1);
+    const onImageWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+        setImageZoom(prev => Math.max(IMAGE_ZOOM_MIN, Math.min(IMAGE_ZOOM_MAX, prev * factor)));
+    };
+    // Reset zoom whenever the previewed file changes — a 4× zoom on
+    // the previous texture shouldn't carry over to the next click.
+    useEffect(() => { setImageZoom(1); }, [wadSelected?.path_hash_hex, selected?.path]);
+    // When true, clicking a row in a WAD also toggles its checkbox.
+    // When false, only the checkbox itself toggles selection — clicking
+    // the row only changes the preview. Some users prefer the strict
+    // mode so a stray click doesn't add things to the extract queue.
+    const [autoCheckOnClick, setAutoCheckOnClick] = useState(true);
     useEffect(() => {
         invoke<string>('get_preference', {
             key: 'WadUseRenamePattern',
@@ -616,11 +739,24 @@ function ExtractView({
         })
             .then(v => setUseRenamePattern(v === 'True'))
             .catch(() => { /* offline / no APPDATA — keep default */ });
+        invoke<string>('get_preference', {
+            key: 'WadAutoCheckOnClick',
+            defaultValue: 'True',
+        })
+            .then(v => setAutoCheckOnClick(v === 'True'))
+            .catch(() => {});
     }, []);
     const toggleRenamePattern = (next: boolean) => {
         setUseRenamePattern(next);
         invoke('set_preference', {
             key: 'WadUseRenamePattern',
+            value: next ? 'True' : 'False',
+        }).catch(() => {});
+    };
+    const toggleAutoCheckOnClick = (next: boolean) => {
+        setAutoCheckOnClick(next);
+        invoke('set_preference', {
+            key: 'WadAutoCheckOnClick',
             value: next ? 'True' : 'False',
         }).catch(() => {});
     };
@@ -634,7 +770,16 @@ function ExtractView({
         format: string | null;
         width: number | null;
         height: number | null;
-    }>({ loading: false, dataUrl: null, error: null, format: null, width: null, height: null });
+        /** Ritobin text for BIN previews (PROP / PTCH chunks). When set,
+         *  the preview pane renders a scrollable monospace block instead
+         *  of an image. Mirrors Flint's WadPreviewPanel: bytes flow
+         *  through `convert_bin_bytes_to_text` without ever hitting
+         *  disk so previewing is non-destructive. */
+        binText: string | null;
+    }>({
+        loading: false, dataUrl: null, error: null, format: null,
+        width: null, height: null, binText: null,
+    });
 
     // ── Hash status / download ──
     const [hashStatus, setHashStatus] = useState<WadHashStatus | null>(null);
@@ -732,14 +877,41 @@ function ExtractView({
         // Browsing into a WAD shouldn't keep the disk-side preview row
         // selected, otherwise the preview pane shows stale info.
         setSelected(null);
+        // The disk-side breadcrumb (`currentPath`) shouldn't follow a
+        // dragged-in WAD — the WAD usually isn't a child of whatever
+        // disk folder the user was looking at, so clear it to avoid a
+        // misleading "League/aatrox.wad.client" trail.
+        setCurrentPath('');
         try {
             const info = await invoke<WadOpenResult>('wad_open', { path });
+            // Render the initial list immediately so the user sees the
+            // WAD open instantly. The magic-byte sniff for unhashed
+            // entries kicks off in parallel; when it finishes we
+            // refetch to pick up the `<hex>.<ext>` rewrites.
             const items = await invoke<WadEntry[]>('wad_list_entries', { id: info.id });
             setMountInfo(info);
             setWadEntries(items);
             setWadCurrentDir('');
             setWadSelected(null);
+            // Switching WADs starts with a clean queue — leftover
+            // checkboxes from the previous WAD would silently leak
+            // into the next extract action.
+            setSelectedHashes(new Set());
             rememberRecentWad(path);
+
+            // Fire-and-forget sniff. Heavy enough to take a few
+            // seconds on a 30k-chunk WAD, but the first list is
+            // already on screen — the refetch just upgrades the
+            // unknown rows to typed ones.
+            void (async () => {
+                try {
+                    const updated = await invoke<number>('wad_sniff_unknown', { id: info.id });
+                    if (updated > 0) {
+                        const refreshed = await invoke<WadEntry[]>('wad_list_entries', { id: info.id });
+                        setWadEntries(refreshed);
+                    }
+                } catch { /* ignore — list is still usable without sniffed types */ }
+            })();
         } catch (e) {
             setError(typeof e === 'string' ? e : 'Failed to open WAD');
         } finally {
@@ -862,6 +1034,75 @@ function ExtractView({
             try {
                 await invoke('wad_cancel_extract', { actionId: extractActionRef.current });
             } catch { /* ignore */ }
+        }
+    };
+
+    // ── Hash scanning (overlay extraction) ──
+    // Separate from WAD extraction: walks every chunk, scans PROP/PTCH for
+    // embedded asset paths and SKN for submesh names, merges discoveries
+    // into the FrogTools hash overlay so unknown hashes get real names on
+    // subsequent reads. Progress flows through the same bottom status bar
+    // that drives the extraction UI — no separate inline status row.
+    const [scanning, setScanning] = useState(false);
+    const scanActionRef = useRef<string | null>(null);
+
+    useEffect(() => {
+        const unlisten = listen<WadHashScanProgressEvent>('wad-hash-scan-progress', (e) => {
+            const { action_id, phase, current, total } = e.payload;
+            if (scanActionRef.current && action_id !== scanActionRef.current) return;
+            if (phase === 'preparing') {
+                onProgress(0);
+                onExtractStatus('Mapping WAD…');
+            } else if (phase === 'scanning') {
+                onProgress(total > 0 ? Math.min(100, (current / total) * 100) : 0);
+                onExtractStatus(`Scanning chunks ${current.toLocaleString()}/${total.toLocaleString()}…`);
+            } else if (phase === 'merging') {
+                onProgress(100);
+                onExtractStatus('Merging hashes…');
+            }
+        });
+        return () => { unlisten.then((u) => u()).catch(() => {}); };
+    }, [onProgress, onExtractStatus]);
+
+    const startHashScan = async () => {
+        if (!mountInfo || scanning) return;
+        const actionId = `scan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        scanActionRef.current = actionId;
+        setScanning(true);
+        onProgress(0);
+        onExtractStatus('Starting hash scan…');
+        try {
+            const result = await invoke<WadHashScanResult>('wad_extract_hashes', {
+                id: mountInfo.id,
+                actionId,
+            });
+            const added = result.wad_paths_added + result.bin_names_added;
+            const summary = added === 0
+                ? `Scan complete — no new hashes found (${(result.wad_paths_scanned + result.bin_names_scanned).toLocaleString()} candidates) · ${(result.elapsed_ms / 1000).toFixed(1)}s`
+                : `Found ${result.wad_paths_added.toLocaleString()} new path${result.wad_paths_added === 1 ? '' : 's'}` +
+                  (result.bin_names_added > 0
+                      ? `, ${result.bin_names_added.toLocaleString()} BIN name${result.bin_names_added === 1 ? '' : 's'}`
+                      : '') +
+                  ` · ${(result.elapsed_ms / 1000).toFixed(1)}s`;
+            onProgress(100);
+            onExtractStatus(summary);
+            // Refresh the entry list — backend already re-resolved the
+            // mount's hash table against the new overlay; the new
+            // `wad_list_entries` call picks that up and the file list
+            // re-renders with real names where the scan got hits.
+            try {
+                const items = await invoke<WadEntry[]>('wad_list_entries', { id: mountInfo.id });
+                setWadEntries(items);
+            } catch { /* ignore — user can re-open manually */ }
+            // Clear bar + status after the same ~2s window the extraction
+            // listener uses, so the two operations behave consistently.
+            setTimeout(() => { onProgress(0); onExtractStatus(null); }, 2500);
+        } catch (e) {
+            onExtractStatus(typeof e === 'string' ? e : 'Hash scan failed');
+            setTimeout(() => { onProgress(0); onExtractStatus(null); }, 4000);
+        } finally {
+            setScanning(false);
+            scanActionRef.current = null;
         }
     };
 
@@ -1060,7 +1301,10 @@ function ExtractView({
     const rememberRecentWad = (path: string) => {
         setRecentWads(prev => {
             const filtered = prev.filter(p => p !== path);
-            const next = [path, ...filtered].slice(0, 8);
+            // Cap at 6 — fits in the sources column without forcing
+            // a vertical scrollbar to appear next to the rest of the
+            // location entries.
+            const next = [path, ...filtered].slice(0, 6);
             invoke('set_preference', { key: 'RecentWads', value: JSON.stringify(next) }).catch(() => {});
             return next;
         });
@@ -1102,7 +1346,19 @@ function ExtractView({
                 const idx = wadCurrentDir.lastIndexOf('/');
                 setWadCurrentDir(idx === -1 ? '' : wadCurrentDir.slice(0, idx));
             } else {
+                // Closing from WAD root — drop the user back into the
+                // disk folder the WAD lived in, otherwise the file list
+                // is empty + the breadcrumb says "Pick a source" while
+                // stale entries from before the WAD was opened still
+                // render. Compute parent BEFORE closeWad runs so we
+                // still have mountInfo.path available.
+                const wadPath = mountInfo.path;
+                let parent = '';
+                try {
+                    parent = await invoke<string>('parent_directory', { path: wadPath });
+                } catch { /* fall through to empty — UI will show empty state */ }
                 await closeWad();
+                if (parent && parent !== wadPath) setCurrentPath(parent);
             }
             return;
         }
@@ -1315,7 +1571,8 @@ function ExtractView({
     // stay viewable from the file list.
     useEffect(() => {
         const reset = () => setPreviewState({
-            loading: false, dataUrl: null, error: null, format: null, width: null, height: null,
+            loading: false, dataUrl: null, error: null, format: null,
+            width: null, height: null, binText: null,
         });
 
         type Source = { path: string; fetchB64: () => Promise<string> };
@@ -1342,10 +1599,16 @@ function ExtractView({
         const isDDS = ext === '.dds';
         const isTEX = ext === '.tex';
         const isBrowserImg = ext === '.png' || ext === '.jpg' || ext === '.jpeg' || ext === '.bmp';
-        if (!isDDS && !isTEX && !isBrowserImg) { reset(); return; }
+        // BIN preview is wad-only — disk-side .bin opens in the editor
+        // so re-routing it through the preview pane would be confusing.
+        const isBIN = !!wadSelected && (ext === '.bin' || ext === '.py');
+        if (!isDDS && !isTEX && !isBrowserImg && !isBIN) { reset(); return; }
 
         let cancelled = false;
-        setPreviewState({ loading: true, dataUrl: null, error: null, format: null, width: null, height: null });
+        setPreviewState({
+            loading: true, dataUrl: null, error: null, format: null,
+            width: null, height: null, binText: null,
+        });
         (async () => {
             try {
                 const b64 = await source!.fetchB64();
@@ -1358,13 +1621,31 @@ function ExtractView({
                     const { dataURL, width, height, ddsFormat } = ddsBufferToDataURL(bytes.buffer, 512);
                     if (!cancelled) setPreviewState({
                         loading: false, dataUrl: dataURL, error: null,
-                        format: ddsFormatName(ddsFormat), width, height,
+                        format: ddsFormatName(ddsFormat), width, height, binText: null,
                     });
                 } else if (isTEX) {
                     const { dataURL, width, height, format } = texBufferToDataURL(bytes.buffer, 512);
                     if (!cancelled) setPreviewState({
                         loading: false, dataUrl: dataURL, error: null,
-                        format: texFormatName(format), width, height,
+                        format: texFormatName(format), width, height, binText: null,
+                    });
+                } else if (isBIN) {
+                    // Magic-byte gate so we don't waste a converter call
+                    // on `.bin` chunks that aren't actually League BINs.
+                    const magic = String.fromCharCode(...bytes.slice(0, 4));
+                    if (magic !== 'PROP' && magic !== 'PTCH') {
+                        throw new Error(`Not a League BIN file (magic: ${magic.replace(/[^\x20-\x7e]/g, '?')})`);
+                    }
+                    // `convert_bin_bytes_to_text` expects a JS array of
+                    // bytes — same shape Flint uses. Heavy on big files;
+                    // command runs on the Tauri async runtime so the UI
+                    // stays responsive while we wait.
+                    const text = await invoke<string>('convert_bin_bytes_to_text', {
+                        binData: Array.from(bytes),
+                    });
+                    if (!cancelled) setPreviewState({
+                        loading: false, dataUrl: null, error: null,
+                        format: magic, width: null, height: null, binText: text,
                     });
                 } else {
                     const mime = ext === '.png' ? 'image/png' : ext === '.bmp' ? 'image/bmp' : 'image/jpeg';
@@ -1378,13 +1659,14 @@ function ExtractView({
                     if (!cancelled) setPreviewState({
                         loading: false, dataUrl: dataURL, error: null,
                         format: ext.slice(1).toUpperCase(), width: img.width, height: img.height,
+                        binText: null,
                     });
                 }
             } catch (e) {
                 if (!cancelled) setPreviewState({
                     loading: false, dataUrl: null,
                     error: typeof e === 'string' ? e : (e instanceof Error ? e.message : 'Preview failed'),
-                    format: null, width: null, height: null,
+                    format: null, width: null, height: null, binText: null,
                 });
             }
         })();
@@ -1504,24 +1786,41 @@ function ExtractView({
             return;
         }
         // wad-file click semantics:
-        //   - First click toggles the checkbox ON and shows the preview.
-        //   - Clicking the *same* (currently-previewed) file again toggles
-        //     the checkbox back OFF and clears the preview.
-        //   - Clicking a *different* file just promotes it to the preview
-        //     and adds it to the selection. Other checkboxes are never
-        //     touched, mirroring Explorer's per-row behavior.
+        //   - With auto-check ON (default): row click is a toggle. An
+        //     unchecked row becomes checked + previewed; a checked row
+        //     becomes unchecked (regardless of whether it's the current
+        //     preview), so the user never has to "close preview first"
+        //     to remove an item from the queue.
+        //   - With auto-check OFF: row click only changes the preview.
+        //     Selection is driven exclusively by checkbox clicks — for
+        //     users who don't want stray clicks queuing files.
         const hash = row.entry.path_hash_hex;
         const isCurrentPreview = wadSelected?.path_hash_hex === hash;
-        if (isCurrentPreview) {
+        if (!autoCheckOnClick) {
+            // Strict-mode: just move the preview. Re-clicking the same
+            // row toggles the preview off so the user can dismiss it
+            // without having to scroll away.
+            if (isCurrentPreview) {
+                setWadSelected(null);
+            } else {
+                setWadSelected(row.entry);
+                setSelected(null);
+            }
+            return;
+        }
+        const isChecked = selectedHashes.has(hash);
+        if (isChecked) {
             setSelectedHashes(prev => {
                 const next = new Set(prev);
                 next.delete(hash);
                 return next;
             });
-            setWadSelected(null);
+            // Clear the preview only if it was pinned to the row we
+            // just unchecked. Otherwise leave the preview alone so the
+            // user keeps reading whatever they were looking at.
+            if (isCurrentPreview) setWadSelected(null);
         } else {
             setSelectedHashes(prev => {
-                if (prev.has(hash)) return prev;
                 const next = new Set(prev);
                 next.add(hash);
                 return next;
@@ -1780,18 +2079,18 @@ function ExtractView({
                             <div className="welcome-source-section-title welcome-source-section-spaced">
                                 Recent WADs
                             </div>
-                            {recentWads.map(path => {
+                            {recentWads.slice(0, 6).map(path => {
                                 const baseName = path.replace(/\\/g, '/').split('/').pop() || path;
                                 const parent = path.replace(/\\/g, '/').split('/').slice(0, -1).join('/') || path;
                                 return (
                                     <button
                                         key={path}
                                         type="button"
-                                        className="welcome-source-row"
+                                        className={`welcome-source-row${mountInfo?.path === path ? ' active' : ''}`}
                                         onClick={() => openWad(path)}
                                         title={path}
                                     >
-                                        <BoxIcon size={20} />
+                                        <WadIcon size={20} isOpen={mountInfo?.path === path} />
                                         <span className="welcome-source-row-text">
                                             <span className="welcome-source-row-label">{baseName}</span>
                                             <span className="welcome-source-row-path" title={parent}>{parent}</span>
@@ -1847,6 +2146,8 @@ function ExtractView({
                     onClose={() => setExtractionSettingsOpen(false)}
                     useRenamePattern={useRenamePattern}
                     onUseRenamePatternChange={toggleRenamePattern}
+                    autoCheckOnClick={autoCheckOnClick}
+                    onAutoCheckOnClickChange={toggleAutoCheckOnClick}
                 />
 
                 {/* Drop overlay — dimmed sheet across the whole Extract
@@ -1854,7 +2155,7 @@ function ExtractView({
                 {dropActive && (
                     <div className="welcome-extract-dropzone" aria-hidden>
                         <div className="welcome-extract-dropzone-inner">
-                            <BoxIcon size={48} />
+                            <WadIcon size={48} />
                             <span>Drop a .wad.client to mount</span>
                         </div>
                     </div>
@@ -1906,6 +2207,26 @@ function ExtractView({
                                 </span>
                             ))}
                         </div>
+                        {/* Hash-scan button — only visible when a WAD is
+                            mounted. Walks every chunk for embedded asset
+                            paths + submesh names, merges discoveries into
+                            the FrogTools hash overlay so unknown hashes
+                            get real names without re-opening. Progress and
+                            results flow through the bottom status bar. */}
+                        {mountInfo && (
+                            <button
+                                type="button"
+                                className="welcome-tool-btn"
+                                onClick={startHashScan}
+                                disabled={scanning}
+                                title={scanning
+                                    ? 'Scanning this WAD for hashes…'
+                                    : 'Scan this WAD for embedded asset paths to recover unknown hashes'}
+                                aria-label="Scan hashes"
+                            >
+                                <ScanHashesIcon size={16} />
+                            </button>
+                        )}
                     </div>
 
                     {/* Search filters the current directory's entries by
@@ -2071,7 +2392,7 @@ function ExtractView({
                                             {e.is_dir
                                                 ? <FolderIcon size={16} />
                                                 : isWad
-                                                    ? <BoxIcon size={16} />
+                                                    ? <WadIcon size={16} isOpen={mountInfo?.path === e.path} />
                                                     : iconForExtension(e.extension)}
                                         </span>
                                         <span className="welcome-extract-row-name">{e.name}</span>
@@ -2204,9 +2525,111 @@ function ExtractView({
                     {previewItem && (
                         <div className="welcome-preview-detail">
                             {previewState.dataUrl && (
-                                <div className="welcome-preview-image">
-                                    <img src={previewState.dataUrl} alt={previewItem.name} />
+                                <div
+                                    className="welcome-preview-image"
+                                    onWheel={onImageWheel}
+                                    title="Scroll to zoom"
+                                >
+                                    <img
+                                        src={previewState.dataUrl}
+                                        alt={previewItem.name}
+                                        style={{
+                                            transform: `scale(${imageZoom})`,
+                                            // Fast-path nearest-neighbour for
+                                            // textures so pixels stay sharp on
+                                            // zoom-in instead of going blurry.
+                                            imageRendering: imageZoom >= 1.5 ? 'pixelated' : 'auto',
+                                            transformOrigin: 'center center',
+                                            transition: 'transform 0.05s linear',
+                                        }}
+                                        draggable={false}
+                                    />
                                 </div>
+                            )}
+                            {/* BIN preview — full Monaco editor in read-
+                                only mode with the ritobin language +
+                                theme registered, so the preview syntax-
+                                highlights identically to a freshly-opened
+                                tab. Same dimensions as the image slot so
+                                the column doesn't reflow between picking
+                                a texture and a BIN. */}
+                            {previewState.binText !== null && (
+                                <>
+                                    <div className="welcome-preview-bintext">
+                                        <Editor
+                                            height="100%"
+                                            defaultLanguage={RITOBIN_LANGUAGE_ID}
+                                            theme={RITOBIN_THEME_ID}
+                                            value={previewState.binText}
+                                            beforeMount={(monaco) => {
+                                                registerRitobinLanguage(monaco);
+                                                registerRitobinTheme(monaco);
+                                            }}
+                                            onMount={(editor) => {
+                                                binEditorRef.current = editor;
+                                            }}
+                                            options={{
+                                                readOnly: true,
+                                                domReadOnly: true,
+                                                minimap: { enabled: false },
+                                                lineNumbers: 'on',
+                                                lineNumbersMinChars: 4,
+                                                glyphMargin: false,
+                                                folding: true,
+                                                automaticLayout: true,
+                                                scrollBeyondLastLine: false,
+                                                renderLineHighlight: 'none',
+                                                overviewRulerLanes: 0,
+                                                overviewRulerBorder: false,
+                                                contextmenu: false,
+                                                stickyScroll: { enabled: false },
+                                                fontSize: binFontSize,
+                                                lineHeight: Math.round(binFontSize * 1.4),
+                                                padding: { top: 6, bottom: 6 },
+                                            }}
+                                        />
+                                    </div>
+                                    {/* BIN preview toolbar — Find triggers
+                                        Monaco's built-in find widget (Replace
+                                        is automatically hidden because the
+                                        editor is read-only). A− / A+ adjust
+                                        font size live, clamped at the bounds
+                                        defined above the component. */}
+                                    <div className="welcome-preview-bin-toolbar">
+                                        <button
+                                            type="button"
+                                            className="welcome-preview-bin-btn"
+                                            onClick={triggerBinFind}
+                                            title="Find in preview (Ctrl+F)"
+                                        >
+                                            Find
+                                        </button>
+                                        <div className="welcome-preview-bin-spacer" />
+                                        <button
+                                            type="button"
+                                            className="welcome-preview-bin-btn welcome-preview-bin-btn-icon"
+                                            onClick={() => bumpBinFont(-1)}
+                                            disabled={binFontSize <= BIN_FONT_MIN}
+                                            title="Decrease font size"
+                                            aria-label="Decrease font size"
+                                        >
+                                            A−
+                                        </button>
+                                        <span className="welcome-preview-bin-font-readout">
+                                            {binFontSize}px
+                                        </span>
+                                        <button
+                                            type="button"
+                                            className="welcome-preview-bin-btn welcome-preview-bin-btn-icon"
+                                            onClick={() => bumpBinFont(1)}
+                                            disabled={binFontSize >= BIN_FONT_MAX}
+                                            title="Increase font size"
+                                            aria-label="Increase font size"
+                                        >
+                                            A+
+                                        </button>
+                                    </div>
+                                </>
                             )}
                             {previewState.loading && (
                                 <div className="welcome-preview-image welcome-preview-image-loading">
@@ -2365,44 +2788,34 @@ function DocIcon({ size = 20 }: { size?: number }) {
     );
 }
 
+/** Folder glyph that swaps from a closed Lucide `folder` to Lucide's
+ *  `folder-open` when its hovering ancestor row gets pointed at. Both
+ *  components are emitted into the DOM and swapped via CSS — see
+ *  `.welcome-folder-icon` in WelcomeScreen.css for the trigger
+ *  selectors (rows, source items, breadcrumb buttons, etc.). */
 function FolderIcon({ size = 20 }: { size?: number }) {
     return (
-        <svg
-            width={size}
-            height={size}
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.6"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-        >
-            <path d="M20 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-        </svg>
+        <span className="welcome-folder-icon" aria-hidden="true">
+            <LucideFolder size={size} strokeWidth={1.8} className="welcome-folder-icon-closed" />
+            <LucideFolderOpen size={size} strokeWidth={1.8} className="welcome-folder-icon-open" />
+        </span>
     );
 }
 
-/* Cardboard-box glyph — used for `.wad.client` rows so they read as
-   "package containing files" rather than a plain document. A flat
-   front-on box with a top lid + a horizontal seam that suggests
-   shipping tape. Stays in lockstep with the other line icons via
-   `currentColor`. */
-function BoxIcon({ size = 16 }: { size?: number }) {
+/** WAD-package glyph using Lucide `package` / `package-open`. Swaps
+ *  to the open variant when (a) the row containing it is being
+ *  hovered, or (b) the `isOpen` prop is true (currently-mounted WAD
+ *  in the recent list / file list). Same CSS-driven swap pattern as
+ *  [`FolderIcon`] above. */
+function WadIcon({ size = 20, isOpen = false }: { size?: number; isOpen?: boolean }) {
     return (
-        <svg
-            width={size}
-            height={size}
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.6"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+        <span
+            className={`welcome-wad-icon${isOpen ? ' welcome-wad-icon-active' : ''}`}
+            aria-hidden="true"
         >
-            <rect x="2.5" y="3.5" width="19" height="5" rx="0.5" />
-            <path d="M3.5 8.5v11a1.5 1.5 0 0 0 1.5 1.5h14a1.5 1.5 0 0 0 1.5-1.5v-11" />
-            <line x1="9.5" y1="13" x2="14.5" y2="13" />
-        </svg>
+            <LucidePackage size={size} strokeWidth={1.8} className="welcome-wad-icon-closed" />
+            <LucidePackageOpen size={size} strokeWidth={1.8} className="welcome-wad-icon-open" />
+        </span>
     );
 }
 
@@ -2436,6 +2849,12 @@ function iconForExtension(ext: string): React.ReactElement {
     if (lower === 'dds' || lower === 'tex' || lower === 'png' || lower === 'jpg' || lower === 'jpeg' || lower === 'bmp') {
         return <TextureIcon size={16} />;
     }
+    // Hand off to FormatIcon for any extension that has a custom
+    // pictogram registered (skl / skn / scb / sco / anm). Otherwise
+    // fall through to the generic page outline.
+    if (getFormatConfig(lower).glyph) {
+        return <FormatIcon extension={lower} size={16} />;
+    }
     return <DocIcon size={16} />;
 }
 
@@ -2453,6 +2872,26 @@ function ArrowUpIcon({ size = 16 }: { size?: number }) {
         >
             <path d="M12 19V5" />
             <path d="M5 12l7-7 7 7" />
+        </svg>
+    );
+}
+
+/* Magnifier-over-hash glyph for the "Scan hashes" toolbar button. */
+function ScanHashesIcon({ size = 14 }: { size?: number }) {
+    return (
+        <svg
+            width={size}
+            height={size}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        >
+            <circle cx="10" cy="10" r="6" />
+            <path d="M14.5 14.5 20 20" />
+            <path d="M8 8h4M8 12h4" />
         </svg>
     );
 }

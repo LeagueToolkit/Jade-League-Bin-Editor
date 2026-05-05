@@ -7,7 +7,7 @@ edition = "2021"
 
 [lib]
 name = "jade_rust_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+crate-type = ["cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -55,3 +55,7 @@ flate2 = "1.0"
 # Memory-mapped WAD reads — workers slice into a shared `&[u8]` instead
 # of opening the file once per chunk.
 memmap2 = "0.9"
+# xxh64 for path → hash matching during the WAD-hash scanner. Same crate
+# Quartz uses; their `hashes.extracted.txt` interop relies on it being
+# byte-identical.
+twox-hash = "1.6"

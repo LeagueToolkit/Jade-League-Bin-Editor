@@ -22,6 +22,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
+use super::extracted_overlay::{bin_overlay, wad_overlay};
 use super::hash_downloader::{detect_layout, HashLayout};
 
 struct EnvCache {
@@ -125,9 +126,15 @@ fn clone_bin_env(hash_dir: &Path) -> Option<Arc<heed::Env>> {
     g.as_ref()?.bin.clone()
 }
 
-/// Resolve a single WAD path hash. Falls back to 16-char hex when not
-/// found or no env is loaded.
+/// Resolve a single WAD path hash. Checks the extracted-overlay first
+/// (so user discoveries win over LMDB), then LMDB, then falls back to
+/// the 16-char hex form.
 pub fn resolve_wad(hash: u64, hash_dir: &Path) -> String {
+    let overlay = wad_overlay(hash_dir);
+    if let Some(p) = overlay.get(&hash) {
+        return p.as_ref().to_string();
+    }
+
     let Some(env) = clone_wad_env(hash_dir) else {
         return format!("{:016x}", hash);
     };
@@ -144,11 +151,23 @@ pub fn resolve_wad(hash: u64, hash_dir: &Path) -> String {
         .unwrap_or_else(|| format!("{:016x}", hash))
 }
 
-/// Bulk WAD hash resolution — single read txn for the whole batch. Returns
-/// a `HashMap<hash, path>` so callers can dedupe + index in O(1).
+/// Bulk WAD hash resolution — single read txn for the whole batch. The
+/// extracted-overlay is layered first so user-discovered names win over
+/// LMDB. Returns a `HashMap<hash, path>` so callers can dedupe + index
+/// in O(1).
 #[allow(dead_code)] // Used by the WAD tree builder in `mount.rs`.
 pub fn resolve_wad_bulk(hashes: &[u64], hash_dir: &Path) -> HashMap<u64, String> {
     let mut out: HashMap<u64, String> = HashMap::with_capacity(hashes.len());
+
+    // Pass 1 — overlay. Cheap (already-loaded HashMap) and authoritative.
+    let overlay = wad_overlay(hash_dir);
+    if !overlay.is_empty() {
+        for &h in hashes {
+            if let Some(p) = overlay.get(&h) {
+                out.insert(h, p.as_ref().to_string());
+            }
+        }
+    }
 
     let Some(env) = clone_wad_env(hash_dir) else {
         for &h in hashes {
@@ -187,10 +206,15 @@ pub fn resolve_wad_bulk(hashes: &[u64], hash_dir: &Path) -> HashMap<u64, String>
     out
 }
 
-/// Resolve a single BIN name hash (FNV1a u32). Returns the resolved name
-/// if known, else `None` so callers can fall through to a text-based
-/// hashtable.
+/// Resolve a single BIN name hash (FNV1a u32). Checks the extracted-name
+/// overlay first, then LMDB. Returns `None` only when neither knows the
+/// hash so callers can still fall through to their own text tables.
 pub fn lookup_bin(hash: u32, hash_dir: &Path) -> Option<Arc<str>> {
+    let overlay = bin_overlay(hash_dir);
+    if let Some(p) = overlay.get(&hash) {
+        return Some(Arc::clone(p));
+    }
+
     let env = clone_bin_env(hash_dir)?;
     let rtxn = env.read_txn().ok()?;
     let db = env
@@ -201,10 +225,15 @@ pub fn lookup_bin(hash: u32, hash_dir: &Path) -> Option<Arc<str>> {
     Some(Arc::from(bytes))
 }
 
-/// Resolve a single WAD path hash via LMDB, returning `None` when unknown
-/// rather than the hex fallback. Used by the BIN converter for xxh64
+/// Resolve a single WAD path hash via overlay → LMDB, returning `None`
+/// when neither knows the hash. Used by the BIN converter for xxh64
 /// lookups so it can fall through to the text-file table.
 pub fn lookup_wad(hash: u64, hash_dir: &Path) -> Option<Arc<str>> {
+    let overlay = wad_overlay(hash_dir);
+    if let Some(p) = overlay.get(&hash) {
+        return Some(Arc::clone(p));
+    }
+
     let env = clone_wad_env(hash_dir)?;
     let rtxn = env.read_txn().ok()?;
     let db = env

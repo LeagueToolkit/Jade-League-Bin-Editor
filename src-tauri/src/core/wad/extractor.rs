@@ -499,40 +499,78 @@ fn augment_path_with_extension(path: &str, data: &[u8]) -> String {
 /// Cheap magic-byte sniffer for the formats League ships. Returns the
 /// extension *with* the leading dot, or `None` when we don't recognise
 /// the data — caller leaves the file extensionless in that case.
+///
+/// Visible to the rest of the crate so the WAD-list view can run the
+/// same sniff against a streamed peek of each compressed chunk and
+/// surface a real extension on hash-named entries (instead of the user
+/// seeing every unknown file as just `aabbccddeeff0011`).
+pub(crate) fn sniff_magic(data: &[u8]) -> Option<&'static str> {
+    sniff_extension(data)
+}
+///
+/// This runs on **every** chunk written when the resolved path lacks an
+/// extension (typically: hash-named files where the WAD path-hash isn't
+/// in any hashtable). Quartz writes hashed files with the same magic-
+/// derived extensions so users can still tell at a glance whether
+/// `aabbccddeeff0011.dds` is a texture or
+/// `aabbccddeeff0011.bin` is a property file — Jade matches the
+/// behaviour here.
 fn sniff_extension(data: &[u8]) -> Option<&'static str> {
     if data.len() < 4 {
         return None;
     }
-    match &data[0..4] {
-        b"PROP" => Some(".bin"),
-        b"PTCH" => Some(".bin"),
-        b"DDS " => Some(".dds"),
-        b"OggS" => Some(".ogg"),
-        b"\x89PNG" => Some(".png"),
-        b"BKHD" => Some(".bnk"),
-        b"r3d2" => Some(".skl"), // r3d2sklt / r3d2anmd / r3d2Mesh — narrow further below
-        b"<lua" | b"\x1bLua" | b"\x1bLJ\x02" => Some(".luaobj"),
-        _ => {
-            // SKN (simple skin)
-            if data.len() >= 8 {
-                let magic = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-                if magic == 0x00112233 {
-                    return Some(".skn");
-                }
-            }
-            // RST (string table)
-            if data.starts_with(b"RST") {
-                return Some(".stringtable");
-            }
-            // BNK header BKHD already matched above; WPK soundbanks:
-            if data.starts_with(b"r3d2aims") {
-                return Some(".aimesh");
-            }
-            // glTF JSON
-            if data.starts_with(b"{") {
-                return Some(".json");
-            }
-            None
-        }
+
+    // Eight-byte r3d2-family magics first — these would otherwise be
+    // shadowed by the four-byte `r3d2` catch-all and we'd mis-tag every
+    // SKL/ANM/SCB as one common type.
+    if data.len() >= 8 && &data[0..4] == b"r3d2" {
+        return Some(match &data[0..8] {
+            b"r3d2sklt" => ".skl",
+            b"r3d2anmd" | b"r3d2canm" => ".anm",
+            b"r3d2Mesh" => ".scb",
+            b"r3d2aims" => ".aimesh",
+            // Anything else with the r3d2 prefix is most often a
+            // Wwise package (.wpk) — Riot's container for sound data.
+            _ => ".wpk",
+        });
     }
+
+    // SKN — magic `0x00112233` little-endian, appears as the first u32.
+    if u32::from_le_bytes([data[0], data[1], data[2], data[3]]) == 0x0011_2233 {
+        return Some(".skn");
+    }
+
+    // Four-byte ASCII magics — fast path for the rest.
+    match &data[0..4] {
+        b"PROP" | b"PTCH" => return Some(".bin"),
+        b"DDS " => return Some(".dds"),
+        b"OggS" => return Some(".ogg"),
+        b"\x89PNG" => return Some(".png"),
+        b"BKHD" => return Some(".bnk"),
+        b"OEGM" => return Some(".mapgeo"),
+        b"TEX\0" => return Some(".tex"),
+        b"\x1bLua" | b"\x1bLJ\x01" | b"\x1bLJ\x02" => return Some(".luaobj"),
+        _ => {}
+    }
+
+    // Three-byte / shorter magics.
+    if data.starts_with(b"\xff\xd8\xff") {
+        return Some(".jpg");
+    }
+    if data.starts_with(b"RST") {
+        return Some(".stringtable");
+    }
+    if data.starts_with(b"<lua") {
+        return Some(".lua");
+    }
+    if data.starts_with(b"GIF8") {
+        return Some(".gif");
+    }
+    // glTF / config JSON. Crude but everything else with a leading `{`
+    // in the corpus is JSON-ish.
+    if data.starts_with(b"{") {
+        return Some(".json");
+    }
+
+    None
 }

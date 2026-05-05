@@ -9,12 +9,16 @@ export default function FileLoadingToast({ fileName, detail }: FileLoadingToastP
   return (
     <div className="file-loading-overlay" role="status" aria-live="polite">
       <div className="file-loading-card">
-        <div className="file-loading-spinner" aria-hidden="true">
-          <span className="file-loading-spinner-ring" />
-        </div>
         <div className="file-loading-text">
           <div className="file-loading-title">Loading {fileName}</div>
           <div className="file-loading-sub">{detail ?? 'Parsing bin - please wait a moment.'}</div>
+        </div>
+        {/* Indeterminate progress bar — shares the green-fill + shimmer
+            treatment with the WAD-extract status bar. The fill is
+            permanently full-width; the moving streak inside it is the
+            "this is still working" cue. */}
+        <div className="file-loading-progress" aria-hidden="true">
+          <div className="file-loading-progress-fill" />
         </div>
       </div>
     </div>

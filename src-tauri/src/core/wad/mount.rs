@@ -48,6 +48,13 @@ fn registry() -> &'static RwLock<HashMap<MountId, MountedWad>> {
     REGISTRY.get_or_init(|| RwLock::new(HashMap::new()))
 }
 
+/// Hand the global registry lock out to crate-internal mutators (e.g.
+/// the lazy magic-byte sniffer that patches `resolved` after mount).
+/// Public-but-pub(crate) so it isn't part of the Tauri API.
+pub(crate) fn registry_write() -> &'static RwLock<HashMap<MountId, MountedWad>> {
+    registry()
+}
+
 /// Open a WAD, parse its TOC, bulk-resolve every chunk's hash via the
 /// LMDB hashtable, and stash the result in the registry. The hash table
 /// is opened lazily on the first lookup; cold-cache cost is one-shot.
@@ -82,6 +89,24 @@ pub fn unmount(id: MountId) -> bool {
 pub fn with_mount<R>(id: MountId, f: impl FnOnce(&MountedWad) -> R) -> Option<R> {
     let guard = registry().read();
     guard.get(&id).map(f)
+}
+
+/// Re-run the bulk hash resolve against the current overlay+LMDB and
+/// replace `resolved` in place. Used after a hash-extraction scan so the
+/// existing mount picks up newly-discovered names without forcing a
+/// close-then-reopen (which would lose the active sub-path / selection).
+pub fn refresh_resolved(id: MountId) -> bool {
+    let hash_dir = match get_frogtools_hash_dir() {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+    let mut guard = registry().write();
+    let Some(mount) = guard.get_mut(&id) else {
+        return false;
+    };
+    let hashes: Vec<u64> = mount.chunks.iter().map(|c| c.path_hash).collect();
+    mount.resolved = resolve_wad_bulk(&hashes, &hash_dir);
+    true
 }
 
 /// Snapshot a small descriptor for every currently-mounted WAD — for the

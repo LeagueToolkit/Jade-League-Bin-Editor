@@ -4,7 +4,31 @@
  * 2-4 character label so a user can tell .bin from .tex from .png at a
  * glance in the welcome screen / file explorer. Folders and unknown
  * formats fall back to neutral outlines.
+ *
+ * The 3D-asset family + .bin use pictograms imported directly from
+ * `lucide-react` so we get the canonical, up-to-date paths instead of
+ * hand-transcribed `<path d="...">` strings (which is fragile to do by
+ * recall and went badly during initial development — see git history).
  */
+
+import {
+    Bone,
+    Box,
+    Boxes,
+    Clapperboard,
+    FileText,
+    type LucideIcon,
+} from 'lucide-react';
+
+/** Lookup table from glyph identifier → lucide-react component. Keep
+ *  the keys in sync with the `glyph` union on `FormatConfig` below. */
+const LUCIDE_GLYPHS: Record<'bone' | 'box' | 'boxes' | 'clapperboard' | 'file-text', LucideIcon> = {
+    'bone': Bone,
+    'box': Box,
+    'boxes': Boxes,
+    'clapperboard': Clapperboard,
+    'file-text': FileText,
+};
 
 interface FormatIconProps {
     /** File extension without the leading dot, lowercased. */
@@ -20,11 +44,20 @@ interface FormatConfig {
     label: string;
     /** Bottom-bar fill colour. Light enough that white text reads on top. */
     color: string;
+    /** Optional pictographic glyph rendered in place of the page +
+     *  label badge. All glyph paths are pulled verbatim from Lucide
+     *  (lucide.dev) so the line-weight + corner radius stay
+     *  consistent with whatever else the app pulls from the same set.
+     *  Drawn in `currentColor` so they sit alongside the existing
+     *  outline icons cleanly without a clashing accent palette. */
+    glyph?: 'bone' | 'box' | 'boxes' | 'clapperboard' | 'file-text';
 }
 
 const FORMAT_CONFIGS: Record<string, FormatConfig> = {
-    // League BIN file — the app's primary format.
-    bin: { label: 'BIN', color: '#8B5CF6' },
+    // League BIN file — the app's primary format. Lucide `file-text`
+    // glyph rather than the page+badge label since BIN files are by
+    // far the most common entry in any list.
+    bin: { label: 'BIN', color: 'currentColor', glyph: 'file-text' },
     py:  { label: 'PY',  color: '#3776AB' },
 
     // Textures
@@ -50,6 +83,16 @@ const FORMAT_CONFIGS: Record<string, FormatConfig> = {
     wad:    { label: 'WAD', color: '#D19A66' },
     zip:    { label: 'ZIP', color: '#9DA5B4' },
     fantome: { label: 'FNT', color: '#D19A66' },
+
+    // 3D asset family — rendered as pictograms instead of label badges
+    // so the user can scan a folder of mesh-related files at a glance.
+    // Drawn in currentColor (the row's text color) rather than a saturated
+    // accent so they sit alongside the page-style icons cleanly.
+    skl: { label: 'SKL', color: 'currentColor', glyph: 'bone' }, // skeleton (rig)
+    skn: { label: 'SKN', color: 'currentColor', glyph: 'boxes'        }, // skinned mesh
+    scb: { label: 'SCB', color: 'currentColor', glyph: 'box'          }, // static binary mesh
+    sco: { label: 'SCO', color: 'currentColor', glyph: 'box'          }, // static text mesh
+    anm: { label: 'ANM', color: 'currentColor', glyph: 'clapperboard' }, // animation
 
     // Office docs (rare in this app but match Word's palette so the
     // welcome list reads consistently when a user has opened one).
@@ -96,6 +139,25 @@ export function FormatIcon({ extension, isFolder, size = 28, className = '' }: F
     const cfg = getFormatConfig(extension);
     const w = size;
     const h = size;
+
+    // Pictographic variant — used by the 3D-asset family + .bin.
+    // Each glyph is a `lucide-react` component, rendered at the same
+    // size as the standard page icon so list rows stay aligned. We
+    // pass `currentColor` through so the icon picks up whatever colour
+    // the row text is using — no clashing accent palette.
+    if (cfg.glyph) {
+        const Glyph = LUCIDE_GLYPHS[cfg.glyph];
+        return (
+            <Glyph
+                width={w}
+                height={h}
+                strokeWidth={1.8}
+                className={className}
+                aria-hidden="true"
+            />
+        );
+    }
+
     const labelLen = cfg.label.length;
     // Outlined page silhouette + a coloured-border badge that overhangs
     // both sides of the sheet, with white bold text inside — same look
@@ -165,3 +227,4 @@ export function FormatIcon({ extension, isFolder, size = 28, className = '' }: F
         </svg>
     );
 }
+

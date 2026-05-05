@@ -10,6 +10,8 @@ interface ExtractionSettingsDialogProps {
     onClose: () => void;
     useRenamePattern: boolean;
     onUseRenamePatternChange: (next: boolean) => void;
+    autoCheckOnClick: boolean;
+    onAutoCheckOnClickChange: (next: boolean) => void;
 }
 
 type NavSection = 'general';
@@ -42,6 +44,8 @@ const ExtractionSettingsDialog: React.FC<ExtractionSettingsDialogProps> = ({
     onClose,
     useRenamePattern,
     onUseRenamePatternChange,
+    autoCheckOnClick,
+    onAutoCheckOnClickChange,
 }) => {
     const [activeSection, setActiveSection] = useState<NavSection>('general');
 
@@ -67,6 +71,19 @@ const ExtractionSettingsDialog: React.FC<ExtractionSettingsDialogProps> = ({
                 }
                 checked={useRenamePattern}
                 onChange={onUseRenamePatternChange}
+            />
+
+            <ToggleRow
+                label="Auto-check on click"
+                description={
+                    <>
+                        Clicking a file inside a WAD adds it to the extraction queue (and clicking
+                        a queued file removes it). Disable to require checkbox clicks — clicking
+                        a row will only update the preview, never touch selection.
+                    </>
+                }
+                checked={autoCheckOnClick}
+                onChange={onAutoCheckOnClickChange}
             />
         </>
     );

@@ -8,9 +8,9 @@
 use crate::core::hash::get_frogtools_hash_dir;
 use crate::core::wad::{
     cancel_extraction, check_for_hash_update, detect_layout, download_combined_hashes,
-    extract_to_dir, hashes_present, list_mounted, loaded_stats, mount,
+    extract_hashes, extract_to_dir, hashes_present, list_mounted, loaded_stats, mount,
     read_chunk_decompressed_bytes, resolve_wad, unload_envs, unmount, with_mount, ExtractResult,
-    HashUpdateStatus, MountInfo,
+    HashScanResult, HashUpdateStatus, MountInfo,
 };
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use serde::Serialize;
@@ -171,7 +171,18 @@ pub async fn wad_list_entries(id: u64) -> Result<Vec<WadEntry>, String> {
                     .get(&c.path_hash)
                     .cloned()
                     .unwrap_or_else(|| hex.clone());
-                let unknown = path == hex;
+                // `unknown` originally meant "resolved name equals the
+                // hex fallback". The lazy magic-byte sniffer rewrites
+                // that fallback to `<hex>.<ext>` once it has data, so
+                // compare against the **file stem** (without extension)
+                // — anything whose stem is still the hex didn't come
+                // from a hashtable and should still render with the
+                // unknown styling.
+                let stem = std::path::Path::new(&path)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("");
+                let unknown = stem == hex;
                 WadEntry {
                     path,
                     path_hash_hex: hex,
@@ -245,6 +256,45 @@ pub async fn wad_extract(
 #[tauri::command]
 pub async fn wad_cancel_extract(action_id: String) -> bool {
     cancel_extraction(&action_id)
+}
+
+// ── Lazy extension sniff for unhashed entries ──────────────────────────────
+
+/// Decompress just the magic bytes of every chunk in `id` whose
+/// resolved name is still the 16-char hex fallback, append the sniffed
+/// extension (`.dds`, `.bin`, `.skn`, …), and return the count of
+/// chunks that gained an extension. Heavy operation — runs on the
+/// blocking pool. The frontend kicks this off right after `wad_open`
+/// so the file list shows real types instead of every unhashed entry
+/// looking like a generic unknown blob.
+#[tauri::command]
+pub async fn wad_sniff_unknown(id: u64) -> Result<usize, String> {
+    tokio::task::spawn_blocking(move || crate::core::wad::sniff::sniff_unknown_in_mount(id))
+        .await
+        .map_err(|e| format!("Sniff task failed to join: {}", e))?
+        .map_err(|e| e.to_string())
+}
+
+// ── Hash extraction (overlay scan) ──────────────────────────────────────────
+
+/// Scan every chunk in `id` for embedded path strings and submesh names,
+/// merge new discoveries into the FrogTools hash overlay files, and
+/// return aggregate counts. Progress is emitted on the
+/// `wad-hash-scan-progress` channel tagged with `action_id` so the UI
+/// can stream chunk-level updates.
+#[tauri::command]
+pub async fn wad_extract_hashes(
+    app: tauri::AppHandle,
+    id: u64,
+    action_id: String,
+) -> Result<HashScanResult, String> {
+    let dir = get_frogtools_hash_dir().map_err(|e| e.to_string())?;
+    let app_clone = app.clone();
+    let action_clone = action_id.clone();
+    tokio::task::spawn_blocking(move || extract_hashes(&app_clone, id, &dir, &action_clone))
+        .await
+        .map_err(|e| format!("Hash scan task failed to join: {}", e))?
+        .map_err(|e| e.to_string())
 }
 
 /// Read + decompress a single chunk and return its bytes as base64. Used

@@ -140,6 +140,14 @@ function App() {
   const [showQuartzInstallModal, setShowQuartzInstallModal] = useState(false);
   const [updateToastVersion, setUpdateToastVersion] = useState<string | null>(null);
   const [hashSyncToast, setHashSyncToast] = useState<HashSyncToastState | null>(null);
+  // When the startup fingerprint check finds an update *and* hashes are
+  // already present, we hold the actual download until after the user's
+  // file has finished opening — otherwise the LMDB swap can land mid-
+  // BIN-conversion and the file ends up rendered with hex names. The
+  // pending-download payload is set here and consumed by an effect that
+  // watches for `tabs.length > 0 && !fileLoading`.
+  const pendingFileOpenRef = useRef(false);
+  const [pendingHashDownload, setPendingHashDownload] = useState<{ latestTag: string } | null>(null);
   const [fileLoading, setFileLoading] = useState<{ name: string; detail?: string } | null>(null);
   const [, setHashSyncBusy] = useState(true);
   const [appIcon, setAppIcon] = useState<string>("/media/jade.ico");
@@ -380,8 +388,11 @@ function App() {
     restoreWindowState();
     // Auto-sync hashes in the background. Preload-into-RAM was removed
     // — LMDB lookups are cheap enough on demand that the spike at startup
-    // wasn't earning its cost.
-    autoDownloadHashesOnStartup();
+    // wasn't earning its cost. Tiny grace window (450 ms) lets a
+    // file-association `open-file` event from Tauri's single-instance
+    // handler arrive *before* we kick the fingerprint check, so the flow
+    // can defer a real download until after the BIN finishes converting.
+    const hashStartupTimer = setTimeout(() => { autoDownloadHashesOnStartup(); }, 450);
     loadRecentFiles(); // Just load the list, don't open files
     if (!monacoInstance) {
       loadSavedTheme(invoke);
@@ -452,6 +463,10 @@ function App() {
       const filePath = event.payload;
       if (filePath && filePath.trim()) {
         console.log('[App] Received open-file event:', filePath);
+        // Flag the startup hash flow so it knows to defer any update
+        // download until after this file has loaded — otherwise the
+        // LMDB swap collides with BIN conversion mid-flight.
+        pendingFileOpenRef.current = true;
         // Bring window to front when a file is opened externally
         const win = getCurrentWindow();
         try {
@@ -863,6 +878,7 @@ function App() {
       // Unlisten from Tauri open-file/hash-sync events
       openFileUnlisten.then(fn => fn());
       hashProgressUnlisten.then(fn => fn());
+      clearTimeout(hashStartupTimer);
     };
   }, [monacoInstance]);
 
@@ -1041,39 +1057,52 @@ function App() {
             status: 'success',
             message: `Hashes are up to date (${fp.current_tag}).`
           });
+          if (hashToastHideTimeoutRef.current) clearTimeout(hashToastHideTimeoutRef.current);
+          hashToastHideTimeoutRef.current = setTimeout(() => {
+            setHashSyncToast((prev) => prev ? { ...prev, visible: false } : prev);
+          }, 4200);
+          setStatusMessage('Hashes ready');
+          statusMessageRef.current = 'Hashes ready';
+          setHashSyncBusy(false);
+          await invoke('set_preference', { key: 'LastHashCheckAt', value: String(Date.now()) }).catch(() => {});
+          setTimeout(() => { allowHashStatusUpdateRef.current = true; }, 500);
+          return;
+        }
+
+        // Update available. Defer the download whenever a file-open is
+        // in flight — even when no LMDB layout is on disk yet. The
+        // user might be offline or unable to reach GitHub; in that
+        // case forcing a download here would block the file from
+        // opening at all, and they'd rather have a partly-hashed file
+        // they can read than a hung launch. The deferred download
+        // still kicks once the BIN has loaded, so when the network
+        // *is* available the second open will be fully resolved.
+        const mustDownloadNow = !pendingFileOpenRef.current;
+        if (mustDownloadNow) {
+          await runHashDownload(fp?.layout_present ? fp.latest_tag : '');
         } else {
-          showHashToast({
-            visible: true,
-            status: 'downloading',
-            message: fp?.layout_present
-              ? `New release ${fp.latest_tag} — downloading...`
-              : 'Downloading combined LMDB hashes...'
-          });
-          await invoke('wad_download_hashes', { force: true });
+          // Defer — let the file open complete first.
+          const latestTag = fp?.latest_tag ?? '';
           showHashToast({
             visible: true,
             status: 'success',
-            message: 'Hashes updated.'
+            message: latestTag
+              ? `Update ${latestTag} queued — will download after the file finishes loading.`
+              : 'Hash download queued — will run after the file finishes loading.'
           });
+          if (hashToastHideTimeoutRef.current) clearTimeout(hashToastHideTimeoutRef.current);
+          hashToastHideTimeoutRef.current = setTimeout(() => {
+            setHashSyncToast((prev) => prev ? { ...prev, visible: false } : prev);
+          }, 4200);
+          setPendingHashDownload({ latestTag });
+          setStatusMessage('Hashes ready');
+          statusMessageRef.current = 'Hashes ready';
+          setHashSyncBusy(false);
+          // Don't stamp LastHashCheckAt — we want the deferred download
+          // to actually run, and re-firing the fingerprint check on the
+          // *next* launch is harmless if it doesn't.
+          setTimeout(() => { allowHashStatusUpdateRef.current = true; }, 500);
         }
-
-        if (hashToastHideTimeoutRef.current) {
-          clearTimeout(hashToastHideTimeoutRef.current);
-        }
-        hashToastHideTimeoutRef.current = setTimeout(() => {
-          setHashSyncToast((prev) => prev ? { ...prev, visible: false } : prev);
-        }, 4200);
-
-        setStatusMessage('Hashes ready');
-        statusMessageRef.current = 'Hashes ready';
-        setHashSyncBusy(false);
-        // Reload the BIN converter's hash manager so it picks up the new
-        // LMDB layout (or refreshed text fallback).
-        await invoke('set_preference', { key: 'LastHashCheckAt', value: String(Date.now()) }).catch(() => {});
-        // Re-enable hash status updates after a short delay
-        setTimeout(() => {
-          allowHashStatusUpdateRef.current = true;
-        }, 500);
       } catch (error) {
         console.error('[App] Failed to auto-download hashes:', error);
         showHashToast({
@@ -1097,6 +1126,67 @@ function App() {
       allowHashStatusUpdateRef.current = true;
     }
   };
+
+  // Actually run the LMDB download + post-update bookkeeping. Split out
+  // of `autoDownloadHashesOnStartup` so the deferred path (after a
+  // file-open completes) can call it without re-running the fingerprint
+  // check.
+  const runHashDownload = async (latestTag: string) => {
+    allowHashStatusUpdateRef.current = false;
+    setHashSyncBusy(true);
+    showHashToast({
+      visible: true,
+      status: 'downloading',
+      message: latestTag ? `New release ${latestTag} — downloading...` : 'Downloading combined LMDB hashes...'
+    });
+    try {
+      await invoke('wad_download_hashes', { force: true });
+      showHashToast({
+        visible: true,
+        status: 'success',
+        message: 'Hashes updated.'
+      });
+      if (hashToastHideTimeoutRef.current) clearTimeout(hashToastHideTimeoutRef.current);
+      hashToastHideTimeoutRef.current = setTimeout(() => {
+        setHashSyncToast((prev) => prev ? { ...prev, visible: false } : prev);
+      }, 4200);
+      setStatusMessage('Hashes ready');
+      statusMessageRef.current = 'Hashes ready';
+      await invoke('set_preference', { key: 'LastHashCheckAt', value: String(Date.now()) }).catch(() => {});
+    } catch (error) {
+      console.error('[App] Hash download failed:', error);
+      showHashToast({
+        visible: true,
+        status: 'error',
+        message: `Hash update failed: ${String(error)}`
+      });
+    } finally {
+      setHashSyncBusy(false);
+      setTimeout(() => { allowHashStatusUpdateRef.current = true; }, 500);
+    }
+  };
+
+  // Run any deferred hash download once the BIN that triggered the
+  // pending state has fully landed. We require both `!fileLoading`
+  // (parser done) and at least one tab (something rendered) so the
+  // converter has already produced output before the LMDB swap fires.
+  // Without this gate the LMDB rename can land mid-conversion and the
+  // file ends up with hex names.
+  useEffect(() => {
+    if (!pendingHashDownload) return;
+    if (fileLoading) return;
+    if (tabs.length === 0) return;
+    // Decouple slightly so React commits the post-load state first —
+    // makes the toast transition cleaner and avoids re-entrancy if the
+    // download triggers further state churn.
+    const t = setTimeout(() => {
+      runHashDownload(pendingHashDownload.latestTag);
+      setPendingHashDownload(null);
+      pendingFileOpenRef.current = false;
+    }, 500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingHashDownload, fileLoading, tabs.length]);
 
   // Hash preload is gone — LMDB lookups are fast enough that draining
   // the table into RAM at startup gave a memory spike with no perceived

@@ -198,6 +198,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             bin_commands::convert_bin_to_text,
+            bin_commands::convert_bin_bytes_to_text,
             bin_commands::convert_text_to_bin,
             bin_commands::batch_convert_bins,
             bin_commands::find_linked_bin_file,
@@ -299,6 +300,9 @@ pub fn run() {
             wad_commands::wad_extract,
             wad_commands::wad_cancel_extract,
             wad_commands::wad_read_chunk_b64,
+            // WAD extraction (Phase 4: hash recovery scan)
+            wad_commands::wad_extract_hashes,
+            wad_commands::wad_sniff_unknown,
             // Taskbar progress reporting (Windows ITaskbarList3)
             taskbar_progress::set_taskbar_progress,
         ])

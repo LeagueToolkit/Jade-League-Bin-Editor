@@ -22,6 +22,18 @@
         "rail     status";
     background: var(--editor-bg, #1e1e1e);
     overflow: hidden;
+    /* Quick lateral slide-out — the welcome steps aside while the
+       editor materialises underneath. Sharp accelerate curve so the
+       motion has weight instead of feeling drifty; duration tracks
+       `WELCOME_EXIT_MS` in WelcomeScreen.tsx, keep them in sync. */
+    transition:
+        transform 180ms cubic-bezier(0.4, 0, 1, 1),
+        opacity 140ms cubic-bezier(0.4, 0, 1, 1) 20ms;
+}
+.welcome-screen-v2-closing {
+    transform: translateX(-3%);
+    opacity: 0;
+    pointer-events: none;
 }
 
 /* Hide the shell's own title-bar contents while the welcome overlay
@@ -453,6 +465,11 @@ body.welcome-active .title-bar > * {
     flex-direction: column;
     gap: 2px;
     min-height: 0;
+    /* Vertical scroll only — never horizontal. The sources column has
+       a fixed 220px grid track, so any horizontal overflow is text
+       (long file paths) that should be ellipsised in-row, not exposed
+       through a scrollbar at the bottom of the panel. */
+    overflow-x: hidden;
     overflow-y: auto;
 }
 .welcome-source-actions {
@@ -838,7 +855,7 @@ body.welcome-active .title-bar > * {
     overflow: hidden;
 }
 .welcome-extract-table.wad-mode .welcome-extract-row {
-    grid-template-columns: 28px 24px 1fr 100px 110px;
+    grid-template-columns: 28px 24px 1fr 80px 80px;
 }
 .welcome-extract-list {
     flex: 1 1 auto;
@@ -862,8 +879,10 @@ body.welcome-active .title-bar > * {
     /* Default = disk mode: checkbox · icon · Name · Type · Size · Modified.
        Single `1fr` for Name keeps the column labels close together —
        using two `1fr`s would space "Name"/"Type" half a screen apart on
-       a wide window. */
-    grid-template-columns: 28px 24px 1fr 110px 100px 130px;
+       a wide window. Type/Size are tightened from the original 110/100
+       to 80/80 — `.client` and "999 MB" both fit comfortably and the
+       column-to-column gap stops looking like dead space. */
+    grid-template-columns: 28px 24px 1fr 80px 80px 110px;
     align-items: center;
     gap: 14px;
     padding: 14px 16px;
@@ -889,7 +908,7 @@ body.welcome-active .title-bar > * {
    per-file mtime, and the column would just be dead space inside a
    mounted WAD. */
 .welcome-extract-list.wad-mode .welcome-extract-row {
-    grid-template-columns: 28px 24px 1fr 110px 100px;
+    grid-template-columns: 28px 24px 1fr 80px 80px;
 }
 .welcome-extract-row-checkbox {
     display: flex;
@@ -1187,6 +1206,150 @@ body.welcome-active .title-bar > * {
 }
 .welcome-preview-image-error {
     color: var(--error-color, #d65c5c);
+}
+
+/* ── Folder + WAD glyph swaps ─────────────────────────────────────
+   `FolderIcon` and `WadIcon` both render the closed and open Lucide
+   variants into the DOM and let CSS swap them on (a) hover over a
+   recognised row container, or (b) `.active` on the row (currently-
+   selected source or currently-mounted WAD). Listing the row classes
+   explicitly keeps the swap from triggering on bystander parents
+   like the title bar or main grid wrappers. */
+.welcome-folder-icon,
+.welcome-wad-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.welcome-folder-icon-open,
+.welcome-wad-icon-open { display: none; }
+
+/* Active state — selected source row, or WAD whose mount matches. */
+.welcome-source-row.active .welcome-folder-icon-closed,
+.welcome-wad-icon.welcome-wad-icon-active .welcome-wad-icon-closed,
+.welcome-source-row.active .welcome-wad-icon-closed { display: none; }
+
+.welcome-source-row.active .welcome-folder-icon-open,
+.welcome-wad-icon.welcome-wad-icon-active .welcome-wad-icon-open,
+.welcome-source-row.active .welcome-wad-icon-open { display: inline-block; }
+
+/* Hover state — works for both folder and wad glyphs in the same
+   set of recognised row containers. */
+:where(
+    .welcome-extract-row,
+    .welcome-source-row,
+    .welcome-recent-row,
+    .welcome-breadcrumb-btn,
+    .welcome-source-extract-settings
+):hover .welcome-folder-icon-closed,
+:where(
+    .welcome-extract-row,
+    .welcome-source-row,
+    .welcome-recent-row,
+    .welcome-breadcrumb-btn,
+    .welcome-source-extract-settings
+):hover .welcome-wad-icon-closed { display: none; }
+
+:where(
+    .welcome-extract-row,
+    .welcome-source-row,
+    .welcome-recent-row,
+    .welcome-breadcrumb-btn,
+    .welcome-source-extract-settings
+):hover .welcome-folder-icon-open,
+:where(
+    .welcome-extract-row,
+    .welcome-source-row,
+    .welcome-recent-row,
+    .welcome-breadcrumb-btn,
+    .welcome-source-extract-settings
+):hover .welcome-wad-icon-open { display: inline-block; }
+
+/* BIN preview action strip — tucks under the Monaco editor with
+   Find + font size controls. Visually a continuation of the
+   bintext slot (same border treatment) so they read as one widget
+   rather than two unrelated panels. */
+.welcome-preview-bin-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    margin-top: -12px; /* close the gap left by .welcome-preview-bintext's margin-bottom */
+    margin-bottom: 12px;
+    background: color-mix(in srgb, var(--text-color, #cccccc) 4%, transparent);
+    border: 1px solid color-mix(in srgb, var(--border-color, #3e3e42) 60%, transparent);
+    border-top: none;
+    border-radius: 0 0 4px 4px;
+}
+.welcome-preview-bin-spacer { flex: 1 1 auto; }
+.welcome-preview-bin-btn {
+    height: 24px;
+    padding: 0 10px;
+    background: transparent;
+    border: 1px solid var(--border-color, #3e3e42);
+    border-radius: 3px;
+    color: var(--text-color, #cccccc);
+    font-family: inherit;
+    font-size: 11px;
+    cursor: pointer;
+    transition: background-color 0.12s, border-color 0.12s;
+}
+.welcome-preview-bin-btn-icon {
+    min-width: 28px;
+    padding: 0 6px;
+    font-weight: 600;
+}
+.welcome-preview-bin-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: var(--jade-accent, #007acc);
+}
+.welcome-preview-bin-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+.welcome-preview-bin-font-readout {
+    font-size: 11px;
+    color: var(--text-muted, #8a8a8a);
+    min-width: 36px;
+    text-align: center;
+    user-select: none;
+}
+[data-ui-mode="modern"] .welcome-preview-bin-toolbar {
+    background: var(--modern-glass-soft, rgba(255, 255, 255, 0.04));
+    border-color: var(--modern-glass-border);
+}
+[data-ui-mode="modern"] .welcome-preview-bin-btn {
+    border-color: var(--modern-glass-border);
+}
+[data-ui-mode="modern"] .welcome-preview-bin-btn:hover:not(:disabled) {
+    background: var(--modern-accent-10);
+    border-color: var(--modern-accent);
+}
+
+/* BIN text preview — Monaco mounts inside this slot in read-only mode
+   with the ritobin language + theme so previews syntax-highlight the
+   same way the editor tab would. Taller than the image slot so the
+   user sees a meaningful chunk of the BIN tree at once; the body
+   still scrolls so the slot has a hard cap relative to the viewport. */
+.welcome-preview-bintext {
+    width: 100%;
+    flex: 1 1 auto;
+    min-height: 480px;
+    max-height: min(840px, 85vh);
+    background: var(--editor-bg, #1e1e1e);
+    border: 1px solid color-mix(in srgb, var(--border-color, #3e3e42) 60%, transparent);
+    /* Square the bottom corners so the action toolbar joins
+       seamlessly underneath. */
+    border-radius: 4px 4px 0 0;
+    margin-bottom: 12px;
+    box-sizing: border-box;
+    overflow: hidden;
+    display: flex;
+}
+.welcome-preview-bintext > * {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
 }
 /* Single-line metadata under the image — type · size · dims. The
    detail rows are gone in WAD mode so the image gets the column. */

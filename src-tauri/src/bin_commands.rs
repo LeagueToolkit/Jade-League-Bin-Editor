@@ -55,6 +55,24 @@ pub async fn convert_bin_to_text(input_path: String) -> Result<BinInfo, String> 
     })
 }
 
+/// Convert raw BIN bytes (held in memory — typically a WAD chunk read
+/// via `wad_read_chunk_b64`) to ritobin text. Same engine selection as
+/// the path-based [`convert_bin_to_text`]; just skips the disk read so
+/// the WAD preview pane can show a BIN without writing it out first.
+///
+/// Heavy enough on big files (multi-MB property trees) that the caller
+/// should treat the await as non-trivial — the command still runs the
+/// converter synchronously inside a Tauri async task, so the runtime
+/// stays responsive but the call may take a beat to return.
+#[tauri::command]
+pub async fn convert_bin_bytes_to_text(bin_data: Vec<u8>) -> Result<String, String> {
+    if use_jade_engine() {
+        jade::convert_bin_to_text(&bin_data)
+    } else {
+        convert_bin_data_to_text(&bin_data)
+    }
+}
+
 #[tauri::command]
 pub async fn convert_text_to_bin(text_content: String, output_path: String) -> Result<BinInfo, String> {
     let preview: String = text_content.chars().take(200).collect();
