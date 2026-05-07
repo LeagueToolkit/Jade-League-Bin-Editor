@@ -193,6 +193,11 @@ function calculateScrollbarColors(selectedTab: string, _editorBg: string): { thu
 export function applyTheme(themeId: string, customColors?: CustomThemeColors) {
     const root = document.documentElement;
 
+    // Track the active theme on root so other systems (modern UI
+    // reconciler, future theme-aware effects) can branch on it without
+    // needing to re-read preferences.
+    root.setAttribute('data-active-theme', themeId);
+
     if (themeId === 'Custom' && customColors) {
         // Apply custom theme colors
         root.style.setProperty('--window-bg', customColors.windowBg);
@@ -307,6 +312,11 @@ export function applyTheme(themeId: string, customColors?: CustomThemeColors) {
             updateMonacoBackground(theme.editorBg);
         }
     }
+
+    // Reconcile modern UI now that the active theme has changed —
+    // suppresses or restores `data-ui-mode="modern"` based on the new
+    // theme's `disableModernUIEffects` flag.
+    reconcileModernUI();
 }
 
 /**
@@ -353,27 +363,46 @@ export function applyRoundedCorners(enabled: boolean) {
 }
 
 /**
+ * Reconcile `data-ui-mode` from the user's Modern UI preference and the
+ * active theme's opt-out flag. Sets `data-ui-mode="modern"` only when the
+ * user wants modern AND the active theme doesn't `disableModernUIEffects`.
+ *
+ * Both `applyModernUI` and `applyTheme` call this so the two inputs stay
+ * in sync — switching to a flat-only theme suppresses modern even if the
+ * pref is on; switching back restores it without a separate toggle.
+ */
+function reconcileModernUI() {
+    const root = document.documentElement;
+    const pref = root.getAttribute('data-modern-ui-pref') !== 'off';
+    const themeId = root.getAttribute('data-active-theme');
+    const theme = themeId && themeId !== 'Custom' ? getTheme(themeId) : undefined;
+    const flatTheme = !!theme?.disableModernUIEffects;
+
+    if (pref && !flatTheme) {
+        root.setAttribute('data-ui-mode', 'modern');
+    } else {
+        root.removeAttribute('data-ui-mode');
+    }
+
+    // Re-apply Monaco's background — updateMonacoBackground reads the
+    // attribute itself, so toggling it changes whether the editor surface
+    // is transparent (modern) or solid (flat).
+    const editorBg =
+        root.style.getPropertyValue('--editor-bg') ||
+        getComputedStyle(root).getPropertyValue('--editor-bg').trim() ||
+        '#1E1E1E';
+    updateMonacoBackground(editorBg);
+}
+
+/**
  * Apply/remove the Modern UI (Quartz-inspired glass morphism) mode.
  * Sets data-ui-mode="modern" on <html> when enabled, removes it when disabled.
  * Also refreshes Monaco's background immediately so transparency kicks in
  * without needing a full theme reload.
  */
 export function applyModernUI(enabled: boolean) {
-    const root = document.documentElement;
-    if (enabled) {
-        root.setAttribute('data-ui-mode', 'modern');
-    } else {
-        root.removeAttribute('data-ui-mode');
-    }
-
-    // Read the current editor bg from the CSS custom property and re-apply.
-    // updateMonacoBackground checks data-ui-mode itself, so it will use
-    // 'transparent' when modern is on and the solid color when it's off.
-    const editorBg =
-        root.style.getPropertyValue('--editor-bg') ||
-        getComputedStyle(root).getPropertyValue('--editor-bg').trim() ||
-        '#1E1E1E';
-    updateMonacoBackground(editorBg);
+    document.documentElement.setAttribute('data-modern-ui-pref', enabled ? 'on' : 'off');
+    reconcileModernUI();
 }
 
 /**

@@ -35,6 +35,7 @@ interface MenuBarProps {
     recentFiles?: string[];
     onOpenRecentFile?: (path: string) => void;
     openFileDisabled?: boolean;
+    onMainPage?: () => void;
 }
 
 export default function MenuBar({
@@ -67,6 +68,7 @@ export default function MenuBar({
     recentFiles = [],
     onOpenRecentFile,
     openFileDisabled = false,
+    onMainPage,
 }: MenuBarProps) {
     const [activeMenu, setActiveMenu] = useState<string | null>(null);
 
@@ -142,6 +144,11 @@ export default function MenuBar({
                             <span>Open Log File</span>
                         </button>
                         <div className="menu-separator" />
+                        {onMainPage && (
+                            <button className="menu-option" onClick={() => handleMenuClick(onMainPage)}>
+                                <span>Main page</span>
+                            </button>
+                        )}
                         <button className="menu-option" onClick={() => handleMenuClick(onExit)}>
                             <span>Exit</span>
                         </button>

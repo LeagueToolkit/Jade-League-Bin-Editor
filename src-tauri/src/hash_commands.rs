@@ -243,7 +243,11 @@ pub async fn check_hashes() -> Result<HashStatus, String> {
 }
 
 #[tauri::command]
-pub async fn download_hashes(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+pub async fn download_hashes(
+    app: tauri::AppHandle,
+    force: Option<bool>,
+) -> Result<Vec<String>, String> {
+    let force = force.unwrap_or(false);
     let hash_dir = get_hash_dir()?;
     fs::create_dir_all(&hash_dir)
         .map_err(|e| format!("Failed to create hash dir {}: {}", hash_dir.display(), e))?;
@@ -300,7 +304,12 @@ pub async fn download_hashes(app: tauri::AppHandle) -> Result<Vec<String>, Strin
             _ => false,
         };
 
-        let up_to_date = txt_path.exists()
+        // `force = true` (manual "Download text hashes" button) skips
+        // the smart-skip and re-fetches every file regardless of
+        // ETag / Last-Modified. The schedule path leaves it false
+        // so up-to-date files are no-ops with just one HEAD probe.
+        let up_to_date = !force
+            && txt_path.exists()
             && (remote.not_modified || same_etag || same_last_modified || local_newer_or_equal);
 
         if up_to_date {

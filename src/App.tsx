@@ -175,6 +175,15 @@ function App() {
   // see the current variant without re-binding when it changes.
   const shellVariantRef = useRef<ShellVariant>('vscode');
   shellVariantRef.current = shellVariant;
+  // Lets the Jade icon / "Main page" / "Continue without file" buttons
+  // override the default "no tabs → welcome / has tabs → editor" toggle.
+  // 'force' shows welcome over the editor; 'hide' keeps editor visible
+  // even with zero tabs. Auto-resets whenever tab count changes so a
+  // newly-opened file naturally lands on the editor.
+  const [welcomeOverride, setWelcomeOverride] = useState<'force' | 'hide' | null>(null);
+  useEffect(() => {
+    setWelcomeOverride(null);
+  }, [tabs.length]);
   const [quartzInteropEnabled, setQuartzInteropEnabled] = useState(true);
   const [quartzHistoryEntries, setQuartzHistoryEntries] = useState<QuartzHistoryEntry[]>([]);
   const quartzSessionsRef = useRef<Map<string, QuartzEditSession>>(new Map());
@@ -997,11 +1006,19 @@ function App() {
     try {
       const rawMode = await invoke<string>('get_preference', {
         key: 'HashUpdateMode',
-        defaultValue: 'every_launch'
-      }).catch(() => 'every_launch');
-      // Migrate the old 7-day pref value silently — schedule is now 3 days.
-      const mode = rawMode === 'every_7_days' ? 'every_3_days' : rawMode;
-      if (rawMode === 'every_7_days') {
+        defaultValue: 'every_3_days'
+      }).catch(() => 'every_3_days');
+      // Default schedule is 'every_3_days'. Existing users on the
+      // older 'every_launch' or 'every_7_days' settings get bumped
+      // to it silently — every_launch is too aggressive for most
+      // people, and 'every_7_days' was an earlier name for what is
+      // now 'every_3_days'. Both silently migrate. The user can
+      // still re-select 'every_launch' from Settings if they want.
+      const mode =
+        rawMode === 'every_7_days' || rawMode === 'every_launch'
+          ? 'every_3_days'
+          : rawMode;
+      if (mode !== rawMode) {
         await invoke('set_preference', { key: 'HashUpdateMode', value: 'every_3_days' }).catch(() => {});
       }
 
@@ -1052,10 +1069,18 @@ function App() {
         }>('wad_check_for_hash_update').catch(() => null);
 
         if (fp && fp.up_to_date) {
+          // LMDB unchanged — but text hashes update independently
+          // (CDragon mirror, no shared release tag), so check those
+          // too. `download_hashes` does its own per-file ETag /
+          // Last-Modified probes; cheap when nothing changed (~5
+          // parallel HEADs), only fetches files that actually moved.
+          const textChanged = await runTextHashRefresh();
           showHashToast({
             visible: true,
             status: 'success',
-            message: `Hashes are up to date (${fp.current_tag}).`
+            message: textChanged
+              ? `Text hashes refreshed (LMDB at ${fp.current_tag}).`
+              : `Hashes are up to date (${fp.current_tag}).`
           });
           if (hashToastHideTimeoutRef.current) clearTimeout(hashToastHideTimeoutRef.current);
           hashToastHideTimeoutRef.current = setTimeout(() => {
@@ -1127,6 +1152,28 @@ function App() {
     }
   };
 
+  // Smart-skip text-hash refresh. Runs the per-file ETag /
+  // Last-Modified probe pipeline; only files that actually moved
+  // get re-fetched. Returns `true` if anything was downloaded
+  // (caller can stamp the message accordingly + reload BIN hashes).
+  const runTextHashRefresh = async (): Promise<boolean> => {
+    try {
+      const downloaded = await invoke<string[]>('download_hashes');
+      if (Array.isArray(downloaded) && downloaded.length > 0) {
+        // New text files on disk — refresh the in-RAM BIN table so
+        // the next conversion sees the new entries without an app
+        // restart. Background; conversions are still gated on
+        // `are_bin_hashes_ready` so a half-loaded table won't be
+        // used while the swap is in flight.
+        invoke('reload_bin_hashes').catch(() => {});
+        return true;
+      }
+    } catch (e) {
+      console.warn('[App] Text hash refresh failed (non-fatal):', e);
+    }
+    return false;
+  };
+
   // Actually run the LMDB download + post-update bookkeeping. Split out
   // of `autoDownloadHashesOnStartup` so the deferred path (after a
   // file-open completes) can call it without re-running the fingerprint
@@ -1140,7 +1187,19 @@ function App() {
       message: latestTag ? `New release ${latestTag} — downloading...` : 'Downloading combined LMDB hashes...'
     });
     try {
-      await invoke('wad_download_hashes', { force: true });
+      // Run both hash downloads in parallel:
+      //   - LMDB (combined.zst) for WAD path resolution
+      //   - text files (CDragon mirror) for BIN field/class names
+      // Each command is independently smart-skip-friendly except
+      // we force LMDB (the fingerprint check already told us it's
+      // stale) and let text use its own per-file ETag/Last-Modified
+      // probes (cheap when nothing changed).
+      await Promise.all([
+        invoke('wad_download_hashes', { force: true }),
+        invoke('download_hashes').catch((e) =>
+          console.warn('[App] Text hash refresh failed (non-fatal):', e),
+        ),
+      ]);
       showHashToast({
         visible: true,
         status: 'success',
@@ -1152,6 +1211,9 @@ function App() {
       }, 4200);
       setStatusMessage('Hashes ready');
       statusMessageRef.current = 'Hashes ready';
+      // Reload BIN hashes from disk so the in-RAM table picks up
+      // anything that just changed. Background — no need to block.
+      invoke('reload_bin_hashes').catch(() => {});
       await invoke('set_preference', { key: 'LastHashCheckAt', value: String(Date.now()) }).catch(() => {});
     } catch (error) {
       console.error('[App] Hash download failed:', error);
@@ -1400,6 +1462,12 @@ function App() {
     const normalizedPath = filePath.toLowerCase();
     if (openingFilesRef.current.has(normalizedPath)) return;
     openingFilesRef.current.add(normalizedPath);
+    // Drop any active welcome override before touching loading state —
+    // otherwise reopening an already-open tab from the welcome screen
+    // (Main page → Recent → same file) leaves `welcomeOverride='force'`
+    // intact, and the brief fileLoading flicker triggers a close/open
+    // animation glitch instead of cleanly handing back to the editor.
+    setWelcomeOverride(null);
     const fileName = getFileName(filePath);
     setFileLoading({ name: fileName });
     try {
@@ -4157,6 +4225,9 @@ function App() {
 
     // -- Recent files
     recentFiles, openFileDisabled, openFileFromPath,
+
+    // -- Welcome screen override
+    welcomeOverride, setWelcomeOverride,
 
     // -- File ops
     onNew: handleNew, onOpen: handleOpen, onSave: handleSave,

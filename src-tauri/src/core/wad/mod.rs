@@ -23,7 +23,13 @@ pub use hash_downloader::{
     check_for_hash_update, detect_layout, download_combined_hashes, hashes_present,
     HashUpdateStatus,
 };
-pub use lmdb_hashes::{loaded_stats, lookup_bin, lookup_wad, resolve_wad, unload_envs};
+// `lookup_bin` stays exported (it's still used by `extractor` /
+// `sniff` / etc. for BIN-property resolution inside chunk content),
+// but the BIN converter doesn't go through it anymore — that path
+// uses the in-RAM text table on the Jade side.
+#[allow(unused_imports)]
+pub use lmdb_hashes::lookup_bin;
+pub use lmdb_hashes::{loaded_stats, lookup_wad, resolve_wad, unload_envs};
 // `preload_envs` is still useful for tests and future eager-warmup hooks
 // even though no command exposes it today.
 #[allow(unused_imports)]

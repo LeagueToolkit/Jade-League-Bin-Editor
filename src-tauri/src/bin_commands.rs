@@ -2,7 +2,26 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use crate::core::bin::{read_bin_ltk, tree_to_text_cached, text_to_tree, write_bin_ltk, BinTree};
 use crate::core::bin::jade;
+use crate::core::bin::jade::hash_manager::{are_bin_hashes_ready, kick_off_bin_hash_load};
 use std::fs;
+
+/// Returns an error string when the in-RAM BIN hash table isn't
+/// populated yet, after kicking the loader so the next attempt can
+/// succeed. Cheap fast-path — `are_bin_hashes_ready` is an
+/// `OnceLock::get` + RwLock read. The convert commands gate on this
+/// so we never produce a fully-hashed text dump.
+fn require_bin_hashes_ready() -> Result<(), String> {
+    if are_bin_hashes_ready() {
+        return Ok(());
+    }
+    kick_off_bin_hash_load();
+    Err(
+        "BIN hashes are still loading — try again in a few seconds. \
+         If this persists, open Settings \u{2192} Hash Files and verify \
+         the text hash files are present."
+            .to_string(),
+    )
+}
 
 /// Check if the Jade Custom converter engine is selected.
 fn use_jade_engine() -> bool {
@@ -39,6 +58,7 @@ pub struct BatchConvertResult {
 
 #[tauri::command]
 pub async fn convert_bin_to_text(input_path: String) -> Result<BinInfo, String> {
+    require_bin_hashes_ready()?;
     let data = std::fs::read(&input_path)
         .map_err(|e| format!("Failed to read input file: {}", e))?;
 
@@ -66,6 +86,7 @@ pub async fn convert_bin_to_text(input_path: String) -> Result<BinInfo, String> 
 /// stays responsive but the call may take a beat to return.
 #[tauri::command]
 pub async fn convert_bin_bytes_to_text(bin_data: Vec<u8>) -> Result<String, String> {
+    require_bin_hashes_ready()?;
     if use_jade_engine() {
         jade::convert_bin_to_text(&bin_data)
     } else {
@@ -75,6 +96,7 @@ pub async fn convert_bin_bytes_to_text(bin_data: Vec<u8>) -> Result<String, Stri
 
 #[tauri::command]
 pub async fn convert_text_to_bin(text_content: String, output_path: String) -> Result<BinInfo, String> {
+    require_bin_hashes_ready()?;
     let preview: String = text_content.chars().take(200).collect();
     println!("[convert_text_to_bin] Parsing {} bytes, preview:\n{}", text_content.len(), preview);
 
@@ -107,6 +129,7 @@ pub async fn batch_convert_bins(input_paths: Vec<String>) -> Result<Vec<BatchCon
     if input_paths.is_empty() {
         return Ok(vec![]);
     }
+    require_bin_hashes_ready()?;
     
     let start = std::time::Instant::now();
     let use_jade = use_jade_engine();
@@ -122,6 +145,52 @@ pub async fn batch_convert_bins(input_paths: Vec<String>) -> Result<Vec<BatchCon
     println!("[BatchConvert] Completed {} files in {:?}", results.len(), start.elapsed());
     
     Ok(results)
+}
+
+/// Snapshot for the settings UI: how many BIN hashes are loaded and
+/// whether the in-RAM table is ready for conversion. Cheap — runs
+/// only `OnceLock::get` + RwLock read.
+#[derive(Serialize)]
+pub struct BinHashStatus {
+    pub ready: bool,
+    pub count: usize,
+    pub memory_mb: f64,
+}
+
+#[tauri::command]
+pub async fn get_bin_hash_status() -> Result<BinHashStatus, String> {
+    use crate::core::bin::jade::hash_manager::{are_jade_hashes_loaded, get_cached_hashes};
+    if !are_jade_hashes_loaded() {
+        return Ok(BinHashStatus { ready: false, count: 0, memory_mb: 0.0 });
+    }
+    let mgr = get_cached_hashes().read();
+    Ok(BinHashStatus {
+        ready: mgr.is_bin_loaded(),
+        count: mgr.total_count(),
+        memory_mb: (mgr.memory_bytes() as f64) / (1024.0 * 1024.0),
+    })
+}
+
+/// Trigger background load of BIN text hashes. Returns immediately;
+/// poll `get_bin_hash_status` to see when it completes. Idempotent.
+#[tauri::command]
+pub async fn preload_bin_hashes() -> Result<(), String> {
+    kick_off_bin_hash_load();
+    Ok(())
+}
+
+/// Force a re-read of the on-disk text hash files into the cached
+/// in-RAM table. Called after an auto-update fetched fresh files so
+/// the next BIN conversion sees the new entries without needing an
+/// app restart. Returns the number of FNV1a entries now in RAM.
+#[tauri::command]
+pub async fn reload_bin_hashes() -> Result<usize, String> {
+    use crate::core::bin::jade::hash_manager::reload_cached_hashes;
+    // Heavy I/O — run on the blocking pool.
+    let count = tokio::task::spawn_blocking(reload_cached_hashes)
+        .await
+        .map_err(|e| format!("reload task join: {e}"))?;
+    Ok(count)
 }
 
 /// Convert a single bin file

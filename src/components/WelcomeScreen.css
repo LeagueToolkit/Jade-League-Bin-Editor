@@ -36,6 +36,17 @@
     pointer-events: none;
 }
 
+/* First commit after the welcome remounts: hold it at the closed
+   position with the transition disabled so the browser doesn't try to
+   tween from "fully visible" (the React-rendered default) to here.
+   Removing the class on the next frame re-enables transitions and
+   the welcome slides back in from the same offset it leaves at. */
+.welcome-screen-v2-opening {
+    transform: translateX(-3%);
+    opacity: 0;
+    transition: none;
+}
+
 /* Hide the shell's own title-bar contents while the welcome overlay
    is mounted — we draw our own bar on top, no need for the underlying
    one to fight for space. */
@@ -209,6 +220,45 @@ body.welcome-active .title-bar > * {
     font-weight: 400;
     color: var(--text-color, #cccccc);
     margin: 0 0 24px;
+}
+
+.welcome-home-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.welcome-home-head .welcome-greeting {
+    margin-bottom: 24px;
+}
+
+.welcome-skip-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    background: transparent;
+    color: var(--text-color, #cccccc);
+    border: 1px solid var(--border-color, #3e3e42);
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.12s, border-color 0.12s, color 0.12s;
+    margin-bottom: 24px;
+    flex-shrink: 0;
+}
+
+.welcome-skip-btn:hover {
+    background: var(--jade-accent, #007acc);
+    border-color: var(--jade-accent, #007acc);
+    color: #ffffff;
+}
+
+.welcome-skip-btn:focus-visible {
+    outline: 1px solid var(--jade-accent, #007acc);
+    outline-offset: 2px;
 }
 
 .welcome-subtitle-muted {
@@ -1350,6 +1400,26 @@ body.welcome-active .title-bar > * {
     flex: 1 1 auto;
     min-width: 0;
     min-height: 0;
+}
+
+/* 3D mesh preview slot — same dimensions as the BIN preview so the
+   column doesn't reflow when switching between an SKN and a BIN. The
+   inner Babylon canvas is transparent (engine alpha=true), so this
+   div's `background` is what the user actually sees behind the model.
+   Following the --editor-bg variable means the preview tracks the
+   active theme automatically, same as the BIN preview. */
+.welcome-preview-mesh {
+    width: 100%;
+    flex: 1 1 auto;
+    min-height: 480px;
+    max-height: min(840px, 85vh);
+    background: var(--editor-bg, #1e1e1e);
+    border: 1px solid color-mix(in srgb, var(--border-color, #3e3e42) 60%, transparent);
+    border-radius: 4px;
+    margin-bottom: 12px;
+    box-sizing: border-box;
+    overflow: hidden;
+    position: relative;
 }
 /* Single-line metadata under the image — type · size · dims. The
    detail rows are gone in WAD mode so the image gets the column. */

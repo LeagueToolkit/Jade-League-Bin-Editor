@@ -42,10 +42,29 @@
 .vs-title-icon {
     width: 18px;
     height: 18px;
-    margin: 7px 8px;
     object-fit: contain;
     flex-shrink: 0;
+    display: block;
+}
+
+.vs-title-icon-btn {
+    background: transparent;
+    border: none;
+    padding: 7px 8px;
+    margin: 0;
+    cursor: pointer;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     -webkit-app-region: no-drag;
+}
+.vs-title-icon-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+.vs-title-icon-btn:focus-visible {
+    outline: 1px solid var(--jade-accent, #007acc);
+    outline-offset: -1px;
 }
 
 .vs-menu-row {

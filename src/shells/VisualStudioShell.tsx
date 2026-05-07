@@ -527,6 +527,9 @@ export default function VisualStudioShell() {
 
     const containerRect = bodyRef.current?.getBoundingClientRect() ?? null;
 
+    const welcomeVisible = s.welcomeOverride === 'force'
+        || (s.welcomeOverride !== 'hide' && s.tabs.length === 0);
+
     return (
         <div className={`app-container visualstudio-shell ${s.isDragging ? 'dragging' : ''}`}>
             <VSTitleBar />
@@ -559,8 +562,9 @@ export default function VisualStudioShell() {
 
                     <div className={`vs-shell-editor${editorFloating ? ' editor-popped-out' : ''}`}>
                         <WelcomeScreenWithExit
-                            visible={s.tabs.length === 0 && !s.fileLoading}
+                            visible={welcomeVisible && !s.fileLoading}
                             onOpenFile={s.onOpen}
+                            onContinueWithoutFile={() => s.setWelcomeOverride('hide')}
                             openFileDisabled={s.openFileDisabled}
                             recentFiles={s.recentFiles}
                             onOpenRecentFile={s.openFileFromPath}
@@ -573,7 +577,7 @@ export default function VisualStudioShell() {
                             onClose={s.onClose}
                             isMaximized={s.isMaximized}
                         />
-                        {s.tabs.length === 0 && s.fileLoading && <div className="file-loading-backdrop" />}
+                        {welcomeVisible && s.fileLoading && <div className="file-loading-backdrop" />}
                         <EditorPane />
                     </div>
 

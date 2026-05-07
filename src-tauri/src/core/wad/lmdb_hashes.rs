@@ -31,6 +31,18 @@ struct EnvCache {
     /// Path the envs were opened from. Used to invalidate the cache if a
     /// different `hash_dir` is queried (rare — only matters during tests).
     layout_root: PathBuf,
+    /// In-memory result cache layered in front of LMDB. Per-call LMDB
+    /// lookups are 1-5 µs each (mutex + read_txn + open_database +
+    /// B-tree get + Arc allocation), and the BIN converter calls the
+    /// same handful of field-name hashes ("value", "name", "x", "y",
+    /// …) tens of thousands of times per file. Storing the resolved
+    /// names lets us skip the LMDB roundtrip after the first hit;
+    /// `None` is also cached so unknown hashes don't repeatedly hit
+    /// the database. Memory cost is bounded by the number of unique
+    /// hashes the converter touches — typically <50K entries per BIN
+    /// (a few MB), and reused across files in the same session.
+    bin_lookups: Mutex<HashMap<u32, Option<Arc<str>>>>,
+    wad_lookups: Mutex<HashMap<u64, Option<Arc<str>>>>,
 }
 
 static ENV_CACHE: OnceLock<Mutex<Option<EnvCache>>> = OnceLock::new();
@@ -86,6 +98,8 @@ pub fn preload_envs(hash_dir: &Path) -> bool {
         wad,
         bin,
         layout_root: hash_dir.to_path_buf(),
+        bin_lookups: Mutex::new(HashMap::new()),
+        wad_lookups: Mutex::new(HashMap::new()),
     });
     true
 }
@@ -206,42 +220,77 @@ pub fn resolve_wad_bulk(hashes: &[u64], hash_dir: &Path) -> HashMap<u64, String>
     out
 }
 
-/// Resolve a single BIN name hash (FNV1a u32). Checks the extracted-name
-/// overlay first, then LMDB. Returns `None` only when neither knows the
-/// hash so callers can still fall through to their own text tables.
+/// Resolve a single BIN name hash (FNV1a u32) via the extracted-name
+/// overlay → cached LMDB. The BIN converter doesn't go through this
+/// path anymore (it uses an in-RAM text table loaded via
+/// `HashManager`), but other callers — mainly the WAD listing/extract
+/// pipeline that resolves BIN-property names — still come through
+/// here so we keep LMDB live for them.
 pub fn lookup_bin(hash: u32, hash_dir: &Path) -> Option<Arc<str>> {
     let overlay = bin_overlay(hash_dir);
     if let Some(p) = overlay.get(&hash) {
         return Some(Arc::clone(p));
     }
 
+    {
+        let g = cache_slot().lock();
+        if let Some(c) = g.as_ref() {
+            if let Some(entry) = c.bin_lookups.lock().get(&hash) {
+                return entry.as_ref().cloned();
+            }
+        }
+    }
+
     let env = clone_bin_env(hash_dir)?;
-    let rtxn = env.read_txn().ok()?;
-    let db = env
-        .open_database::<Bytes, Str>(&rtxn, Some("bin"))
-        .ok()
-        .flatten()?;
-    let bytes = db.get(&rtxn, &hash.to_be_bytes()[..]).ok().flatten()?;
-    Some(Arc::from(bytes))
+    let result: Option<Arc<str>> = (|| {
+        let rtxn = env.read_txn().ok()?;
+        let db = env
+            .open_database::<Bytes, Str>(&rtxn, Some("bin"))
+            .ok()
+            .flatten()?;
+        let bytes = db.get(&rtxn, &hash.to_be_bytes()[..]).ok().flatten()?;
+        Some(Arc::from(bytes))
+    })();
+
+    let g = cache_slot().lock();
+    if let Some(c) = g.as_ref() {
+        c.bin_lookups.lock().insert(hash, result.clone());
+    }
+    result
 }
 
-/// Resolve a single WAD path hash via overlay → LMDB, returning `None`
-/// when neither knows the hash. Used by the BIN converter for xxh64
-/// lookups so it can fall through to the text-file table.
+/// Resolve a single WAD path hash via overlay → cached LMDB.
 pub fn lookup_wad(hash: u64, hash_dir: &Path) -> Option<Arc<str>> {
     let overlay = wad_overlay(hash_dir);
     if let Some(p) = overlay.get(&hash) {
         return Some(Arc::clone(p));
     }
 
+    {
+        let g = cache_slot().lock();
+        if let Some(c) = g.as_ref() {
+            if let Some(entry) = c.wad_lookups.lock().get(&hash) {
+                return entry.as_ref().cloned();
+            }
+        }
+    }
+
     let env = clone_wad_env(hash_dir)?;
-    let rtxn = env.read_txn().ok()?;
-    let db = env
-        .open_database::<Bytes, Str>(&rtxn, Some("wad"))
-        .ok()
-        .flatten()?;
-    let bytes = db.get(&rtxn, &hash.to_be_bytes()[..]).ok().flatten()?;
-    Some(Arc::from(bytes))
+    let result: Option<Arc<str>> = (|| {
+        let rtxn = env.read_txn().ok()?;
+        let db = env
+            .open_database::<Bytes, Str>(&rtxn, Some("wad"))
+            .ok()
+            .flatten()?;
+        let bytes = db.get(&rtxn, &hash.to_be_bytes()[..]).ok().flatten()?;
+        Some(Arc::from(bytes))
+    })();
+
+    let g = cache_slot().lock();
+    if let Some(c) = g.as_ref() {
+        c.wad_lookups.lock().insert(hash, result.clone());
+    }
+    result
 }
 
 /// Snapshot of which named DBs are currently cached. Driven by the UI to

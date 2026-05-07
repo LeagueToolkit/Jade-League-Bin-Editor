@@ -17,6 +17,9 @@ import './WordShell.css';
 export default function WordShell() {
     const s = useShell();
 
+    const welcomeVisible = s.welcomeOverride === 'force'
+        || (s.welcomeOverride !== 'hide' && s.tabs.length === 0);
+
     return (
         <div className={`app-container word-shell ${s.isDragging ? 'dragging' : ''}`}>
             <TitleBar
@@ -32,6 +35,7 @@ export default function WordShell() {
                 onParticleEditor={s.onParticleEditor}
                 onMaterialLibrary={s.onMaterialLibrary}
                 onQuartzAction={s.onSendToQuartz}
+                onIconClick={() => s.setWelcomeOverride('force')}
                 wordMode
                 tabs={s.tabs}
                 activeTabId={s.activeTabId}
@@ -48,8 +52,9 @@ export default function WordShell() {
                 <WordSidePane />
                 <div className="word-shell-doc">
                     <WelcomeScreenWithExit
-                        visible={s.tabs.length === 0 && !s.fileLoading}
+                        visible={welcomeVisible && !s.fileLoading}
                         onOpenFile={s.onOpen}
+                        onContinueWithoutFile={() => s.setWelcomeOverride('hide')}
                         openFileDisabled={s.openFileDisabled}
                         recentFiles={s.recentFiles}
                         onOpenRecentFile={s.openFileFromPath}
@@ -62,7 +67,7 @@ export default function WordShell() {
                         onClose={s.onClose}
                         isMaximized={s.isMaximized}
                     />
-                    {s.tabs.length === 0 && s.fileLoading && <div className="file-loading-backdrop" />}
+                    {welcomeVisible && s.fileLoading && <div className="file-loading-backdrop" />}
                     <EditorPane />
                 </div>
             </div>

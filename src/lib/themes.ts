@@ -30,6 +30,11 @@ export interface ThemeColors {
      *  to look right. The theme list disables it when Modern UI is off, and
      *  toggling Modern UI off while one is active reverts to the Default theme. */
     requiresModernUI?: boolean;
+    /** When true, the modern UI's glass + gradient layer is suppressed while
+     *  this theme is active — even if the user has Modern UI enabled in
+     *  preferences. Used by minimalist palettes that look "wrong" when
+     *  semi-transparent washes mute their flat colors. */
+    disableModernUIEffects?: boolean;
 }
 
 // Cascadia Code already covers the Cascadia family — its Mono variant
@@ -276,6 +281,26 @@ export const THEMES: ThemeColors[] = [
         defaultBackground: '/theme-icons/bglain.png',
         statusBarText: '#000000',
         requiresModernUI: true,
+    },
+    {
+        // Three-color minimalist theme: pink-magenta surfaces with black
+        // chrome/text and a deeper wine-red for selection + accent
+        // differentiation. Syntax tokens (besides keywords) render in the
+        // same wine-red so highlighted code visually echoes the UI accent.
+        // Opts out of modern UI glass — the flat palette is the look.
+        id: 'MilkBag',
+        displayName: 'Milk Bag',
+        windowBg: '#890092',
+        editorBg: '#890092',
+        titleBar: '#890092',
+        statusBar: '#640020',
+        text: '#000000',
+        tabBg: '#890092',
+        selectedTab: '#640020',
+        statusBarText: '#000000',
+        titleBarText: '#000000',
+        chromeForeground: '#000000',
+        disableModernUIEffects: true,
     }
 ];
 
@@ -365,6 +390,18 @@ export const SYNTAX_COLORS: Record<string, SyntaxColors> = {
         number: '#CC8A9A',
         propertyColor: '#A89E84'
     },
+    // Most tokens stay black (the theme's default text color) so code
+    // reads as plain prose; only comments and string literals pop in
+    // wine-red, so quoted asset paths and notes are easy to spot at a
+    // glance without flooding the file with color.
+    MilkBag: {
+        keyword: '#000000',
+        comment: '#640020',
+        stringColor: '#640020',
+        number: '#000000',
+        propertyColor: '#000000',
+        symbolColor: '#000000',
+    },
     '2023': {
         keyword: '#F65752',
         comment: '#885540',
@@ -424,6 +461,7 @@ export const BRACKET_COLORS: Record<string, BracketColors> = {
     OrangeBurnout: { color1: '#FF8C00', color2: '#DAA520', color3: '#FF4500' },
     PurpleGrief: { color1: '#BE9FE1', color2: '#E1BEE7', color3: '#9575CD' },
     LetsAllLoveLain: { color1: '#B8697A', color2: '#B07868', color3: '#C1B492' },
+    MilkBag: { color1: '#640020', color2: '#640020', color3: '#640020' },
     '2023': { color1: '#F65752', color2: '#6BFBFC', color3: '#F65752' },
     YoRHa: { color1: '#4E4B42', color2: '#4E4B42', color3: '#4E4B42' },
     '2077': { color1: '#EBFA5C', color2: '#5269B3', color3: '#6BFBFC' },

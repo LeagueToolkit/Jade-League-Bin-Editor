@@ -90,6 +90,14 @@ export interface ShellContextValue {
     openFileDisabled: boolean;
     openFileFromPath: (path: string) => void | Promise<void>;
 
+    // -- Welcome screen override
+    //    'force' = show welcome even with open tabs (Jade icon / Main page);
+    //    'hide'  = stay in editor with zero tabs (Continue without file);
+    //    null    = default ("show welcome iff no tabs"). Auto-resets when
+    //    tab count changes so a freshly opened file always shows the editor.
+    welcomeOverride: 'force' | 'hide' | null;
+    setWelcomeOverride: (v: 'force' | 'hide' | null) => void;
+
     // -- File operations
     onNew: () => void;
     onOpen: () => void;

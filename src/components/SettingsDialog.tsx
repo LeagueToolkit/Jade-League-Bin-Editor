@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { marked } from 'marked';
 import { HashIcon, SettingsIcon, ArrowUpIcon, ConverterIcon, LibraryIcon, BoltIcon } from './Icons';
+import { Link2 } from 'lucide-react';
 import './SettingsDialog.css';
 
 interface SettingsDialogProps {
@@ -16,6 +17,12 @@ interface HashStatus {
     format: string;
 }
 
+interface BinHashStatus {
+    ready: boolean;
+    count: number;
+    memory_mb: number;
+}
+
 interface UpdateInfo {
     available: boolean;
     version: string;
@@ -25,15 +32,23 @@ interface UpdateInfo {
 
 type UpdateCheckState = 'idle' | 'checking' | 'up-to-date' | 'available' | 'downloading' | 'ready' | 'installing' | 'error';
 
-type NavSection = 'hashes' | 'converter' | 'behavior' | 'library' | 'performance' | 'updates';
+type NavSection =
+    | 'hashes'
+    | 'converter'
+    | 'behavior'
+    | 'registration'
+    | 'library'
+    | 'performance'
+    | 'updates';
 
 const NAV_ITEMS: { id: NavSection; label: string; icon: React.ReactNode }[] = [
-    { id: 'hashes',      label: 'Hash Files',    icon: <HashIcon size={15} />     },
-    { id: 'converter',   label: 'Converter',     icon: <ConverterIcon size={15} /> },
-    { id: 'behavior',    label: 'App Behavior',  icon: <SettingsIcon size={15} /> },
-    { id: 'library',     label: 'Library',       icon: <LibraryIcon size={15} /> },
-    { id: 'performance', label: 'Performance',   icon: <BoltIcon size={15} /> },
-    { id: 'updates',     label: 'Updates',       icon: <ArrowUpIcon size={15} /> },
+    { id: 'hashes',       label: 'Hash Files',   icon: <HashIcon size={15} />     },
+    { id: 'converter',    label: 'Converter',    icon: <ConverterIcon size={15} /> },
+    { id: 'behavior',     label: 'App Behavior', icon: <SettingsIcon size={15} /> },
+    { id: 'registration', label: 'Registration', icon: <Link2 size={15} strokeWidth={1.8} /> },
+    { id: 'library',      label: 'Library',      icon: <LibraryIcon size={15} /> },
+    { id: 'performance',  label: 'Performance',  icon: <BoltIcon size={15} /> },
+    { id: 'updates',      label: 'Updates',      icon: <ArrowUpIcon size={15} /> },
 ];
 
 /* ── Performance prefs ──
@@ -177,6 +192,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose }) => {
     const unlistenRef = useRef<(() => void) | null>(null);
     const [hashUpdateMode, setHashUpdateMode] = useState<'every_launch' | 'every_3_days' | 'never'>('every_launch');
     const [lastHashCheckAt, setLastHashCheckAt] = useState<number>(0);
+    const [binHashStatus, setBinHashStatus] = useState<BinHashStatus | null>(null);
     const [perfPrefs, setPerfPrefs] = useState<Record<PerfKey, PerfMode>>(PERF_DEFAULT);
     const [minimizeToTray, setMinimizeToTray] = useState(false);
     const [runAtStartup, setRunAtStartup] = useState(false);
@@ -198,6 +214,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose }) => {
         if (isOpen) {
             loadPreferences();
             checkHashStatus();
+            loadBinHashStatus();
             loadLibraryData();
             // Restore cached update info from broadcast if we have it
             if (!updateInfo && cachedUpdateRef.current) {
@@ -264,6 +281,29 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose }) => {
         catch (e) { console.error(e); }
     };
 
+    const loadBinHashStatus = async () => {
+        try { setBinHashStatus(await invoke<BinHashStatus>('get_bin_hash_status')); }
+        catch (e) { console.error(e); }
+    };
+
+    // While the BIN hash table is mid-load (kicked off at app
+    // startup or by `preload_bin_hashes`), poll every 500 ms so the
+    // UI flips from "loading" to the populated count without the
+    // user having to reopen the settings dialog.
+    useEffect(() => {
+        if (!isOpen) return;
+        if (binHashStatus?.ready) return;
+        const id = setInterval(loadBinHashStatus, 500);
+        return () => clearInterval(id);
+    }, [isOpen, binHashStatus?.ready]);
+
+    const handlePreloadBinHashes = async () => {
+        try {
+            await invoke('preload_bin_hashes');
+            await loadBinHashStatus();
+        } catch (e) { console.error(e); }
+    };
+
     const savePref = async (key: string, value: boolean) => {
         try { await invoke('set_preference', { key, value: value ? 'True' : 'False' }); }
         catch (e) { console.error(e); }
@@ -284,9 +324,16 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose }) => {
         setIsDownloading(true);
         setDownloadStatus('Downloading text hashes from CommunityDragon…');
         try {
-            await invoke('download_hashes');
-            setDownloadStatus('Text hashes ready.');
+            // `force: true` bypasses the per-file ETag / Last-Modified
+            // skip — the manual button always re-downloads every file.
+            // The auto-update schedule still uses the smart-skip path.
+            await invoke('download_hashes', { force: true });
+            setDownloadStatus('Text hashes re-downloaded.');
             checkHashStatus();
+            // New text files on disk — push them into the in-RAM BIN
+            // table so the next conversion picks up the new entries
+            // without an app restart.
+            invoke('reload_bin_hashes').catch(() => {});
         } catch (e) { setDownloadStatus(`Text download failed: ${e}`); }
         finally { setIsDownloading(false); }
     };
@@ -462,6 +509,52 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose }) => {
 
             <div className="settings-divider" />
 
+            <h3 className="settings-section-title" style={{ fontSize: 16 }}>Active hash sources</h3>
+            <p className="settings-section-subtitle">
+                Jade reads BIN field-name hashes from the text files (loaded into RAM at startup) and WAD path hashes from the shared LMDB. The text load is what makes BIN conversion fast — conversions wait for it to finish before running.
+            </p>
+
+            <div className="settings-row" style={{ marginBottom: 8 }}>
+                <div className="settings-row-header">
+                    <span className="settings-row-title">BIN names — text in RAM</span>
+                    {binHashStatus?.ready ? (
+                        <span className="success-text" style={{ fontSize: 12 }}>
+                            {binHashStatus.count.toLocaleString()} loaded · {binHashStatus.memory_mb.toFixed(0)} MB
+                        </span>
+                    ) : (
+                        <span className="warning-text" style={{ fontSize: 12 }}>
+                            Loading…
+                        </span>
+                    )}
+                </div>
+                <p className="settings-row-desc">
+                    FNV1a-keyed lookups for BIN property/class names. Loaded once per session from <code>%APPDATA%\FrogTools\hashes\*.txt</code>.
+                </p>
+                {!binHashStatus?.ready && (
+                    <button
+                        className="action-button gray"
+                        style={{ marginTop: 6 }}
+                        onClick={handlePreloadBinHashes}
+                    >
+                        Reload now
+                    </button>
+                )}
+            </div>
+
+            <div className="settings-row" style={{ marginBottom: 12 }}>
+                <div className="settings-row-header">
+                    <span className="settings-row-title">WAD paths — LMDB</span>
+                    <span className="success-text" style={{ fontSize: 12 }}>
+                        {hashStatus?.format && hashStatus.format !== 'None' ? hashStatus.format : 'not present'}
+                    </span>
+                </div>
+                <p className="settings-row-desc">
+                    xxh64-keyed WAD path resolution. Read directly from the shared LMDB (combined or split layout) — same file Quartz uses, no duplication in process memory.
+                </p>
+            </div>
+
+            <div className="settings-divider" />
+
             <h3 className="settings-section-title" style={{ fontSize: 16 }}>Update Schedule</h3>
             <p className="settings-section-subtitle">When should Jade check for hash file updates? Updates always run in the background and never block opening files.</p>
 
@@ -563,8 +656,13 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose }) => {
                     {materialMatchMode === 1 && <><span className="match-mode-warning-text">&#9888; Fuzzy</span> — picks the closest texture by character overlap. May produce inaccurate matches.</>}
                 </p>
             </div>
+        </>
+    );
 
-            <div className="settings-divider" />
+    const renderRegistration = () => (
+        <>
+            <h2 className="settings-section-title">File Registration</h2>
+            <p className="settings-section-subtitle">Manage how Windows treats Jade-supported file types.</p>
 
             <h3 className="settings-section-title" style={{ fontSize: 16 }}>File Association</h3>
             <p className="settings-section-subtitle">Register Jade as the default handler for .bin files.</p>
@@ -1016,6 +1114,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose }) => {
         hashes: renderHashes,
         converter: renderConverter,
         behavior: renderBehavior,
+        registration: renderRegistration,
         library: renderLibrary,
         performance: renderPerformance,
         updates: renderUpdates,

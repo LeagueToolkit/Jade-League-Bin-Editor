@@ -16,6 +16,9 @@ interface TitleBarProps {
     onParticleEditor?: () => void;
     onMaterialLibrary?: () => void;
     onQuartzAction?: (mode: 'paint' | 'port' | 'bineditor' | 'vfxhub') => void;
+    /** Click handler for the Jade icon at the far left. Wired up by the
+     *  shell to surface the Welcome screen without closing open tabs. */
+    onIconClick?: () => void;
     /** When set, the title bar swaps the "Jade - BIN Editor" label for the
      *  Word-style cluster: Save/Undo/Redo + a tabs dropdown showing the
      *  active document. The Word shell uses this to retire the tab strip. */
@@ -42,6 +45,7 @@ export default function TitleBar({
     onParticleEditor,
     onMaterialLibrary,
     onQuartzAction,
+    onIconClick,
     wordMode = false,
     tabs,
     activeTabId,
@@ -86,7 +90,18 @@ export default function TitleBar({
             <div className="title-bar-content">
                 {/* Left: Icon + (Title | Word toolbar) */}
                 <div className="title-section">
-                    <img src={currentIcon} alt="Jade" className="title-icon" />
+                    {onIconClick ? (
+                        <button
+                            type="button"
+                            className="title-icon-btn"
+                            onClick={onIconClick}
+                            title="Main page"
+                        >
+                            <img src={currentIcon} alt="Jade" className="title-icon" />
+                        </button>
+                    ) : (
+                        <img src={currentIcon} alt="Jade" className="title-icon" />
+                    )}
                     {wordMode ? (
                         <div className="title-word-cluster">
                             <button

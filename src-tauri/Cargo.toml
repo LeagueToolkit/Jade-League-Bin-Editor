@@ -72,3 +72,14 @@ memmap2 = "0.9"
 # Quartz uses; their `hashes.extracted.txt` interop relies on it being
 # byte-identical.
 twox-hash = "1.6"
+
+# Vector/matrix math for SKN/SKL/ANM parsing + bind-pose composition.
+# Default features only — we don't need serde/scalar-math/wasmbind.
+glam = "0.29"
+
+# BC1/BC3 (DXT1/DXT5) block decompression for the 3D-preview texture
+# pipeline. Pure-Rust, no transitive deps, ~10KB. Pairs with our own
+# DDS / Riot-TEX header parser (the texpresso crate is just the block
+# math). Decoder output is rayon-parallelised across multiple
+# textures by the wad_decode_textures command.
+texpresso = "2"

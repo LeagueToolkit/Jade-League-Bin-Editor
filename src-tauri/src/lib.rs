@@ -3,6 +3,7 @@ mod app_commands;
 mod hash_commands;
 mod extra_commands;
 mod library_commands;
+mod mesh_commands;
 mod wad_commands;
 mod taskbar_progress;
 mod core;
@@ -54,6 +55,12 @@ pub fn run() {
             if let Err(e) = app_commands::write_jade_pid_file() {
                 eprintln!("[Setup] Failed to write Jade PID file: {}", e);
             }
+
+            // Kick off the BIN hash text load on a background thread
+            // so the first BIN conversion the user attempts has a
+            // populated table waiting for it. Conversions that race
+            // the load see a clean error and can retry.
+            crate::core::bin::jade::hash_manager::kick_off_bin_hash_load();
 
             // Recover preferences.json from leftover .tmp if a previous write
             // was interrupted (e.g. process killed during a silent update).
@@ -202,6 +209,9 @@ pub fn run() {
             bin_commands::convert_text_to_bin,
             bin_commands::batch_convert_bins,
             bin_commands::find_linked_bin_file,
+            bin_commands::get_bin_hash_status,
+            bin_commands::preload_bin_hashes,
+            bin_commands::reload_bin_hashes,
             app_commands::get_app_version,
             app_commands::get_custom_icon_path,
             app_commands::get_custom_icon_data,
@@ -303,6 +313,18 @@ pub fn run() {
             // WAD extraction (Phase 4: hash recovery scan)
             wad_commands::wad_extract_hashes,
             wad_commands::wad_sniff_unknown,
+            // 3D mesh previews (Phase 1: SKN parser)
+            mesh_commands::read_skn_mesh,
+            mesh_commands::wad_read_skn_mesh,
+            mesh_commands::read_scb_mesh,
+            mesh_commands::wad_read_scb_mesh,
+            mesh_commands::read_sco_mesh,
+            mesh_commands::wad_read_sco_mesh,
+            mesh_commands::find_skin_bin_for_skn,
+            mesh_commands::wad_read_skin_textures,
+            mesh_commands::wad_find_static_mesh_texture,
+            mesh_commands::wad_guess_textures,
+            mesh_commands::wad_decode_texture,
             // Taskbar progress reporting (Windows ITaskbarList3)
             taskbar_progress::set_taskbar_progress,
         ])

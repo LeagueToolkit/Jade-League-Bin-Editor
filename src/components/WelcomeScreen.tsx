@@ -8,6 +8,7 @@ import {
 import { FormatIcon, extractExtension, getFormatConfig } from './FormatIcons';
 import { texBufferToDataURL, ddsBufferToDataURL, ddsFormatName, formatName as texFormatName } from '../lib/texFormat';
 import ExtractionSettingsDialog from './ExtractionSettingsDialog';
+import { MeshPreview } from './MeshPreview';
 import Editor from '@monaco-editor/react';
 import {
     RITOBIN_LANGUAGE_ID, RITOBIN_THEME_ID,
@@ -23,6 +24,11 @@ import './WelcomeScreen.css';
 
 interface WelcomeScreenProps {
     onOpenFile: () => void;
+    /** Dismisses the welcome overlay and reveals the empty editor without
+     *  picking a file. Wired to the home tab's "Continue without file"
+     *  button — lets the user land in the editor and decide what to open
+     *  later. When omitted, the button is not rendered. */
+    onContinueWithoutFile?: () => void;
     openFileDisabled?: boolean;
     recentFiles?: string[];
     onOpenRecentFile?: (path: string) => void;
@@ -43,6 +49,10 @@ interface WelcomeScreenProps {
      *  callers normally use `WelcomeScreenWithExit` instead of touching
      *  it directly. */
     isClosing?: boolean;
+    /** True for the single frame after mount while CSS holds the
+     *  welcome at its closed transform; clearing it on the next frame
+     *  triggers the slide-in transition. Mirror of `isClosing`. */
+    isOpening?: boolean;
 }
 
 interface DirEntry {
@@ -178,6 +188,7 @@ function formatBytes(bytes: number): string {
  */
 export default function WelcomeScreen({
     onOpenFile,
+    onContinueWithoutFile,
     openFileDisabled = false,
     recentFiles = [],
     onOpenRecentFile,
@@ -190,6 +201,7 @@ export default function WelcomeScreen({
     onClose,
     isMaximized = false,
     isClosing = false,
+    isOpening = false,
 }: WelcomeScreenProps) {
     const [view, setView] = useState<WelcomeView>('home');
     const [search, setSearch] = useState('');
@@ -275,7 +287,7 @@ export default function WelcomeScreen({
     }, []);
 
     return (
-        <div className={`welcome-screen-v2${isClosing ? ' welcome-screen-v2-closing' : ''}`}>
+        <div className={`welcome-screen-v2${isClosing ? ' welcome-screen-v2-closing' : ''}${isOpening ? ' welcome-screen-v2-opening' : ''}`}>
             {(onMinimize || onMaximize || onClose) && (
                 <div className="welcome-titlebar" data-tauri-drag-region>
                     <div className="welcome-titlebar-brand">
@@ -369,6 +381,7 @@ export default function WelcomeScreen({
                         onSearch={setSearch}
                         recentFiles={recentFiles}
                         onOpenFile={onOpenFile}
+                        onContinueWithoutFile={onContinueWithoutFile}
                         onOpenRecentFile={onOpenRecentFile}
                         onMaterialLibrary={onMaterialLibrary}
                         onThemes={onThemes}
@@ -422,22 +435,29 @@ export function WelcomeScreenWithExit({
     ...props
 }: WelcomeScreenProps & { visible: boolean }) {
     const [shouldRender, setShouldRender] = useState(visible);
-    const [isExiting, setIsExiting] = useState(false);
+    const [phase, setPhase] = useState<'idle' | 'opening' | 'open' | 'closing'>(
+        visible ? 'open' : 'idle'
+    );
 
     useEffect(() => {
         if (visible) {
+            // Mount in the "opening" state (closed transform applied),
+            // flip to "open" on the next frame so CSS transitions the
+            // welcome in. Symmetrical with the closing animation —
+            // same transition curve, just running in reverse.
             setShouldRender(true);
-            setIsExiting(false);
-            return;
+            setPhase('opening');
+            const raf = requestAnimationFrame(() => setPhase('open'));
+            return () => cancelAnimationFrame(raf);
         }
         if (!shouldRender) return;
         // Defer the closing class to the next frame so React's commit
         // never paints "open + closing" simultaneously — without the
         // RAF the transition occasionally skips and snaps to the end.
-        const raf = requestAnimationFrame(() => setIsExiting(true));
+        const raf = requestAnimationFrame(() => setPhase('closing'));
         const t = setTimeout(() => {
             setShouldRender(false);
-            setIsExiting(false);
+            setPhase('idle');
         }, WELCOME_EXIT_MS);
         return () => {
             cancelAnimationFrame(raf);
@@ -446,7 +466,13 @@ export function WelcomeScreenWithExit({
     }, [visible, shouldRender]);
 
     if (!shouldRender) return null;
-    return <WelcomeScreen {...props} isClosing={isExiting} />;
+    return (
+        <WelcomeScreen
+            {...props}
+            isClosing={phase === 'closing'}
+            isOpening={phase === 'opening'}
+        />
+    );
 }
 
 /* ────────────────── Home view ────────────────── */
@@ -456,6 +482,7 @@ function HomeView({
     onSearch,
     recentFiles,
     onOpenFile,
+    onContinueWithoutFile,
     onOpenRecentFile,
     onMaterialLibrary,
     onThemes,
@@ -467,6 +494,7 @@ function HomeView({
     onSearch: (s: string) => void;
     recentFiles: string[];
     onOpenFile: () => void;
+    onContinueWithoutFile?: () => void;
     onOpenRecentFile?: (path: string) => void;
     onMaterialLibrary?: () => void;
     onThemes?: () => void;
@@ -502,7 +530,20 @@ function HomeView({
 
     return (
         <div className="welcome-home">
-            <h1 className="welcome-greeting">{greeting}</h1>
+            <div className="welcome-home-head">
+                <h1 className="welcome-greeting">{greeting}</h1>
+                {onContinueWithoutFile && (
+                    <button
+                        type="button"
+                        className="welcome-skip-btn"
+                        onClick={onContinueWithoutFile}
+                        title="Skip the welcome screen and go to an empty editor"
+                    >
+                        Continue without file
+                        <ChevronRightIcon size={14} strokeWidth={1.8} />
+                    </button>
+                )}
+            </div>
 
             <section className="welcome-section">
                 <div className="welcome-section-head">
@@ -2522,7 +2563,29 @@ function ExtractView({
                             </div>
                         </div>
                     )}
-                    {previewItem && (
+                    {previewItem && ['.skn', '.scb', '.sco'].includes(previewItem.ext.toLowerCase()) && (
+                        <div className="welcome-preview-detail welcome-preview-detail-mesh">
+                            <div className="welcome-preview-mesh">
+                                <MeshPreview
+                                    source={
+                                        wadSelected && mountInfo
+                                            ? { kind: 'wad', mountId: mountInfo.id, pathHashHex: wadSelected.path_hash_hex }
+                                            : { kind: 'disk', path: previewItem.path }
+                                    }
+                                    label={previewItem.name}
+                                />
+                            </div>
+                            <div className="welcome-preview-name" title={previewItem.path}>
+                                {previewItem.name}
+                            </div>
+                            <div className="welcome-preview-meta-line">
+                                {previewItem.type}
+                                {' · '}
+                                {formatBytes(previewItem.size)}
+                            </div>
+                        </div>
+                    )}
+                    {previewItem && !['.skn', '.scb', '.sco'].includes(previewItem.ext.toLowerCase()) && (
                         <div className="welcome-preview-detail">
                             {previewState.dataUrl && (
                                 <div

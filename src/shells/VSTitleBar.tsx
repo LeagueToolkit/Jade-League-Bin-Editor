@@ -36,7 +36,14 @@ export default function VSTitleBar() {
 
     return (
         <div className="vs-title-bar" ref={wrapRef}>
-            <img src={s.appIcon} className="vs-title-icon" alt="Jade" draggable={false} />
+            <button
+                type="button"
+                className="vs-title-icon-btn"
+                onClick={() => s.setWelcomeOverride('force')}
+                title="Main page"
+            >
+                <img src={s.appIcon} className="vs-title-icon" alt="Jade" draggable={false} />
+            </button>
 
             <div className="vs-menu-row">
                 {/* File */}
@@ -91,6 +98,13 @@ export default function VSTitleBar() {
                                 <span>Open Log File</span>
                             </button>
                             <div className="vs-menu-separator" />
+                            <button
+                                className="vs-menu-option"
+                                onClick={click(() => s.setWelcomeOverride('force'))}
+                                title="Open Welcome / Main page"
+                            >
+                                <span>Main page</span>
+                            </button>
                             <button className="vs-menu-option" onClick={click(s.onClose)}>
                                 <span>Exit</span>
                             </button>

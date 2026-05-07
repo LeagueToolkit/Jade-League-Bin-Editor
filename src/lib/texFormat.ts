@@ -300,8 +300,21 @@ export function readDDS(buffer: ArrayBuffer): DDSData {
   return { width, height, format, data };
 }
 
+/** Scan an RGBA pixel buffer to see if any alpha byte is below 255.
+ *  Used by the 3D preview pipeline so we can put fully-opaque
+ *  textures into Babylon's MATERIAL_OPAQUE bucket (proper depth
+ *  occlusion) and only the genuinely-transparent ones into
+ *  ALPHATESTANDBLEND (which has the see-through-back-faces tradeoff).
+ *  Cheap — `Uint8Array` indexing, terminates on the first hit. */
+function hasAnyTransparency(pixels: Uint8Array): boolean {
+  for (let i = 3; i < pixels.length; i += 4) {
+    if (pixels[i] < 255) return true;
+  }
+  return false;
+}
+
 /** Decompress a DDS buffer into RGBA pixels and return a data URL */
-export function ddsBufferToDataURL(buffer: ArrayBuffer, maxDim?: number): { dataURL: string; width: number; height: number; format: number; ddsFormat: string } {
+export function ddsBufferToDataURL(buffer: ArrayBuffer, maxDim?: number): { dataURL: string; width: number; height: number; format: number; ddsFormat: string; hasAlpha: boolean } {
   const dds = readDDS(buffer);
   const { width, height, format, data } = dds;
   const pixels = new Uint8Array(width * height * 4);
@@ -345,7 +358,14 @@ export function ddsBufferToDataURL(buffer: ArrayBuffer, maxDim?: number): { data
   // Map to TEXFormat number for formatName compatibility
   const fmtNum = format === 'DXT1' ? TEXFormat.DXT1 : format === 'DXT5' ? TEXFormat.DXT5 : format === 'BGRA8' ? TEXFormat.BGRA8 : 0;
 
-  return { dataURL: pixelsToDataURL(pixels, width, height, maxDim), width, height, format: fmtNum, ddsFormat: format };
+  return {
+    dataURL: pixelsToDataURL(pixels, width, height, maxDim),
+    width,
+    height,
+    format: fmtNum,
+    ddsFormat: format,
+    hasAlpha: hasAnyTransparency(pixels),
+  };
 }
 
 /** Render pixels to a canvas, optionally downscaling if larger than maxDim. Returns PNG data URL. */
@@ -388,7 +408,7 @@ export function loadTEXAsImageData(buffer: ArrayBuffer): ImageData {
 }
 
 /** Decode a .tex ArrayBuffer and render it to a canvas, returning a PNG data URL. */
-export function texBufferToDataURL(buffer: ArrayBuffer, maxDim?: number): { dataURL: string; width: number; height: number; format: number } {
+export function texBufferToDataURL(buffer: ArrayBuffer, maxDim?: number): { dataURL: string; width: number; height: number; format: number; hasAlpha: boolean } {
   const tex = readTEX(buffer);
   const pixels = decompressTEX(tex);
   return {
@@ -396,6 +416,7 @@ export function texBufferToDataURL(buffer: ArrayBuffer, maxDim?: number): { data
     width: tex.width,
     height: tex.height,
     format: tex.format,
+    hasAlpha: hasAnyTransparency(pixels),
   };
 }
 

@@ -667,6 +667,12 @@ export default function RibbonBar() {
                     </RibbonGroup>
 
                     <RibbonGroup title="App">
+                        <RibbonButton
+                            label="Main page"
+                            icon={<FileIcon size={16} />}
+                            onClick={() => s.setWelcomeOverride('force')}
+                            title="Open Welcome / Main page"
+                        />
                         <RibbonButton label="Exit" icon={<PowerIcon size={16} />} onClick={s.onClose} />
                     </RibbonGroup>
                 </div>

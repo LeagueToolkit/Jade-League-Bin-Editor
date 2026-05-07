@@ -13,6 +13,8 @@ import { useShell } from './ShellContext';
  */
 export default function VSCodeShell() {
     const s = useShell();
+    const welcomeVisible = s.welcomeOverride === 'force'
+        || (s.welcomeOverride !== 'hide' && s.tabs.length === 0);
 
     return (
         <div className={`app-container ${s.isDragging ? 'dragging' : ''}`}>
@@ -29,6 +31,7 @@ export default function VSCodeShell() {
                 onParticleEditor={s.onParticleEditor}
                 onMaterialLibrary={s.onMaterialLibrary}
                 onQuartzAction={s.onSendToQuartz}
+                onIconClick={() => s.setWelcomeOverride('force')}
             />
 
             <MenuBar
@@ -61,6 +64,7 @@ export default function VSCodeShell() {
                 recentFiles={s.recentFiles}
                 onOpenRecentFile={s.openFileFromPath}
                 openFileDisabled={s.openFileDisabled}
+                onMainPage={() => s.setWelcomeOverride('force')}
             />
 
             {s.tabs.length > 0 && (
@@ -75,8 +79,9 @@ export default function VSCodeShell() {
             )}
 
             <WelcomeScreenWithExit
-                visible={s.tabs.length === 0 && !s.fileLoading}
+                visible={welcomeVisible && !s.fileLoading}
                 onOpenFile={s.onOpen}
+                onContinueWithoutFile={() => s.setWelcomeOverride('hide')}
                 openFileDisabled={s.openFileDisabled}
                 recentFiles={s.recentFiles}
                 onOpenRecentFile={s.openFileFromPath}
@@ -89,9 +94,14 @@ export default function VSCodeShell() {
                 onClose={s.onClose}
                 isMaximized={s.isMaximized}
             />
-            {s.tabs.length === 0 && s.fileLoading && <div className="file-loading-backdrop" />}
+            {welcomeVisible && s.fileLoading && <div className="file-loading-backdrop" />}
 
-            <EditorPane />
+            {/* Wrapper takes flex:1 so the StatusBar stays pinned to the
+                bottom even when EditorPane has no active tab to render
+                (no welcome overlay, e.g. after "Continue without file"). */}
+            <div className="vscode-editor-area">
+                <EditorPane />
+            </div>
 
             <StatusBar
                 status={s.statusText}
