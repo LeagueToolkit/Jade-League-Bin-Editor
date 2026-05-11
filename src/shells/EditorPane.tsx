@@ -1,5 +1,5 @@
 import Editor from '@monaco-editor/react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { RITOBIN_LANGUAGE_ID } from '../lib/ritobinLanguage';
 import { getFileExtension } from '../lib/binOperations';
@@ -10,6 +10,7 @@ import MarkdownPreview from '../components/MarkdownPreview';
 import MarkdownEditPanel from '../components/MarkdownEditPanel';
 import TexturePreviewTab from '../components/TexturePreviewTab';
 import QuartzDiffTab from '../components/QuartzDiffTab';
+import SecondaryPaneView from './SecondaryPaneView';
 import { useShell, type PerfMode } from './ShellContext';
 
 /**
@@ -22,7 +23,14 @@ import { useShell, type PerfMode } from './ShellContext';
  */
 export default function EditorPane() {
     const s = useShell();
-    const { activeTab, shellVariant } = s;
+    const { shellVariant } = s;
+    // The LEFT pane always tracks `leftActiveTabId`, never the
+    // derived `activeTabId` (which follows focus). Without this,
+    // focusing the right pane in split mode would yank the left
+    // pane's preview/editor over to the right tab's content too.
+    const activeTab = s.leftActiveTabId
+        ? s.tabs.find(t => t.id === s.leftActiveTabId) ?? null
+        : null;
     const isWord = shellVariant === 'word';
     const isVS = shellVariant === 'visualstudio';
     const stripChrome = isWord; // VS keeps full Monaco chrome — only Word goes "page" mode
@@ -34,6 +42,43 @@ export default function EditorPane() {
     // else is a multiplier of the font size.
     const [editorFontSize, setEditorFontSize] = useState(14);
     const [editorLineHeight, setEditorLineHeight] = useState(0);
+
+    // Container ref for the split-pane divider's drag math — we need
+    // the container's bounding box to convert the mouse's clientX
+    // into a left-pane fraction.
+    const splitContainerRef = useRef<HTMLDivElement>(null);
+    const startSplitDrag = useCallback((e: React.MouseEvent) => {
+        e.preventDefault();
+        const container = splitContainerRef.current;
+        if (!container) return;
+        // Capture the bounding box once at drag-start — Monaco's
+        // automaticLayout may re-flow on resize, but the container's
+        // own rect doesn't move during a single drag gesture, and
+        // re-reading every move would noticeably hitch on big files.
+        const rect = container.getBoundingClientRect();
+        const onMove = (ev: MouseEvent) => {
+            const x = ev.clientX - rect.left;
+            const ratio = x / rect.width;
+            // Hand off clamping to setSplitRatio (declared in App).
+            // Snapping into [0.1, 0.9] there keeps the call sites
+            // honest: any caller that sets ratio gets the same bound.
+            s.setSplitRatio(ratio);
+        };
+        const onUp = () => {
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+        };
+        // Lock the cursor + suppress selection during drag so the
+        // user gets a consistent resize affordance instead of the
+        // browser-default text selection that would otherwise flicker
+        // across the editor as they move.
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+    }, [s]);
     useEffect(() => {
         let cancelled = false;
         invoke<string>('get_preference', { key: 'EditorFontSize', defaultValue: '14' })
@@ -105,13 +150,57 @@ export default function EditorPane() {
             )}
 
             <div
-                className="editor-container"
+                ref={splitContainerRef}
+                className={`editor-container${s.splitMode ? ' split-mode' : ''}`}
                 style={
                     s.tabs.length === 0 || !s.isEditorTab(activeTab)
                         ? { display: 'none' }
-                        : undefined
+                        : s.splitMode
+                            ? { display: 'flex', flexDirection: 'row' }
+                            : undefined
                 }
             >
+                {/* Left pane wrapper — wraps the existing Editor so
+                    we can size it via flex-basis in split mode. In
+                    single-pane mode the wrapper has no flex and the
+                    Editor fills the whole container exactly like
+                    before, so non-split behavior is byte-for-byte
+                    identical. */}
+                <div
+                    onMouseDown={() => {
+                        // Clicking inside the left pane focuses it.
+                        // Routing in the tab bar uses `focusedPane`
+                        // to decide which pane's active tab to
+                        // update when the user clicks a tab.
+                        if (s.splitMode && s.focusedPane !== 'left') {
+                            s.setFocusedPane('left');
+                        }
+                    }}
+                    style={
+                        s.splitMode
+                            ? {
+                                  // `min-width: 0` lets the flex item
+                                  // shrink below its content's intrinsic
+                                  // size — without it Monaco's giant
+                                  // intrinsic min-width would force the
+                                  // pane to stay near 100% and refuse
+                                  // to shrink.
+                                  flex: `0 0 calc(${s.splitRatio * 100}% - 2px)`,
+                                  minWidth: 0,
+                                  height: '100%',
+                                  position: 'relative',
+                                  // Visible focus ring so the user
+                                  // knows where the next tab click
+                                  // will land.
+                                  outline:
+                                      s.focusedPane === 'left'
+                                          ? '1px solid color-mix(in srgb, var(--accent-color, #2196f3) 60%, transparent)'
+                                          : '1px solid transparent',
+                                  outlineOffset: -1,
+                              }
+                            : { width: '100%', height: '100%', position: 'relative' }
+                    }
+                >
                 <Editor
                     height="100%"
                     defaultLanguage={RITOBIN_LANGUAGE_ID}
@@ -206,6 +295,42 @@ export default function EditorPane() {
                         };
                     })()}
                 />
+                </div>
+                {s.splitMode && (
+                    <>
+                        {/* Divider — mouse-down starts a drag that
+                            updates `splitRatio`. The 4px column is
+                            wide enough to hit reliably without
+                            stealing real estate from either pane. */}
+                        <div
+                            onMouseDown={startSplitDrag}
+                            title="Drag to resize split"
+                            style={{
+                                flex: '0 0 4px',
+                                cursor: 'col-resize',
+                                background:
+                                    'color-mix(in srgb, var(--border-color, #3e3e42) 70%, transparent)',
+                                position: 'relative',
+                                zIndex: 2,
+                            }}
+                        />
+                        <div
+                            style={{
+                                flex: `0 0 calc(${(1 - s.splitRatio) * 100}% - 2px)`,
+                                minWidth: 0,
+                                height: '100%',
+                                position: 'relative',
+                                outline:
+                                    s.focusedPane === 'right'
+                                        ? '1px solid color-mix(in srgb, var(--accent-color, #2196f3) 60%, transparent)'
+                                        : '1px solid transparent',
+                                outlineOffset: -1,
+                            }}
+                        >
+                            <SecondaryPaneView />
+                        </div>
+                    </>
+                )}
                 {/* Floating edit panels are VSCode-shell only. The Word
                     and Visual Studio shells dock these in their own
                     side/right/bottom panes. */}

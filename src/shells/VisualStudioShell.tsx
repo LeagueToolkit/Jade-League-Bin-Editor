@@ -549,15 +549,67 @@ export default function VisualStudioShell() {
                         VS the tabs belong to the editor pane, not the
                         workspace top. */}
                     {visibleTabs.length > 0 && (
-                        <TabBar
-                            tabs={visibleTabs}
-                            activeTabId={s.activeTabId}
-                            onTabSelect={s.onTabSelect}
-                            onTabClose={s.onTabClose}
-                            onTabCloseAll={s.onTabCloseAll}
-                            onTabPin={s.onTabPin}
-                            onTabPointerDown={e => startEditorDrag(e, 'pop')}
-                        />
+                        s.splitMode ? (
+                            // Split mode: two pane-filtered bars. We
+                            // skip the pop-out pointer-down hook here
+                            // — TabBar's internal cross-pane drag
+                            // already consumes pointerdown, and the
+                            // user said "moving the tab just pops it
+                            // out" was a bug. Pop-out remains
+                            // available in single-pane mode below.
+                            <div style={{ display: 'flex', flexDirection: 'row' }}>
+                                <div
+                                    style={{
+                                        flex: `0 0 calc(${s.splitRatio * 100}% - 2px)`,
+                                        minWidth: 0,
+                                    }}
+                                >
+                                    <TabBar
+                                        tabs={visibleTabs}
+                                        activeTabId={s.leftActiveTabId}
+                                        onTabSelect={s.onTabSelect}
+                                        onTabClose={s.onTabClose}
+                                        onTabCloseAll={s.onTabCloseAll}
+                                        onTabPin={s.onTabPin}
+                                        splitMode={s.splitMode}
+                                        onToggleSplit={() => s.setSplitMode(!s.splitMode)}
+                                        paneFilter="left"
+                                        onDropTabIntoPane={s.onTabSetPane}
+                                    />
+                                </div>
+                                <div style={{ flex: '0 0 4px' }} />
+                                <div
+                                    style={{
+                                        flex: `0 0 calc(${(1 - s.splitRatio) * 100}% - 2px)`,
+                                        minWidth: 0,
+                                    }}
+                                >
+                                    <TabBar
+                                        tabs={visibleTabs}
+                                        activeTabId={s.rightActiveTabId}
+                                        onTabSelect={s.onTabSelect}
+                                        onTabClose={s.onTabClose}
+                                        onTabCloseAll={s.onTabCloseAll}
+                                        onTabPin={s.onTabPin}
+                                        paneFilter="right"
+                                        onDropTabIntoPane={s.onTabSetPane}
+                                    />
+                                </div>
+                            </div>
+                        ) : (
+                            <TabBar
+                                tabs={visibleTabs}
+                                activeTabId={s.activeTabId}
+                                onTabSelect={s.onTabSelect}
+                                onTabClose={s.onTabClose}
+                                onTabCloseAll={s.onTabCloseAll}
+                                onTabPin={s.onTabPin}
+                                onTabPointerDown={e => startEditorDrag(e, 'pop')}
+                                splitMode={s.splitMode}
+                                onToggleSplit={() => s.setSplitMode(!s.splitMode)}
+                                splitDisabled={s.tabs.length < 2}
+                            />
+                        )
                     )}
 
                     <div className={`vs-shell-editor${editorFloating ? ' editor-popped-out' : ''}`}>

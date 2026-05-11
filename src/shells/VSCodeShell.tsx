@@ -68,14 +68,67 @@ export default function VSCodeShell() {
             />
 
             {s.tabs.length > 0 && (
-                <TabBar
-                    tabs={s.tabs}
-                    activeTabId={s.activeTabId}
-                    onTabSelect={s.onTabSelect}
-                    onTabClose={s.onTabClose}
-                    onTabCloseAll={s.onTabCloseAll}
-                    onTabPin={s.onTabPin}
-                />
+                s.splitMode ? (
+                    // Split mode: two pane-filtered tab bars side by
+                    // side. The split-toggle button lives only on
+                    // the left bar so there's a single source of
+                    // truth for the action. Drag-drop wires both
+                    // bars together via `onTabSetPane`.
+                    <div style={{ display: 'flex', flexDirection: 'row' }}>
+                        <div
+                            style={{
+                                flex: `0 0 calc(${s.splitRatio * 100}% - 2px)`,
+                                minWidth: 0,
+                            }}
+                        >
+                            <TabBar
+                                tabs={s.tabs}
+                                activeTabId={s.leftActiveTabId}
+                                onTabSelect={s.onTabSelect}
+                                onTabClose={s.onTabClose}
+                                onTabCloseAll={s.onTabCloseAll}
+                                onTabPin={s.onTabPin}
+                                splitMode={s.splitMode}
+                                onToggleSplit={() => s.setSplitMode(!s.splitMode)}
+                                paneFilter="left"
+                                onDropTabIntoPane={s.onTabSetPane}
+                            />
+                        </div>
+                        {/* Spacer column matches the editor divider's
+                            width so the bar split lines up with the
+                            pane divider below. */}
+                        <div style={{ flex: '0 0 4px' }} />
+                        <div
+                            style={{
+                                flex: `0 0 calc(${(1 - s.splitRatio) * 100}% - 2px)`,
+                                minWidth: 0,
+                            }}
+                        >
+                            <TabBar
+                                tabs={s.tabs}
+                                activeTabId={s.rightActiveTabId}
+                                onTabSelect={s.onTabSelect}
+                                onTabClose={s.onTabClose}
+                                onTabCloseAll={s.onTabCloseAll}
+                                onTabPin={s.onTabPin}
+                                paneFilter="right"
+                                onDropTabIntoPane={s.onTabSetPane}
+                            />
+                        </div>
+                    </div>
+                ) : (
+                    <TabBar
+                        tabs={s.tabs}
+                        activeTabId={s.activeTabId}
+                        onTabSelect={s.onTabSelect}
+                        onTabClose={s.onTabClose}
+                        onTabCloseAll={s.onTabCloseAll}
+                        onTabPin={s.onTabPin}
+                        splitMode={s.splitMode}
+                        onToggleSplit={() => s.setSplitMode(!s.splitMode)}
+                        splitDisabled={s.tabs.length < 2}
+                    />
+                )
             )}
 
             <WelcomeScreenWithExit

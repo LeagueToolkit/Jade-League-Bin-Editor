@@ -11,7 +11,7 @@
  * component owns its own `Scene` and disposes it on unmount.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 
 // Side-effect import. Babylon registers its shader-include modules
@@ -31,6 +31,7 @@ import { Scene } from '@babylonjs/core/scene';
 import { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera';
 import { Vector3, Color3, Color4 } from '@babylonjs/core/Maths/math';
 import type { Mesh } from '@babylonjs/core/Meshes/mesh';
+import type { LinesMesh } from '@babylonjs/core/Meshes/linesMesh';
 import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight';
 import { Material } from '@babylonjs/core/Materials/material';
 import { PBRMaterial } from '@babylonjs/core/Materials/PBR/pbrMaterial';
@@ -41,6 +42,21 @@ import { GridMaterial } from '@babylonjs/materials/grid/gridMaterial';
 
 import { createEngine } from '../lib/babylon/engine';
 import { buildSknMeshes, type SknDTO } from '../lib/babylon/meshBuilder';
+import {
+    buildBabylonSkeleton,
+    buildSkeletonJoints,
+    buildSkeletonLines,
+    buildSkeletonOctahedrons,
+    type SklJointDTO,
+    type SklSkeletonDTO,
+} from '../lib/babylon/skeletonBuilder';
+import {
+    AnimationPlayer,
+    resetSkeletonToRestPose,
+    type BakedAnimationDTO,
+} from '../lib/babylon/animationPlayer';
+import type { Skeleton } from '@babylonjs/core/Bones/skeleton';
+import type { Bone } from '@babylonjs/core/Bones/bone';
 
 interface MeshPreviewProps {
     /** Disk path or `wad://<mountId>/<pathHashHex>` source identifier. */
@@ -53,6 +69,13 @@ interface MeshPreviewProps {
 
 type ShadingMode = 'flat' | 'lit';
 type MissingStyle = 'material-color' | 'pattern';
+/// Skeleton render style.
+///   - 'joints'      Maya-style: a sphere at each joint plus thin line
+///                   connectors between parent and child. Default.
+///   - 'octahedrons' Blender-style: a stretched octahedron per
+///                   parent→child link. No joint markers.
+///   - 'lines'       Just the line connectors. Lightest variant.
+type SkeletonStyle = 'joints' | 'lines' | 'octahedrons';
 
 /// Per-submesh display state — kept in a ref (not React state) because
 /// the render loop reads from it every frame and we don't want to
@@ -91,6 +114,43 @@ export function MeshPreview({ source, label }: MeshPreviewProps) {
     /// once per fetchAndBuild and read by `refreshMaterials`.
     const doubleSidedRef = useRef(false);
 
+    /// Skeleton overlay — populated when:
+    ///   1. Source is a `.skl` (standalone skeleton preview), or
+    ///   2. Source is a `.skn` and a sibling `.skl` exists in the
+    ///      same WAD / folder (rendered hidden by default; user
+    ///      toggles via the settings panel).
+    ///
+    /// We build all three render styles eagerly and just toggle their
+    /// `setEnabled` flags when the user flips the style switch —
+    /// building everything is cheap (joint counts top out in the low
+    /// hundreds, joint markers are thin-instanced into one mesh, the
+    /// octahedron mesh shares a single VertexData) and avoids any
+    /// rebuild lag on toggle. The 'joints' style enables BOTH the
+    /// joint-marker mesh and the lines mesh together for the Maya
+    /// look (sphere at each pivot, line connectors between them).
+    const skeletonLinesRef = useRef<LinesMesh | null>(null);
+    const skeletonOctaRef = useRef<Mesh | null>(null);
+    const skeletonJointsRef = useRef<Mesh | null>(null);
+    /// Babylon Skeleton built from the same SKL the visualisations
+    /// above came from. Attached to the SKN meshes (mesh.skeleton =)
+    /// so Babylon's skinning shader picks up bone-driven vertex
+    /// transforms; the AnimationPlayer mutates each bone's local
+    /// TRS components every tick to drive the pose.
+    const babylonSkeletonRef = useRef<Skeleton | null>(null);
+    const bonesRef = useRef<Bone[] | null>(null);
+    const boneIndexByHashRef = useRef<Map<number, number> | null>(null);
+    /// Snapshot of the SKL joint DTOs at build time. The animation
+    /// player needs these so it can reset bones to their rest TRS
+    /// when initialising — bones not driven by the active clip get
+    /// their original local position/rotation/scale back instead of
+    /// inheriting the previous clip's last-frame pose.
+    const sklJointsRef = useRef<SklJointDTO[] | null>(null);
+    /// Active animation player + the render-loop unsubscribe for it.
+    /// Replaced when the user picks a different clip; cleared on
+    /// unmount.
+    const animPlayerRef = useRef<AnimationPlayer | null>(null);
+    const animUnsubscribeRef = useRef<(() => void) | null>(null);
+
     const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     /** Per-submesh visibility list, in the same order as `built.meshes`.
@@ -99,6 +159,62 @@ export function MeshPreview({ source, label }: MeshPreviewProps) {
     const [submeshes, setSubmeshes] = useState<{ name: string; visible: boolean }[]>([]);
     const [panelOpen, setPanelOpen] = useState(false);
     const [shadingMode, setShadingMode] = useState<ShadingMode>('flat');
+    /// `true` once a skeleton is in the scene (either standalone SKL
+    /// or sibling-of-SKN). Drives whether the visibility-toggle row
+    /// shows up in the settings panel.
+    const [skeletonAvailable, setSkeletonAvailable] = useState(false);
+    /// Skeleton visibility. SKL standalone defaults this to true (the
+    /// skeleton IS the preview). SKN overlay defaults to false — the
+    /// user opts in via the toggle. We initialise it lazily inside
+    /// fetchAndBuild based on the format.
+    const [skeletonVisible, setSkeletonVisible] = useState(false);
+    /// Render style for the skeleton — toggles which of the three
+    /// pre-built mesh combinations is enabled. Default is 'joints'
+    /// (Maya-style spheres + line connectors) because it reads the
+    /// most cleanly without any extra explanation; the other two
+    /// styles are one click away in the settings panel.
+    const [skeletonStyle, setSkeletonStyle] = useState<SkeletonStyle>('joints');
+    /// Animation listing for the SKN's skin BIN — `null` while
+    /// loading or for non-SKN previews. The dropdown only renders
+    /// when this resolves to a populated listing.
+    const [animations, setAnimations] = useState<AnimationListing | null>(null);
+    const [animationsPanelOpen, setAnimationsPanelOpen] = useState(false);
+    const [animationFilter, setAnimationFilter] = useState('');
+    const [selectedAnimation, setSelectedAnimation] = useState<AnimationClip | null>(null);
+    /// Playback-controls state. Mirrored into `animPlayerRef.current`
+    /// via effects below so the player's mutable fields stay in sync
+    /// with React, but the player remains the source of truth for the
+    /// per-frame pose. `playerTime` is read from the player at rAF
+    /// cadence so the progress bar tracks live playback.
+    const [playerPaused, setPlayerPaused] = useState(false);
+    const [playerSpeed, setPlayerSpeed] = useState(1);
+    const [playerTime, setPlayerTime] = useState(0);
+    const [playerDuration, setPlayerDuration] = useState(0);
+    /// Set when the user is actively dragging the scrub bar — pauses
+    /// the rAF→React updates so React-driven `value` doesn't fight
+    /// the slider thumb mid-drag.
+    const [scrubbing, setScrubbing] = useState(false);
+
+    /// Stable JSON key so effects only re-run when the source actually
+    /// *changes*, not when the parent re-renders with a new `source`
+    /// object literal (which happens whenever any parent state moves,
+    /// even unrelated state like a filter input). Without this, the
+    /// animation-load effect tears down + rebuilds the player mid-
+    /// playback on every parent re-render — exactly the "stops at
+    /// halfway and restarts on next play" symptom.
+    const sourceKey =
+        source.kind === 'disk'
+            ? `disk:${source.path}`
+            : `wad:${source.mountId}:${source.pathHashHex}`;
+    /// X-ray draws skeleton meshes through the SKN geometry by
+    /// promoting them to renderingGroupId=1 (rendered after group 0
+    /// with a fresh depth buffer). Off pushes them back to group 0
+    /// so they're occluded by the mesh — useful when you want to see
+    /// which bones are visible without the mesh covering them.
+    /// Default on so the skeleton is always visible at first; the
+    /// toggle only surfaces when there's a mesh to occlude with
+    /// (i.e. SKN previews — for standalone SKL the toggle is moot).
+    const [skeletonXray, setSkeletonXray] = useState(true);
     // Default to the magenta/black checkerboard for missing textures —
     // it's the universally-recognized "missing texture" indicator and
     // makes failed BIN lookups visually obvious. Users who prefer the
@@ -144,6 +260,179 @@ export function MeshPreview({ source, label }: MeshPreviewProps) {
     useEffect(() => {
         refreshMaterials();
     }, [refreshMaterials]);
+
+    // Animation playback — when the user picks a clip:
+    //   1. Cancel any running player + render-loop hook.
+    //   2. Fetch the baked ANM data via wad_load_animation.
+    //   3. Build a fresh AnimationPlayer wired to the existing
+    //      Babylon Skeleton's bones, hook it into the render loop.
+    //   4. Cleanup on unmount or selection change is symmetric — the
+    //      effect's cleanup function tears down the previous player
+    //      before the new one is built, so cycling clips can't leak
+    //      observer subscriptions.
+    useEffect(() => {
+        if (!selectedAnimation) return;
+        const scene = sceneRef.current;
+        const bones = bonesRef.current;
+        const boneIndexByHash = boneIndexByHashRef.current;
+        const joints = sklJointsRef.current;
+        if (!scene || !bones || !boneIndexByHash || !joints) return;
+        // Pick the right loader per source. A clip with neither a
+        // chunk hash NOR a disk path is unselectable; the picker
+        // marks it visually but defensively bail here too.
+        const wadHash = selectedAnimation.anm_chunk_hash_hex;
+        const diskPath = selectedAnimation.anm_disk_path;
+        if (!wadHash && !diskPath) return;
+
+        let cancelled = false;
+
+        (async () => {
+            try {
+                const baked = source.kind === 'wad' && wadHash
+                    ? await invoke<BakedAnimationDTO>('wad_load_animation', {
+                          id: source.mountId,
+                          pathHashHex: wadHash,
+                      })
+                    : await invoke<BakedAnimationDTO>('read_animation', {
+                          path: diskPath!,
+                      });
+                if (cancelled) return;
+                // Tear down the previous player BEFORE wiring the new
+                // one so we don't briefly run two players against the
+                // same skeleton.
+                animUnsubscribeRef.current?.();
+                animUnsubscribeRef.current = null;
+                animPlayerRef.current = null;
+
+                const player = new AnimationPlayer(baked, boneIndexByHash, bones, joints);
+                animPlayerRef.current = player;
+                console.log(
+                    `[MeshPreview] anim "${selectedAnimation.name}": ` +
+                        `${baked.frame_count} frames @ ${baked.fps.toFixed(1)} fps, ` +
+                        `${player.matchedTrackCount}/${baked.tracks.length} bones matched`,
+                );
+
+                // Seed the React state so the controls bar starts in
+                // a consistent state (playing, 1×, at frame 0) and
+                // can display the clip duration.
+                player.paused = false;
+                player.speed = 1;
+                setPlayerPaused(false);
+                setPlayerSpeed(1);
+                setPlayerTime(0);
+                setPlayerDuration(player.duration);
+
+                // Drive the player from Babylon's beforeRender — fires
+                // once per render frame regardless of monitor refresh,
+                // and `getEngine().getDeltaTime()` returns ms.
+                const engine = scene.getEngine();
+                const observer = scene.onBeforeRenderObservable.add(() => {
+                    const dt = engine.getDeltaTime() / 1000;
+                    player.tick(dt);
+                });
+                animUnsubscribeRef.current = () => {
+                    if (observer) scene.onBeforeRenderObservable.remove(observer);
+                };
+            } catch (e) {
+                console.warn('[MeshPreview] animation load failed:', e);
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+            animUnsubscribeRef.current?.();
+            animUnsubscribeRef.current = null;
+            animPlayerRef.current = null;
+        };
+        // Depend on `sourceKey` (a stable string), not `source` (a
+        // fresh object every parent render). Without this, the player
+        // gets torn down + rebuilt whenever the parent re-renders for
+        // unrelated reasons, freezing animations mid-play.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedAnimation, sourceKey]);
+
+    // When the user explicitly unloads (selectedAnimation → null),
+    // the load effect's cleanup tears down the player but doesn't
+    // touch the bones — they keep whatever last-frame pose was
+    // applied. Snap them back to bind-pose so the model returns to
+    // its T-pose visually, and clear the controls' duration so the
+    // bar collapses cleanly.
+    useEffect(() => {
+        if (selectedAnimation) return;
+        const bones = bonesRef.current;
+        const joints = sklJointsRef.current;
+        if (bones && joints) {
+            resetSkeletonToRestPose(bones, joints);
+        }
+        setPlayerTime(0);
+        setPlayerDuration(0);
+        setPlayerPaused(false);
+        setPlayerSpeed(1);
+    }, [selectedAnimation]);
+
+    // Mirror the React-controlled fields back into the player. We
+    // can't just pass them as constructor args because they change
+    // *after* construction (user clicks pause, changes speed).
+    useEffect(() => {
+        const p = animPlayerRef.current;
+        if (p) p.paused = playerPaused;
+    }, [playerPaused]);
+
+    useEffect(() => {
+        const p = animPlayerRef.current;
+        if (p) p.speed = playerSpeed;
+    }, [playerSpeed]);
+
+    // Pull the player's live `time` into React at rAF cadence so the
+    // progress bar tracks playback. While the user is dragging the
+    // scrub thumb we skip the sync — the slider's controlled value
+    // is whatever the user set, and we don't want a stale rAF tick
+    // to yank the thumb back mid-drag.
+    useEffect(() => {
+        if (playerDuration <= 0) return;
+        let raf = 0;
+        const update = () => {
+            const p = animPlayerRef.current;
+            if (p && !scrubbing) {
+                setPlayerTime(p.time);
+            }
+            raf = requestAnimationFrame(update);
+        };
+        raf = requestAnimationFrame(update);
+        return () => cancelAnimationFrame(raf);
+    }, [playerDuration, scrubbing]);
+
+    // Skeleton visibility + style + X-ray — only the active style's
+    // mesh combination is enabled, and only when the visibility
+    // toggle is on. All meshes are built upfront so flipping the
+    // style is just a few `setEnabled` calls, no rebuild.
+    //
+    // 'joints' enables both the sphere markers AND the line
+    // connectors so the Maya look (sphere-at-pivot + line-between)
+    // reads as one combined visual; 'lines' uses just the lines;
+    // 'octahedrons' uses the stretched-bone mesh on its own.
+    //
+    // X-ray drives `renderingGroupId`: 1 = rendered after group 0
+    // with the depth buffer cleared (always visible), 0 = drawn
+    // alongside the mesh and subject to normal depth testing
+    // (occluded where geometry covers it).
+    useEffect(() => {
+        const linesActive =
+            skeletonVisible && (skeletonStyle === 'lines' || skeletonStyle === 'joints');
+        const groupId = skeletonXray ? 1 : 0;
+        if (skeletonLinesRef.current) {
+            skeletonLinesRef.current.setEnabled(linesActive);
+            skeletonLinesRef.current.renderingGroupId = groupId;
+        }
+        if (skeletonOctaRef.current) {
+            skeletonOctaRef.current.setEnabled(skeletonVisible && skeletonStyle === 'octahedrons');
+            skeletonOctaRef.current.renderingGroupId = groupId;
+        }
+        if (skeletonJointsRef.current) {
+            skeletonJointsRef.current.setEnabled(skeletonVisible && skeletonStyle === 'joints');
+            skeletonJointsRef.current.renderingGroupId = groupId;
+        }
+    }, [skeletonVisible, skeletonStyle, skeletonXray]);
 
     const toggleSubmesh = useCallback((index: number) => {
         setSubmeshes((prev) => {
@@ -232,13 +521,6 @@ export function MeshPreview({ source, label }: MeshPreviewProps) {
         }
     }, [source, label, guessing, refreshMaterials]);
 
-    // Stable JSON key so the effect only re-runs when the source actually
-    // changes — avoids a render-tear on every parent rerender.
-    const sourceKey =
-        source.kind === 'disk'
-            ? `disk:${source.path}`
-            : `wad:${source.mountId}:${source.pathHashHex}`;
-
     useEffect(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
@@ -312,6 +594,40 @@ export function MeshPreview({ source, label }: MeshPreviewProps) {
 
         const fetchAndBuild = async () => {
             try {
+                const format = detectFormat(source, label);
+
+                // SKL standalone — render only the bone hierarchy. No
+                // mesh, no materials, no submesh panel; the skeleton
+                // is the preview. Returns early because none of the
+                // SKN/SCB/SCO path applies.
+                if (format === 'skl') {
+                    const skl = await loadSkeletonDto(source);
+                    if (cancelled) return;
+                    const built = buildAllSkeletonStyles(skl, scene, {
+                        color: new Color3(0.55, 0.85, 1.0),
+                        nameSuffix: 'standalone',
+                    });
+                    if (!built) {
+                        setError('Skeleton has no joints');
+                        setLoading(false);
+                        return;
+                    }
+                    skeletonLinesRef.current = built.lines;
+                    skeletonOctaRef.current = built.octa;
+                    skeletonJointsRef.current = built.joints;
+                    setSkeletonAvailable(true);
+                    setSkeletonVisible(true);
+
+                    // Both meshes start disabled; the visibility
+                    // useEffect above flips the active style on once
+                    // React commits the new state. No need to call
+                    // setEnabled here.
+                    frameCamera(camera, built.shiftTargets, built.bbox.min, built.bbox.max);
+                    setLoading(false);
+                    startRender();
+                    return;
+                }
+
                 const skn = await loadMeshAsSknDto(source, label);
                 if (cancelled) return;
                 // Static meshes (SCB/SCO) often contain flat
@@ -319,10 +635,35 @@ export function MeshPreview({ source, label }: MeshPreviewProps) {
                 // hair cards. Disabling backface culling for those
                 // makes both sides visible, matching how they're
                 // rendered in-engine. SKNs keep normal culling.
-                doubleSidedRef.current = detectFormat(source, label) !== 'skn';
+                doubleSidedRef.current = format !== 'skn';
 
+                // For SKN previews, eagerly fetch the sibling SKL so
+                // we can wire up skinning at mesh build time.
+                // Without the SKL, we can't translate per-vertex
+                // bone_indices (which reference the SKL's influences
+                // table) into actual bone IDs the shader expects.
+                // The wait is usually short (small file in the same
+                // mount) and saves a dispose+rebuild later.
+                let sklDto: SklSkeletonDTO | null = null;
+                let babylonSkeleton: ReturnType<typeof buildBabylonSkeleton> | null = null;
+                if (format === 'skn') {
+                    sklDto = await fetchSiblingSkeletonDto(source);
+                    if (cancelled) return;
+                    if (sklDto) {
+                        babylonSkeleton = buildBabylonSkeleton(sklDto, scene);
+                        babylonSkeletonRef.current = babylonSkeleton.skeleton;
+                        bonesRef.current = babylonSkeleton.bones;
+                        boneIndexByHashRef.current = babylonSkeleton.boneIndexByHash;
+                        sklJointsRef.current = sklDto.joints;
+                    }
+                }
 
-                const built = buildSknMeshes(skn, scene);
+                const built = buildSknMeshes(
+                    skn,
+                    scene,
+                    babylonSkeleton?.skeleton,
+                    sklDto?.influences,
+                );
                 meshesRef.current = built.meshes;
                 // Seed the visibility panel — mirrors `built.meshes`
                 // order so toggle indices line up 1:1 with the ref.
@@ -365,30 +706,40 @@ export function MeshPreview({ source, label }: MeshPreviewProps) {
                 //   - SCB/SCO → walks the BIN tree for any object
                 //     that references the mesh's path string and
                 //     pulls a sibling texture
-                if (source.kind === 'wad') {
-                    const fmt = detectFormat(source, label);
-                    if (fmt === 'skn') {
-                        void applyTextures(
-                            source.mountId,
-                            source.pathHashHex,
-                            skn,
-                            slots,
-                            loadedTexturesRef.current,
-                            scene,
-                            () => cancelled,
-                            refreshMaterials,
-                        );
-                    } else {
-                        void applyStaticMeshTexture(
-                            source.mountId,
-                            source.pathHashHex,
-                            slots,
-                            loadedTexturesRef.current,
-                            scene,
-                            () => cancelled,
-                            refreshMaterials,
-                        );
-                    }
+                if (source.kind === 'wad' && format === 'skn') {
+                    void applyTextures(
+                        source.mountId,
+                        source.pathHashHex,
+                        skn,
+                        slots,
+                        loadedTexturesRef.current,
+                        scene,
+                        () => cancelled,
+                        refreshMaterials,
+                    );
+                } else if (source.kind === 'wad') {
+                    void applyStaticMeshTexture(
+                        source.mountId,
+                        source.pathHashHex,
+                        slots,
+                        loadedTexturesRef.current,
+                        scene,
+                        () => cancelled,
+                        refreshMaterials,
+                    );
+                } else if (source.kind === 'disk' && format === 'skn') {
+                    // Disk SKN texture pipeline — same shape as the
+                    // WAD path but each binding carries a disk path
+                    // and we decode through `decode_texture_disk`.
+                    void applyTexturesDisk(
+                        source.path,
+                        skn,
+                        slots,
+                        loadedTexturesRef.current,
+                        scene,
+                        () => cancelled,
+                        refreshMaterials,
+                    );
                 }
 
                 // Compute the AABB from Babylon's per-mesh bounding info,
@@ -478,6 +829,32 @@ export function MeshPreview({ source, label }: MeshPreviewProps) {
                     return;
                 }
 
+                // Sibling-SKL discovery (SKN-only). Fire-and-forget —
+                // we don't want a missing or unparseable skeleton to
+                // block the mesh from rendering. Kicked off after
+                // y-shift is computed so the skeleton lines align with
+                // the (possibly shifted) mesh in world space. The
+                // overlay starts hidden; the user toggles it from the
+                // settings panel.
+                if (format === 'skn') {
+                    if (sklDto) {
+                        applySiblingSkeletonVisuals(
+                            sklDto,
+                            scene,
+                            skeletonLinesRef,
+                            skeletonOctaRef,
+                            skeletonJointsRef,
+                            setSkeletonAvailable,
+                            yShift,
+                        );
+                    }
+                    // Animation discovery — fires for both WAD and disk
+                    // source kinds, picking the matching command path.
+                    // Fire-and-forget; a missing animation graph is
+                    // silent.
+                    void loadAnimations(source, () => cancelled, setAnimations);
+                }
+
                 setLoading(false);
                 startRender();
             } catch (e) {
@@ -502,13 +879,34 @@ export function MeshPreview({ source, label }: MeshPreviewProps) {
             sceneRef.current = null;
             meshesRef.current = [];
             slotsRef.current = [];
-            // Babylon disposes textures together with their owning
-            // scene, so we just drop the references — no per-texture
-            // cleanup needed.
+            // Babylon disposes textures + child meshes together with
+            // their owning scene, so we just drop the references —
+            // no per-texture / per-line-mesh cleanup needed.
             loadedTexturesRef.current = new Map();
             placeholderTexRef.current = null;
+            skeletonLinesRef.current = null;
+            skeletonOctaRef.current = null;
+            skeletonJointsRef.current = null;
+            babylonSkeletonRef.current = null;
+            bonesRef.current = null;
+            boneIndexByHashRef.current = null;
+            sklJointsRef.current = null;
+            // Animation player teardown — the effect that owns the
+            // observer cleans itself up on `selectedAnimation` change,
+            // but a hot scene-dispose can race that. Belt and braces.
+            animUnsubscribeRef.current?.();
+            animUnsubscribeRef.current = null;
+            animPlayerRef.current = null;
             setSubmeshes([]);
             setPanelOpen(false);
+            setSkeletonAvailable(false);
+            setSkeletonVisible(false);
+            setSkeletonStyle('joints');
+            setSkeletonXray(true);
+            setAnimations(null);
+            setAnimationsPanelOpen(false);
+            setAnimationFilter('');
+            setSelectedAnimation(null);
             engine.stopRenderLoop();
             scene.dispose();
             engine.dispose();
@@ -566,28 +964,64 @@ export function MeshPreview({ source, label }: MeshPreviewProps) {
                     </div>
                 </div>
             )}
-            {label && !loading && !error && (
-                <div
-                    style={{
-                        position: 'absolute',
-                        bottom: 8,
-                        left: 10,
-                        fontSize: 10,
-                        color: 'var(--text-secondary, #9DA5B4)',
-                        background: 'rgba(0, 0, 0, 0.35)',
-                        padding: '2px 6px',
-                        borderRadius: 3,
-                        pointerEvents: 'none',
-                    }}
-                >
-                    {label}
-                </div>
+            {/* Animation picker — top-right. Shows up after the SKN's
+                skin BIN → animation BIN walk lands; clicking opens a
+                scrollable, filterable list of clip names. Selection is
+                tracked locally for now (highlighted entry); we'll wire
+                actual playback to the selected ANM in the next phase. */}
+            {!loading && !error && animations && animations.clips.length > 0 && (
+                <AnimationPickerPanel
+                    listing={animations}
+                    panelOpen={animationsPanelOpen}
+                    onTogglePanel={() => setAnimationsPanelOpen((p) => !p)}
+                    filter={animationFilter}
+                    onFilterChange={setAnimationFilter}
+                    selected={selectedAnimation}
+                    onSelect={setSelectedAnimation}
+                />
             )}
 
-            {/* Submesh visibility panel — bottom-right corner. Button
+            {/* Playback controls — only present when an animation is
+                actually loaded (selectedAnimation is set AND the
+                player has reported its duration). Bottom-left so it
+                mirrors the submesh panel at bottom-right and doesn't
+                clash with the picker at top-right. */}
+            {!loading && !error && selectedAnimation && playerDuration > 0 && (
+                <AnimationControlsBar
+                    name={selectedAnimation.name}
+                    paused={playerPaused}
+                    onTogglePaused={() => setPlayerPaused((p) => !p)}
+                    time={playerTime}
+                    duration={playerDuration}
+                    onScrubStart={() => setScrubbing(true)}
+                    onScrub={(t) => {
+                        const p = animPlayerRef.current;
+                        if (p) p.time = t;
+                        setPlayerTime(t);
+                    }}
+                    onScrubEnd={() => setScrubbing(false)}
+                    speed={playerSpeed}
+                    onCycleSpeed={() => {
+                        // Cycle order per the user's preference:
+                        // 1× → 2× → 0.1× → 0.5× → 1×. First tap from
+                        // default is "play faster"; subsequent taps
+                        // land on the slowdowns.
+                        const order = [1, 2, 0.1, 0.5];
+                        const idx = order.indexOf(playerSpeed);
+                        const next = order[(idx + 1) % order.length] ?? 1;
+                        setPlayerSpeed(next);
+                    }}
+                    onUnload={() => setSelectedAnimation(null)}
+                />
+            )}
+
+            {/* Submesh + settings panel — bottom-right corner. Button
                 always visible after the mesh loads; expands on click
-                to a checklist of submeshes the user can toggle. */}
-            {!loading && !error && submeshes.length > 0 && (
+                to a checklist of submeshes the user can toggle. The
+                panel is also shown for skeleton-only previews so the
+                user has somewhere to find the skeleton-visibility
+                control (and any future skeleton-specific settings). */}
+            {!loading && !error && (submeshes.length > 0 || skeletonAvailable) && (
                 <div
                     style={{
                         position: 'absolute',
@@ -622,39 +1056,49 @@ export function MeshPreview({ source, label }: MeshPreviewProps) {
                                 onGuess={onGuessTextures}
                                 guessAvailable={source.kind === 'wad'}
                                 guessing={guessing}
+                                skeletonAvailable={skeletonAvailable}
+                                skeletonVisible={skeletonVisible}
+                                onSkeletonToggle={setSkeletonVisible}
+                                skeletonStyle={skeletonStyle}
+                                onSkeletonStyleChange={setSkeletonStyle}
+                                skeletonXray={skeletonXray}
+                                onSkeletonXrayChange={setSkeletonXray}
+                                meshControlsAvailable={submeshes.length > 0}
                             />
-                            <div
-                                style={{
-                                    display: 'flex',
-                                    justifyContent: 'space-between',
-                                    alignItems: 'center',
-                                    marginBottom: 6,
-                                    paddingBottom: 4,
-                                    borderBottom: '1px solid color-mix(in srgb, var(--border-color, #3e3e42) 50%, transparent)',
-                                    fontSize: 10,
-                                    color: 'var(--text-secondary, #9DA5B4)',
-                                }}
-                            >
-                                <span>Submeshes ({submeshes.length})</span>
-                                <span style={{ display: 'flex', gap: 4 }}>
-                                    <button
-                                        type="button"
-                                        onClick={() => setAllSubmeshes(true)}
-                                        style={miniButtonStyle}
-                                        title="Show all"
-                                    >
-                                        All
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setAllSubmeshes(false)}
-                                        style={miniButtonStyle}
-                                        title="Hide all"
-                                    >
-                                        None
-                                    </button>
-                                </span>
-                            </div>
+                            {submeshes.length > 0 && (
+                                <div
+                                    style={{
+                                        display: 'flex',
+                                        justifyContent: 'space-between',
+                                        alignItems: 'center',
+                                        marginBottom: 6,
+                                        paddingBottom: 4,
+                                        borderBottom: '1px solid color-mix(in srgb, var(--border-color, #3e3e42) 50%, transparent)',
+                                        fontSize: 10,
+                                        color: 'var(--text-secondary, #9DA5B4)',
+                                    }}
+                                >
+                                    <span>Submeshes ({submeshes.length})</span>
+                                    <span style={{ display: 'flex', gap: 4 }}>
+                                        <button
+                                            type="button"
+                                            onClick={() => setAllSubmeshes(true)}
+                                            style={miniButtonStyle}
+                                            title="Show all"
+                                        >
+                                            All
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setAllSubmeshes(false)}
+                                            style={miniButtonStyle}
+                                            title="Hide all"
+                                        >
+                                            None
+                                        </button>
+                                    </span>
+                                </div>
+                            )}
                             {submeshes.map((s, i) => (
                                 <label
                                     key={`${i}-${s.name}`}
@@ -700,9 +1144,11 @@ export function MeshPreview({ source, label }: MeshPreviewProps) {
                             cursor: 'pointer',
                             fontSize: 11,
                         }}
-                        title={panelOpen ? 'Hide submesh list' : 'Show submesh list'}
+                        title={panelOpen ? 'Hide settings panel' : 'Show settings panel'}
                     >
-                        Submeshes ({submeshes.filter((s) => s.visible).length}/{submeshes.length})
+                        {submeshes.length > 0
+                            ? `Submeshes (${submeshes.filter((s) => s.visible).length}/${submeshes.length})`
+                            : 'Skeleton'}
                     </button>
                 </div>
             )}
@@ -722,6 +1168,344 @@ const miniButtonStyle: React.CSSProperties = {
 
 // ── Settings UI ──────────────────────────────────────────────────────
 
+// ── Animation picker ─────────────────────────────────────────────────
+//
+// Top-right popup. Button collapses/expands a tall, scrollable list of
+// clips with a filter input on top. v1 is purely a picker — selection
+// updates a local highlight; playback wiring will follow when the ANM
+// loader + skinning path lands.
+
+interface AnimationPickerPanelProps {
+    listing: AnimationListing;
+    panelOpen: boolean;
+    onTogglePanel: () => void;
+    filter: string;
+    onFilterChange: (s: string) => void;
+    selected: AnimationClip | null;
+    onSelect: (clip: AnimationClip) => void;
+}
+
+function AnimationPickerPanel({
+    listing,
+    panelOpen,
+    onTogglePanel,
+    filter,
+    onFilterChange,
+    selected,
+    onSelect,
+}: AnimationPickerPanelProps) {
+    const filtered = filter.trim()
+        ? listing.clips.filter((c) =>
+              c.name.toLowerCase().includes(filter.trim().toLowerCase()),
+          )
+        : listing.clips;
+
+    return (
+        <div
+            style={{
+                position: 'absolute',
+                top: 8,
+                right: 8,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'flex-end',
+                gap: 6,
+                fontSize: 11,
+                color: 'var(--text-primary, #d4d4d4)',
+            }}
+        >
+            <button
+                type="button"
+                onClick={onTogglePanel}
+                style={{
+                    background: 'color-mix(in srgb, var(--editor-bg, #1e1e1e) 88%, transparent)',
+                    border: '1px solid color-mix(in srgb, var(--border-color, #3e3e42) 70%, transparent)',
+                    color: 'var(--text-primary, #d4d4d4)',
+                    padding: '4px 10px',
+                    borderRadius: 4,
+                    cursor: 'pointer',
+                    fontSize: 11,
+                }}
+                title={panelOpen ? 'Hide animations list' : 'Show animations list'}
+            >
+                {selected
+                    ? `Animation: ${selected.name}`
+                    : `Animations (${listing.clips.length})`}
+            </button>
+            {panelOpen && (
+                <div
+                    style={{
+                        background: 'color-mix(in srgb, var(--editor-bg, #1e1e1e) 88%, transparent)',
+                        border: '1px solid color-mix(in srgb, var(--border-color, #3e3e42) 70%, transparent)',
+                        borderRadius: 4,
+                        padding: '8px 10px',
+                        minWidth: 240,
+                        maxWidth: 320,
+                        maxHeight: 400,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 6,
+                        boxShadow: '0 4px 14px rgba(0, 0, 0, 0.45)',
+                    }}
+                >
+                    <input
+                        type="text"
+                        value={filter}
+                        onChange={(e) => onFilterChange(e.target.value)}
+                        placeholder="Filter…"
+                        style={{
+                            background: 'color-mix(in srgb, var(--editor-bg, #1e1e1e) 70%, transparent)',
+                            color: 'var(--text-primary, #d4d4d4)',
+                            border: '1px solid color-mix(in srgb, var(--border-color, #3e3e42) 70%, transparent)',
+                            borderRadius: 3,
+                            padding: '3px 6px',
+                            fontSize: 11,
+                            outline: 'none',
+                        }}
+                    />
+                    <div
+                        style={{
+                            fontSize: 9,
+                            color: 'var(--text-secondary, #9DA5B4)',
+                            paddingBottom: 2,
+                            borderBottom: '1px solid color-mix(in srgb, var(--border-color, #3e3e42) 50%, transparent)',
+                        }}
+                        title={listing.bin_path}
+                    >
+                        {filtered.length === listing.clips.length
+                            ? `${listing.clips.length} clip${listing.clips.length === 1 ? '' : 's'}`
+                            : `${filtered.length} of ${listing.clips.length}`}
+                    </div>
+                    <div style={{ overflowY: 'auto', maxHeight: 320 }}>
+                        {filtered.length === 0 && (
+                            <div
+                                style={{
+                                    padding: '6px 4px',
+                                    fontSize: 10,
+                                    color: 'var(--text-secondary, #9DA5B4)',
+                                    fontStyle: 'italic',
+                                }}
+                            >
+                                No matches.
+                            </div>
+                        )}
+                        {filtered.map((clip) => {
+                            const active = selected?.name === clip.name;
+                            const missing = !clip.anm_chunk_hash_hex && !clip.anm_disk_path;
+                            return (
+                                <button
+                                    key={clip.name}
+                                    type="button"
+                                    onClick={() => onSelect(clip)}
+                                    title={
+                                        missing
+                                            ? `${clip.anm_path}\n(file not found)`
+                                            : clip.anm_path
+                                    }
+                                    style={{
+                                        display: 'block',
+                                        width: '100%',
+                                        textAlign: 'left',
+                                        background: active
+                                            ? 'color-mix(in srgb, var(--accent-color, #2196f3) 60%, transparent)'
+                                            : 'transparent',
+                                        border: 'none',
+                                        color: missing
+                                            ? 'var(--text-muted, #6b6b6b)'
+                                            : active
+                                                ? 'var(--text-primary, #d4d4d4)'
+                                                : 'var(--text-primary, #d4d4d4)',
+                                        padding: '3px 4px',
+                                        borderRadius: 2,
+                                        cursor: 'pointer',
+                                        fontSize: 11,
+                                        whiteSpace: 'nowrap',
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis',
+                                    }}
+                                >
+                                    {clip.name}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
+// ─── Playback controls bar ──────────────────────────────────────────
+//
+// Sits at the bottom-left of the viewport whenever an animation is
+// loaded. Stays out of the way (auto-width, low-contrast background)
+// but exposes the four mediaplayer operations a user expects:
+//
+//   - Play / pause toggle
+//   - Scrub slider with elapsed/total time readout
+//   - Speed cycle (1× → 2× → 0.5× → 0.1× → 1×)
+//   - Unload (✕) which clears the clip and snaps back to T-pose
+//
+// State lives in the parent (so the rAF→React sync loop can update
+// `time` from the player); this is a presentation-only component.
+
+interface AnimationControlsBarProps {
+    name: string;
+    paused: boolean;
+    onTogglePaused: () => void;
+    /** Current playback time in seconds. */
+    time: number;
+    /** Total clip duration in seconds. */
+    duration: number;
+    /** Fired once when the user starts dragging the scrub thumb so
+     *  the parent can pause the rAF→React time sync — otherwise the
+     *  thumb jumps as we overwrite `time` each frame. */
+    onScrubStart: () => void;
+    onScrub: (time: number) => void;
+    onScrubEnd: () => void;
+    speed: number;
+    onCycleSpeed: () => void;
+    onUnload: () => void;
+}
+
+function AnimationControlsBar({
+    name,
+    paused,
+    onTogglePaused,
+    time,
+    duration,
+    onScrubStart,
+    onScrub,
+    onScrubEnd,
+    speed,
+    onCycleSpeed,
+    onUnload,
+}: AnimationControlsBarProps) {
+    return (
+        <div
+            style={{
+                position: 'absolute',
+                left: 8,
+                bottom: 8,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '6px 8px',
+                // Match the picker / submesh panel styling: same
+                // `--editor-bg` blend + `--border-color` outline so
+                // the controls inherit Milk Bag (or any other theme)
+                // without explicit overrides.
+                background: 'color-mix(in srgb, var(--editor-bg, #1e1e1e) 88%, transparent)',
+                border: '1px solid color-mix(in srgb, var(--border-color, #3e3e42) 70%, transparent)',
+                borderRadius: 4,
+                color: 'var(--text-primary, #d4d4d4)',
+                fontSize: 11,
+                width: 380,
+                boxSizing: 'border-box',
+            }}
+        >
+            <button
+                type="button"
+                onClick={onTogglePaused}
+                title={paused ? 'Play' : 'Pause'}
+                style={controlIconButtonStyle}
+            >
+                {paused ? '▶' : '⏸'}
+            </button>
+
+            <input
+                type="range"
+                min={0}
+                max={duration}
+                step={Math.max(duration / 1000, 0.001)}
+                value={Math.min(time, duration)}
+                onMouseDown={onScrubStart}
+                onTouchStart={onScrubStart}
+                onChange={(e) => onScrub(parseFloat(e.target.value))}
+                onMouseUp={onScrubEnd}
+                onTouchEnd={onScrubEnd}
+                style={{
+                    flex: 1,
+                    // `accent-color` tints the track + thumb in
+                    // theme-appropriate hue; fallback only kicks
+                    // in when the theme doesn't expose
+                    // `--accent-color`.
+                    accentColor: 'var(--accent-color, #2196f3)',
+                    cursor: 'pointer',
+                }}
+            />
+
+            <span
+                style={{
+                    fontVariantNumeric: 'tabular-nums',
+                    color: 'var(--text-secondary, #9DA5B4)',
+                    fontSize: 10,
+                    minWidth: 70,
+                    textAlign: 'right',
+                }}
+                title={name}
+            >
+                {formatClock(time)} / {formatClock(duration)}
+            </span>
+
+            <button
+                type="button"
+                onClick={onCycleSpeed}
+                title="Cycle playback speed"
+                style={{
+                    ...controlIconButtonStyle,
+                    width: 'auto',
+                    minWidth: 36,
+                    padding: '0 6px',
+                    fontVariantNumeric: 'tabular-nums',
+                }}
+            >
+                {formatSpeed(speed)}
+            </button>
+
+            <button
+                type="button"
+                onClick={onUnload}
+                title="Unload animation (back to T-pose)"
+                style={controlIconButtonStyle}
+            >
+                ✕
+            </button>
+        </div>
+    );
+}
+
+const controlIconButtonStyle: CSSProperties = {
+    width: 24,
+    height: 24,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'transparent',
+    border: '1px solid color-mix(in srgb, var(--border-color, #3e3e42) 70%, transparent)',
+    borderRadius: 3,
+    color: 'var(--text-primary, #d4d4d4)',
+    cursor: 'pointer',
+    fontSize: 11,
+    lineHeight: 1,
+    padding: 0,
+};
+
+/** Format seconds as `M:SS`. Hours not modeled — animation clips
+ *  are seconds-long and we'd rather avoid the visual width of `H:MM:SS`. */
+function formatClock(seconds: number): string {
+    if (!isFinite(seconds) || seconds < 0) return '0:00';
+    const totalSec = Math.floor(seconds);
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+/** Format a speed multiplier compactly. `0.5` → `0.5×`, `1` → `1×`. */
+function formatSpeed(speed: number): string {
+    return Number.isInteger(speed) ? `${speed}×` : `${speed}×`;
+}
+
 interface SettingsSectionProps {
     shadingMode: ShadingMode;
     onShadingChange: (m: ShadingMode) => void;
@@ -731,6 +1515,20 @@ interface SettingsSectionProps {
     /// `false` for disk-source previews — there's no mount to scan.
     guessAvailable: boolean;
     guessing: boolean;
+    /// `true` when a skeleton has been loaded (either standalone SKL
+    /// or sibling-of-SKN). When false, the skeleton toggle row is
+    /// suppressed entirely.
+    skeletonAvailable: boolean;
+    skeletonVisible: boolean;
+    onSkeletonToggle: (visible: boolean) => void;
+    skeletonStyle: SkeletonStyle;
+    onSkeletonStyleChange: (s: SkeletonStyle) => void;
+    skeletonXray: boolean;
+    onSkeletonXrayChange: (xray: boolean) => void;
+    /// `false` for SKL-only previews — there's no mesh to apply
+    /// shading/material settings to, so the mesh-side controls are
+    /// hidden and the panel collapses to just the skeleton toggle.
+    meshControlsAvailable: boolean;
 }
 
 function SettingsSection({
@@ -741,6 +1539,14 @@ function SettingsSection({
     onGuess,
     guessAvailable,
     guessing,
+    skeletonAvailable,
+    skeletonVisible,
+    onSkeletonToggle,
+    skeletonStyle,
+    onSkeletonStyleChange,
+    skeletonXray,
+    onSkeletonXrayChange,
+    meshControlsAvailable,
 }: SettingsSectionProps) {
     return (
         <div
@@ -753,40 +1559,107 @@ function SettingsSection({
                 gap: 6,
             }}
         >
-            <SegmentedToggle<ShadingMode>
-                label="Shading"
-                value={shadingMode}
-                onChange={onShadingChange}
-                options={[
-                    { value: 'flat', label: 'Flat' },
-                    { value: 'lit', label: 'Lit' },
-                ]}
-            />
-            <SegmentedToggle<MissingStyle>
-                label="Missing"
-                value={missingStyle}
-                onChange={onMissingStyleChange}
-                options={[
-                    { value: 'material-color', label: 'Color' },
-                    { value: 'pattern', label: 'Pattern' },
-                ]}
-            />
-            {guessAvailable && (
-                <button
-                    type="button"
-                    onClick={onGuess}
-                    disabled={guessing}
-                    style={{
-                        ...miniButtonStyle,
-                        padding: '4px 8px',
-                        fontSize: 11,
-                        cursor: guessing ? 'wait' : 'pointer',
-                        opacity: guessing ? 0.6 : 1,
-                    }}
-                    title="Scan the WAD for matching textures and apply them by name"
-                >
-                    {guessing ? 'Guessing…' : 'Guess textures'}
-                </button>
+            {meshControlsAvailable && (
+                <>
+                    <SegmentedToggle<ShadingMode>
+                        label="Shading"
+                        value={shadingMode}
+                        onChange={onShadingChange}
+                        options={[
+                            { value: 'flat', label: 'Flat' },
+                            { value: 'lit', label: 'Lit' },
+                        ]}
+                    />
+                    <SegmentedToggle<MissingStyle>
+                        label="Missing"
+                        value={missingStyle}
+                        onChange={onMissingStyleChange}
+                        options={[
+                            { value: 'material-color', label: 'Color' },
+                            { value: 'pattern', label: 'Pattern' },
+                        ]}
+                    />
+                    {guessAvailable && (
+                        <button
+                            type="button"
+                            onClick={onGuess}
+                            disabled={guessing}
+                            style={{
+                                ...miniButtonStyle,
+                                padding: '4px 8px',
+                                fontSize: 11,
+                                cursor: guessing ? 'wait' : 'pointer',
+                                opacity: guessing ? 0.6 : 1,
+                            }}
+                            title="Scan the WAD for matching textures and apply them by name"
+                        >
+                            {guessing ? 'Guessing…' : 'Guess textures'}
+                        </button>
+                    )}
+                </>
+            )}
+            {skeletonAvailable && (
+                <>
+                    <label
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            cursor: 'pointer',
+                            fontSize: 11,
+                        }}
+                        title={
+                            meshControlsAvailable
+                                ? 'Overlay the skeleton from the sibling .skl file'
+                                : 'Show the skeleton bone hierarchy'
+                        }
+                    >
+                        <input
+                            type="checkbox"
+                            checked={skeletonVisible}
+                            onChange={(e) => onSkeletonToggle(e.target.checked)}
+                            style={{ margin: 0, cursor: 'pointer' }}
+                        />
+                        <span>Skeleton</span>
+                    </label>
+                    {skeletonVisible && (
+                        <SegmentedToggle<SkeletonStyle>
+                            label="Style"
+                            value={skeletonStyle}
+                            onChange={onSkeletonStyleChange}
+                            options={[
+                                { value: 'joints', label: 'Joints' },
+                                { value: 'octahedrons', label: 'Bones' },
+                                { value: 'lines', label: 'Lines' },
+                            ]}
+                        />
+                    )}
+                    {/* X-ray only meaningful when there's a mesh to be
+                        occluded by — for standalone-SKL previews the
+                        skeleton always renders unobstructed and the
+                        toggle would be a no-op, so we hide it. */}
+                    {skeletonVisible && meshControlsAvailable && (
+                        <label
+                            style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 6,
+                                cursor: 'pointer',
+                                fontSize: 11,
+                                marginLeft: 18,
+                            }}
+                            title="Draw the skeleton on top of the mesh so it's never occluded"
+                        >
+                            <input
+                                type="checkbox"
+                                checked={skeletonXray}
+                                onChange={(e) => onSkeletonXrayChange(e.target.checked)}
+                                style={{ margin: 0, cursor: 'pointer' }}
+                            />
+                            <span>X-ray</span>
+                        </label>
+                    )}
+                </>
             )}
         </div>
     );
@@ -881,7 +1754,7 @@ interface StaticMeshDTO {
     bbox: [[number, number, number], [number, number, number]];
 }
 
-type MeshFormat = 'skn' | 'scb' | 'sco';
+type MeshFormat = 'skn' | 'scb' | 'sco' | 'skl';
 
 function detectFormat(
     source: { kind: 'disk'; path: string } | { kind: 'wad'; mountId: number; pathHashHex: string },
@@ -890,7 +1763,195 @@ function detectFormat(
     const name = (source.kind === 'disk' ? source.path : label || '').toLowerCase();
     if (name.endsWith('.scb')) return 'scb';
     if (name.endsWith('.sco')) return 'sco';
+    if (name.endsWith('.skl')) return 'skl';
     return 'skn'; // default — covers all "no extension visible" cases too
+}
+
+/// Build all three render styles (lines, octahedrons, joint markers)
+/// from one SKL DTO and return refs to each mesh. Meshes are
+/// *disabled* on return — the visibility/style `useEffect` in
+/// MeshPreview is responsible for enabling exactly the right
+/// combination on the next React commit. Returns `null` when the
+/// skeleton has no joints (or every bone is degenerate); caller
+/// decides what to do with that.
+function buildAllSkeletonStyles(
+    skl: SklSkeletonDTO,
+    scene: Scene,
+    options?: { color?: Color3; nameSuffix?: string },
+): {
+    lines: LinesMesh;
+    octa: Mesh;
+    joints: Mesh;
+    shiftTargets: { position: { y: number } }[];
+    bbox: { min: [number, number, number]; max: [number, number, number] };
+} | null {
+    const suffix = options?.nameSuffix ? `-${options.nameSuffix}` : '';
+    const linesBuilt = buildSkeletonLines(skl, scene, {
+        color: options?.color,
+        name: `skeleton-lines${suffix}`,
+    });
+    const octaBuilt = buildSkeletonOctahedrons(skl, scene, {
+        color: options?.color,
+        name: `skeleton-octa${suffix}`,
+    });
+    const jointsBuilt = buildSkeletonJoints(skl, scene, {
+        color: options?.color,
+        name: `skeleton-joints${suffix}`,
+    });
+    if (!linesBuilt || !octaBuilt || !jointsBuilt) {
+        // Cleanup partial build before bailing — Babylon would leak
+        // any half-built mesh into the scene otherwise.
+        linesBuilt?.lines.dispose();
+        octaBuilt?.mesh.dispose();
+        jointsBuilt?.mesh.dispose();
+        return null;
+    }
+    linesBuilt.lines.setEnabled(false);
+    octaBuilt.mesh.setEnabled(false);
+    jointsBuilt.mesh.setEnabled(false);
+    // All three variants cover the same joint cloud, so any bbox
+    // works for camera framing. Use the lines variant — it computes
+    // bounds from the raw joint positions while the octa/joints
+    // versions include the ring radius / sphere radius offsets,
+    // which would shift the framed center slightly.
+    return {
+        lines: linesBuilt.lines,
+        octa: octaBuilt.mesh,
+        joints: jointsBuilt.mesh,
+        shiftTargets: [linesBuilt.lines, octaBuilt.mesh, jointsBuilt.mesh],
+        bbox: linesBuilt.bbox,
+    };
+}
+
+async function loadSkeletonDto(
+    source: { kind: 'disk'; path: string } | { kind: 'wad'; mountId: number; pathHashHex: string },
+): Promise<SklSkeletonDTO> {
+    if (source.kind === 'disk') {
+        return invoke<SklSkeletonDTO>('read_skl_skeleton', { path: source.path });
+    }
+    return invoke<SklSkeletonDTO>('wad_read_skl_skeleton', {
+        id: source.mountId,
+        pathHashHex: source.pathHashHex,
+    });
+}
+
+/// Try to load the SKL that lives next to the given SKN. Failure is
+/// silent — many SKNs don't ship with a sibling skeleton (e.g. ward
+/// meshes, decorations) and we don't want a 404 to spam the console.
+///
+/// Disk source: derive the path by swapping the extension. WAD source:
+/// ask the backend to do the path lookup + xxh64 hash check (it's the
+/// only side with the resolved-name table for the mount).
+///
+/// On success, attaches the LinesMesh to `skeletonRef` (hidden) and
+/// flips `skeletonAvailable` so the toggle shows up in the panel.
+/// Just the fetch — looks up + loads the sibling SKL DTO without
+/// touching the scene. Returns `null` for any miss (no sibling, parse
+/// error, etc.) so the caller can branch on whether skinning + the
+/// skeleton overlays should be set up.
+async function fetchSiblingSkeletonDto(
+    source: { kind: 'disk'; path: string } | { kind: 'wad'; mountId: number; pathHashHex: string },
+): Promise<SklSkeletonDTO | null> {
+    try {
+        if (source.kind === 'wad') {
+            const sklHash = await invoke<string | null>('wad_find_sibling_skl', {
+                id: source.mountId,
+                sknPathHashHex: source.pathHashHex,
+            });
+            if (!sklHash) return null;
+            return await invoke<SklSkeletonDTO>('wad_read_skl_skeleton', {
+                id: source.mountId,
+                pathHashHex: sklHash,
+            });
+        }
+        // Disk: swap the SKN's extension for `.skl`. Best-effort —
+        // we swallow the read error from missing/unparseable files
+        // (most SCB/SCO source folders won't have a sibling SKL).
+        const sklPath = source.path.replace(/\.[^./\\]+$/i, '.skl');
+        try {
+            return await invoke<SklSkeletonDTO>('read_skl_skeleton', { path: sklPath });
+        } catch {
+            return null;
+        }
+    } catch (e) {
+        console.warn('[MeshPreview] sibling skeleton fetch failed:', e);
+        return null;
+    }
+}
+
+/// Build the visualization meshes (lines / octa / joints) from a
+/// pre-fetched SKL DTO and slot them into the per-style refs. Pulled
+/// out of `fetchAndBuild` so the SKN/SCB/SCO paths can call it after
+/// they've decided whether they need sibling skeleton overlays.
+function applySiblingSkeletonVisuals(
+    dto: SklSkeletonDTO,
+    scene: Scene,
+    linesRef: React.MutableRefObject<LinesMesh | null>,
+    octaRef: React.MutableRefObject<Mesh | null>,
+    jointsRef: React.MutableRefObject<Mesh | null>,
+    setAvailable: (v: boolean) => void,
+    yShift: number,
+): void {
+    const built = buildAllSkeletonStyles(dto, scene, {
+        // Warm gold for the SKN-overlay variant — visually
+        // distinguishes it from the standalone-SKL preview's cool
+        // cyan in case both are open in different panels.
+        color: new Color3(1.0, 0.82, 0.45),
+        nameSuffix: 'sibling',
+    });
+    if (!built) return;
+    if (yShift !== 0) {
+        for (const t of built.shiftTargets) t.position.y = yShift;
+    }
+    // All meshes left disabled — the visibility useEffect honours
+    // the user-controlled toggle (default: hidden for sibling
+    // overlays so the user opts in explicitly).
+    linesRef.current = built.lines;
+    octaRef.current = built.octa;
+    jointsRef.current = built.joints;
+    setAvailable(true);
+}
+
+/// Frame the orbit camera around an AABB and lift its targets so the
+/// model's lowest point sits on the ground grid. Shared between the
+/// SKN/SCB/SCO path (where `targets` is `built.meshes`) and the SKL
+/// standalone path (where it's `[built.lines]`). Pulled out so both
+/// paths get identical camera angles, radius weighting, and y-shift
+/// without diverging.
+function frameCamera(
+    camera: ArcRotateCamera,
+    target: { position: { y: number } } | { position: { y: number } }[],
+    min: [number, number, number],
+    max: [number, number, number],
+): void {
+    const finite = (n: number) => (Number.isFinite(n) ? n : 0);
+    const minX = finite(min[0]), minY = finite(min[1]), minZ = finite(min[2]);
+    const maxX = finite(max[0]), maxY = finite(max[1]), maxZ = finite(max[2]);
+    const sizeX = maxX - minX;
+    const sizeY = maxY - minY;
+    const sizeZ = maxZ - minZ;
+
+    const yShift = minY < 0 ? -minY : 0;
+    if (yShift !== 0) {
+        const arr = Array.isArray(target) ? target : [target];
+        for (const t of arr) t.position.y = yShift;
+    }
+
+    const center = new Vector3(
+        (minX + maxX) / 2,
+        (minY + maxY) / 2 + yShift,
+        (minZ + maxZ) / 2,
+    );
+    // Same Y-weighted framing as the SKN inline path — see comment
+    // there for why Y gets a 1.4× multiplier vs X/Z.
+    const radius = Math.max(sizeY * 1.4, sizeX, sizeZ) || 5;
+
+    camera.setTarget(center);
+    camera.alpha = Math.PI / 2 + Math.PI / 8;
+    camera.beta = Math.PI / 2 - Math.PI / 8;
+    camera.radius = radius;
+    camera.lowerRadiusLimit = radius * 0.1;
+    camera.upperRadiusLimit = radius * 8;
 }
 
 async function loadMeshAsSknDto(
@@ -957,13 +2018,40 @@ async function loadTextureFromHash(
     chunkHashHex: string,
     scene: Scene,
 ): Promise<{ tex: RawTexture; hasAlpha: boolean } | null> {
+    return loadTextureBlob(
+        () =>
+            invoke<ArrayBuffer>('wad_decode_texture', {
+                id: mountId,
+                pathHashHex: chunkHashHex,
+            }),
+        chunkHashHex,
+        scene,
+    );
+}
+
+async function loadTextureFromDisk(
+    diskPath: string,
+    scene: Scene,
+): Promise<{ tex: RawTexture; hasAlpha: boolean } | null> {
+    return loadTextureBlob(
+        () => invoke<ArrayBuffer>('decode_texture_disk', { path: diskPath }),
+        diskPath,
+        scene,
+    );
+}
+
+/// Shared decoded-blob → Babylon RawTexture path. The `fetcher`
+/// closure abstracts WAD vs disk source; everything downstream
+/// (header parse, RGBA upload, address mode) is identical.
+async function loadTextureBlob(
+    fetcher: () => Promise<ArrayBuffer>,
+    label: string,
+    scene: Scene,
+): Promise<{ tex: RawTexture; hasAlpha: boolean } | null> {
     try {
-        const buf = await invoke<ArrayBuffer>('wad_decode_texture', {
-            id: mountId,
-            pathHashHex: chunkHashHex,
-        });
+        const buf = await fetcher();
         if (buf.byteLength < TEX_HEADER_LEN) {
-            console.warn(`[MeshPreview] short payload for ${chunkHashHex}: ${buf.byteLength} bytes`);
+            console.warn(`[MeshPreview] short payload for ${label}: ${buf.byteLength} bytes`);
             return null;
         }
         const header = new DataView(buf, 0, TEX_HEADER_LEN);
@@ -986,7 +2074,7 @@ async function loadTextureFromHash(
         tex.hasAlpha = hasAlpha;
         return { tex, hasAlpha };
     } catch (e) {
-        console.warn(`[MeshPreview] texture fetch failed for ${chunkHashHex}:`, e);
+        console.warn(`[MeshPreview] texture fetch failed for ${label}:`, e);
         return null;
     }
 }
@@ -1097,16 +2185,59 @@ function buildPlaceholderTexture(scene: Scene): RawTexture {
 // texture (also pre-resolved server-side).
 // ─────────────────────────────────────────────────────────────────────
 
+interface AnimationClip {
+    name: string;
+    anm_path: string;
+    anm_chunk_hash_hex: string | null;
+    /** Set when the SKN was loaded from disk and the ANM file exists
+     *  on disk under the same root. Either this OR `anm_chunk_hash_hex`
+     *  is populated, never both. */
+    anm_disk_path?: string | null;
+}
+interface AnimationListing {
+    bin_path: string;
+    bin_path_hash_hex: string;
+    clips: AnimationClip[];
+}
+
+/// Fire the appropriate animations command (WAD or disk variant) and
+/// pipe the result into the component state. Failure is non-fatal —
+/// "no animations available" is a valid state we just surface
+/// silently.
+async function loadAnimations(
+    source: { kind: 'disk'; path: string } | { kind: 'wad'; mountId: number; pathHashHex: string },
+    isCancelled: () => boolean,
+    setAnimations: (a: AnimationListing | null) => void,
+): Promise<void> {
+    try {
+        const listing = source.kind === 'wad'
+            ? await invoke<AnimationListing | null>('wad_read_skn_animations', {
+                  id: source.mountId,
+                  pathHashHex: source.pathHashHex,
+              })
+            : await invoke<AnimationListing | null>('read_skn_animations_disk_cmd', {
+                  sknPath: source.path,
+              });
+        if (isCancelled()) return;
+        setAnimations(listing);
+    } catch (e) {
+        console.warn('[MeshPreview] animations lookup failed:', e);
+    }
+}
+
 interface TextureBinding {
     material: string;
     texture_path: string;
     chunk_hash_hex: string | null;
+    /** Disk path; populated by the disk-source variants. */
+    texture_disk_path?: string | null;
 }
 interface SknTextureBindings {
     bin_path: string;
     bin_path_hash_hex: string;
     default_texture: string | null;
     default_chunk_hash_hex: string | null;
+    default_texture_disk_path?: string | null;
     bindings: TextureBinding[];
 }
 
@@ -1254,6 +2385,82 @@ async function applyTextures(
             `decode(slowest)=${totalsRef.decode.toFixed(0)}ms, ` +
             `upload(total)=${totalsRef.upload.toFixed(0)}ms, ` +
             `total=${(tEnd - tStart).toFixed(0)}ms`,
+    );
+}
+
+/// Disk-source counterpart of `applyTextures`. Same per-submesh
+/// matching cascade; the only difference is each binding carries a
+/// disk path (instead of a chunk hash) and we decode through
+/// `decode_texture_disk`. Uses the disk path string as the cache
+/// key — disk paths are unique within a process so collisions with
+/// any WAD chunk-hash entries already in the cache aren't possible.
+async function applyTexturesDisk(
+    sknDiskPath: string,
+    skn: SknDTO,
+    slots: SubmeshSlot[],
+    loadedTextures: Map<string, { tex: RawTexture; hasAlpha: boolean }>,
+    scene: Scene,
+    isCancelled: () => boolean,
+    refresh: () => void,
+): Promise<void> {
+    const tStart = performance.now();
+
+    let map: SknTextureBindings | null;
+    try {
+        map = await invoke<SknTextureBindings | null>('read_skn_textures_disk', {
+            sknPath: sknDiskPath,
+        });
+    } catch (e) {
+        console.warn('[MeshPreview] disk texture map fetch failed:', e);
+        return;
+    }
+    if (isCancelled() || !map) return;
+    const tBin = performance.now();
+    console.log(
+        `[MeshPreview] disk BIN: ${map.bin_path} | default: ${map.default_texture ?? '(none)'} | bindings: ${map.bindings.length}`,
+    );
+
+    const bindingByName = new Map<string, TextureBinding>();
+    for (const b of map.bindings) {
+        bindingByName.set(b.material.toLowerCase(), b);
+    }
+
+    const indicesByPath = new Map<string, number[]>();
+    for (let i = 0; i < skn.submeshes.length; i++) {
+        const name = skn.submeshes[i].name.toLowerCase();
+        const b = bindingByName.get(name);
+        const path = b?.texture_disk_path ?? map.default_texture_disk_path;
+        if (!path) continue;
+        const slot = slots[i];
+        // Reuse `chunkHash` field as a generic texture key —
+        // semantically it's the cache lookup id, here populated with
+        // a disk path. Avoids forking the SubmeshSlot shape.
+        if (slot) slot.chunkHash = path;
+        const list = indicesByPath.get(path) ?? [];
+        list.push(i);
+        indicesByPath.set(path, list);
+    }
+
+    if (indicesByPath.size === 0) {
+        console.warn('[MeshPreview] no resolvable disk textures for any submesh');
+        return;
+    }
+
+    let appliedCount = 0;
+    const work = Array.from(indicesByPath.entries()).map(async ([path, indices]) => {
+        const decoded = await loadTextureFromDisk(path, scene);
+        if (isCancelled() || !decoded) return;
+        loadedTextures.set(path, decoded);
+        refresh();
+        appliedCount += indices.length;
+    });
+
+    await Promise.allSettled(work);
+
+    const tEnd = performance.now();
+    console.log(
+        `[MeshPreview] disk ${appliedCount}/${indicesByPath.size} texture(s) applied: ` +
+            `bin=${(tBin - tStart).toFixed(0)}ms, total=${(tEnd - tStart).toFixed(0)}ms`,
     );
 }
 

@@ -94,6 +94,38 @@ pub struct SkinTextureMap {
 
 // ── End-to-end command path ─────────────────────────────────────────
 
+/// Disk-source variant — given an SKN file path, find its sibling
+/// skin BIN, parse it, and return the same texture map shape the WAD
+/// path produces. Returns `Ok(None)` for any structural miss (no
+/// skin BIN found, parse error). The texture paths in the result
+/// are still BIN-string format (`ASSETS/...`); a separate per-clip
+/// resolver maps them to disk paths.
+pub fn read_skin_textures_for_skn_disk(
+    skn_disk_path: &str,
+) -> Result<Option<SkinTextureMap>, String> {
+    use super::skin_bin::find_skin_bin_disk;
+
+    let skin_bin_path = match find_skin_bin_disk(skn_disk_path) {
+        Some(p) => p,
+        None => return Ok(None),
+    };
+    let bytes = std::fs::read(&skin_bin_path)
+        .map_err(|e| format!("read skin bin '{}': {}", skin_bin_path, e))?;
+    let tree = read_bin_ltk(&bytes).map_err(|e| format!("parse skin bin: {e}"))?;
+    let (default_texture, materials) = extract_textures_from_tree(&tree);
+
+    Ok(Some(SkinTextureMap {
+        bin_path: skin_bin_path.replace('\\', "/").to_lowercase(),
+        // Disk source has no xxh64 chunk hash — fill with zeros so
+        // the field stays serializable and frontend code that
+        // doesn't care about it (the disk path is what's used)
+        // doesn't have to special-case Optional vs Required.
+        bin_path_hash_hex: format!("{:016x}", 0u64),
+        default_texture,
+        materials,
+    }))
+}
+
 pub fn read_skin_textures_for_skn(
     mount_id: u64,
     skn_path_hash: u64,

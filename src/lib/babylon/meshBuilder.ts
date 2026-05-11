@@ -28,6 +28,7 @@
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
 import type { Scene } from '@babylonjs/core/scene';
+import type { Skeleton } from '@babylonjs/core/Bones/skeleton';
 
 export interface SknDTO {
     major: number;
@@ -62,11 +63,33 @@ export interface BuiltMesh {
 
 /**
  * Build per-submesh Babylon meshes from an SKN DTO. Geometry only —
- * no materials, no skeleton attached. Caller is responsible for both
- * (and for disposing the meshes when the preview unmounts).
+ * no materials. The optional `skeleton` parameter wires bone
+ * influences into the mesh's vertex buffers so Babylon's skinning
+ * shader picks them up; callers building static SKN previews can
+ * skip it. Caller still owns disposal on unmount.
+ *
+ * Skinning wiring details:
+ *   - Sets `mesh.numBoneInfluencers = 4` (League SKN always has 4
+ *     bone slots per vertex).
+ *   - Maps each vertex's `bone_indices` (which point into the SKL's
+ *     `influences` table) through that table to actual bone IDs;
+ *     the GPU shader uses bone ID directly to index Babylon's bone
+ *     matrix array.
+ *   - Falls back to bone 0 (and weight=0) for any out-of-range
+ *     influence index, so a malformed influences list can't crash
+ *     the shader.
  */
-export function buildSknMeshes(skn: SknDTO, scene: Scene): BuiltMesh {
+export function buildSknMeshes(
+    skn: SknDTO,
+    scene: Scene,
+    skeleton?: Skeleton,
+    influences?: number[],
+): BuiltMesh {
     const meshes: Mesh[] = [];
+    const hasSkin =
+        !!skeleton &&
+        skn.bone_indices.length === skn.positions.length / 3 * 4 &&
+        skn.bone_weights.length === skn.bone_indices.length;
 
     for (let s = 0; s < skn.submeshes.length; s++) {
         const sm = skn.submeshes[s];
@@ -122,8 +145,39 @@ export function buildSknMeshes(skn: SknDTO, scene: Scene): BuiltMesh {
         vd.normals = normals;
         vd.uvs = uvs;
 
+        // Skinning data — slice the same submesh range out of the
+        // SKN's flat bone_indices / bone_weights arrays. SKN bone
+        // indices reference the SKL's `influences` table; the
+        // shader wants actual bone IDs, so map through it now.
+        if (hasSkin) {
+            const matrixIndices: number[] = new Array(vCount * 4);
+            const matrixWeights: number[] = new Array(vCount * 4);
+            const influenceTable = influences ?? [];
+            for (let i = 0; i < vCount * 4; i++) {
+                const sknIdx = skn.bone_indices[vStart * 4 + i];
+                // Empty SKL influences (some custom SKLs ship none)
+                // fall through to identity mapping; the SKN's index
+                // already references a bone slot directly in that
+                // case.
+                const boneId =
+                    influenceTable.length > sknIdx
+                        ? influenceTable[sknIdx]
+                        : sknIdx;
+                matrixIndices[i] = boneId;
+                matrixWeights[i] = skn.bone_weights[vStart * 4 + i];
+            }
+            vd.matricesIndices = matrixIndices;
+            vd.matricesWeights = matrixWeights;
+        }
+
         const mesh = new Mesh(sm.name || `submesh_${s}`, scene);
         vd.applyToMesh(mesh);
+
+        if (hasSkin) {
+            mesh.skeleton = skeleton!;
+            // 4 weights per vertex matches the SKN file format.
+            mesh.numBoneInfluencers = 4;
+        }
         // DOUBLESIDE makes Babylon do a proper two-pass render of
         // each face (back pass then front pass) with the depth
         // buffer interleaved, which sorts transparent pixels far

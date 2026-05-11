@@ -875,9 +875,14 @@ function checkSemanticWarnings(lines: string[]): SyntaxError[] {
   //    - Same (submesh, texture) pair appearing twice (literal copy-paste)
   //    - Any submesh with more than one override entry (conflicting assignment)
   if (smpStart !== -1 && smpEnd !== -1) {
-    const texRe = /texture\s*:\s*string\s*=\s*"([^"]+)"/;
-    const materialRe = /material\s*:\s*link\s*=\s*"([^"]+)"/;
-    const submeshRe = /submesh\s*:\s*string\s*=\s*"([^"]+)"/;
+    // Case-insensitive: Riot's BIN field-name capitalization is
+    // inconsistent — `Submesh` is capitalized in older skin BINs while
+    // `texture` / `material` are lowercase. Without the `i` flag the
+    // duplicate-submesh detector silently misses every entry with a
+    // capital `S`, which is the whole reason this pass exists.
+    const texRe = /texture\s*:\s*string\s*=\s*"([^"]+)"/i;
+    const materialRe = /material\s*:\s*link\s*=\s*"([^"]+)"/i;
+    const submeshRe = /submesh\s*:\s*string\s*=\s*"([^"]+)"/i;
 
     interface OvInfo {
       submesh: string;
@@ -991,88 +996,16 @@ function checkSemanticWarnings(lines: string[]): SyntaxError[] {
     }
   }
 
-  // 6. Duplicate Diffuse_Texture paths across StaticMaterialDef blocks.
-  //    Two different materials sharing the same diffuse texture is usually
-  //    a copy-paste mistake — the user likely forgot to update the path.
-  {
-    const entryStart = /^\s*("([^"]+)"|0x[0-9a-fA-F]+)\s*=\s*StaticMaterialDef\s*\{/;
-    let currentMat = '';
-    let depth = 0;
-    let inside = false;
-    let inSampler = false;
-    let samplerDepth = 0;
-    let currentSamplerName = '';
-    // materialName → { texturePath, line }
-    const diffuseByMat = new Map<string, { path: string; line: number }>();
-    // texturePath → first materialName
-    const diffuseByPath = new Map<string, string>();
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      if (!inside) {
-        const m = entryStart.exec(line);
-        if (m) {
-          currentMat = m[2] ?? m[1];
-          inside = true;
-          depth = 0;
-          inSampler = false;
-          currentSamplerName = '';
-        }
-      }
-      if (!inside) continue;
-
-      for (const ch of line) {
-        if (ch === '{') depth++;
-        else if (ch === '}') depth--;
-      }
-
-      // Track sampler blocks
-      if (/StaticMaterialShaderSamplerDef\s*\{/.test(line)) {
-        inSampler = true;
-        samplerDepth = 0;
-        currentSamplerName = '';
-        for (const ch of line) {
-          if (ch === '{') samplerDepth++;
-          else if (ch === '}') samplerDepth--;
-        }
-      } else if (inSampler) {
-        for (const ch of line) {
-          if (ch === '{') samplerDepth++;
-          else if (ch === '}') samplerDepth--;
-        }
-        const nameMatch = /TextureName\s*:\s*string\s*=\s*"([^"]+)"/.exec(line);
-        if (nameMatch) currentSamplerName = nameMatch[1];
-
-        if (currentSamplerName === 'Diffuse_Texture') {
-          const tpMatch = /texturePath\s*:\s*string\s*=\s*"([^"]+)"/.exec(line);
-          if (tpMatch) {
-            const tp = tpMatch[1].toLowerCase();
-            diffuseByMat.set(currentMat, { path: tp, line: i + 1 });
-            const firstMat = diffuseByPath.get(tp);
-            if (firstMat && firstMat !== currentMat) {
-              const col = line.indexOf(tpMatch[1]);
-              warnings.push({
-                line: i + 1,
-                column: col + 1,
-                length: tpMatch[1].length,
-                message: `Duplicate Diffuse_Texture — same path used by material "${firstMat}"`,
-                severity: 'warning',
-              });
-            } else if (!firstMat) {
-              diffuseByPath.set(tp, currentMat);
-            }
-          }
-        }
-
-        if (samplerDepth <= 0) {
-          inSampler = false;
-          currentSamplerName = '';
-        }
-      }
-
-      if (depth <= 0) inside = false;
-    }
-  }
+  // 6. (Removed) Duplicate Diffuse_Texture paths across StaticMaterialDef.
+  //
+  // Used to flag any two StaticMaterialDef sharing a Diffuse_Texture
+  // path. False-positived on the common legitimate pattern of one
+  // texture being reused across materials that target *different*
+  // submeshes — modders ship this routinely (e.g. one custom toon-
+  // shader material for Body sharing the body diffuse with the rest
+  // of the mesh that uses the raw texture). The duplicate-submesh-
+  // in-materialOverride pass (#5 above) catches the real "same
+  // submesh wired twice" case the user actually wants flagged.
 
   // 7. Top-level raw texture + materialOverride coexistence check.
   //    When skinMeshProperties has BOTH a top-level `texture: string`
@@ -1291,28 +1224,22 @@ function findTextureOverrideConflicts(lines: string[]): SyntaxError[] {
     }
 
     if (propsDepth <= 0) {
-      // Only warn when the raw texture path actually overlaps with a
-      // linked material's textures. Different textures = intentional.
-      if (rawTextureLine && rawTexturePath && overrideLinks.length > 0) {
-        for (const link of overrideLinks) {
-          const matTextures = materialTextures.get(link.materialName);
-          if (matTextures && matTextures.has(rawTexturePath)) {
-            out.push({
-              line: rawTextureLine.line,
-              column: rawTextureLine.column,
-              length: rawTextureLine.length,
-              message: `Raw texture duplicates a texture in material "${link.materialName}" — override may be ignored`,
-              severity: 'warning',
-            });
-            out.push({
-              line: link.line,
-              column: link.column,
-              length: link.length,
-              message: `Material override uses the same texture as the raw texture field`,
-              severity: 'warning',
-            });
-          }
-        }
+      // (DISABLED) Raw-texture-vs-linked-material overlap warning.
+      //
+      // Used to fire when the raw `texture` field and any linked
+      // StaticMaterialDef's Diffuse_Texture pointed at the same file
+      // path. The warning claimed the override "may be ignored", but
+      // League's pipeline actually lets per-submesh overrides win
+      // regardless. The cross-check produced false positives in the
+      // common case of a skin that uses the same diffuse for both
+      // the un-overridden submeshes and one explicitly-routed submesh
+      // through a custom material (e.g. toon-shading on Body sharing
+      // the body texture with the rest of the mesh). The duplicate-
+      // submesh check (pass 5) handles the real "wired twice" case.
+      // Block kept as a hook so we can scope it more carefully later
+      // without re-writing the materialTextures collector below.
+      if (false && rawTextureLine && rawTexturePath && overrideLinks.length > 0) {
+        // intentionally empty — see note above
       }
       inProps = false;
       propsDepth = 0;

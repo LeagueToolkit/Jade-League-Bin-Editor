@@ -68,6 +68,143 @@ pub fn find_skin_bin(mount_id: u64, skn_path_hash: u64) -> Option<SkinBinMatch> 
     .flatten()
 }
 
+/// Disk-source layout extracted from an SKN path.
+///
+/// `root` is everything *before* the `assets/` segment, including the
+/// trailing slash (e.g. `C:/extracted/MyMod/`).
+///
+/// `wad_subfolder` is the intermediate path between `assets/` and
+/// `characters/` — empty for canonical mods, populated for "re-pathed"
+/// mods where the contents of a WAD live under a named subfolder of
+/// `assets/` (e.g. `assets/Sett.wad/characters/...`). The same
+/// subfolder mirrors under `data/`, so we have to inject it when
+/// reconstructing BIN / ANM / texture paths.
+#[derive(Debug, Clone)]
+pub struct DiskLayout {
+    pub root: String,
+    pub wad_subfolder: String,
+}
+
+/// Compute the [`DiskLayout`] for an SKN path. Returns `None` only when
+/// the path doesn't contain an `assets/` segment — without that anchor
+/// we can't infer where the data tree lives. If `characters/` doesn't
+/// appear under `assets/`, `wad_subfolder` is empty (we treat the SKN
+/// as canonical-but-non-champion rather than refusing it).
+pub fn disk_layout_for_skn(skn_disk_path: &str) -> Option<DiskLayout> {
+    let normalized = skn_disk_path.replace('\\', "/");
+    let lower = normalized.to_lowercase();
+
+    let assets_idx = if let Some(idx) = lower.find("/assets/") {
+        idx + 1
+    } else if lower.starts_with("assets/") {
+        0
+    } else {
+        return None;
+    };
+
+    let root = normalized[..assets_idx].to_string();
+    let after_assets_idx = assets_idx + "assets/".len();
+    if after_assets_idx > normalized.len() {
+        return Some(DiskLayout { root, wad_subfolder: String::new() });
+    }
+
+    // Look for the `characters/` segment in what comes after `assets/`.
+    // Anything between the two segments is the wad-subfolder injection.
+    // Mods often re-path the entire contents of a WAD into a folder
+    // named after the source WAD ("Sett.wad/", "MyMod/", whatever); the
+    // SKN, BIN, animations, and textures all live under that same
+    // subfolder so we only have to capture it once here and pass it
+    // through.
+    let after_assets_lower = &lower[after_assets_idx..];
+    let chars_idx = match after_assets_lower.find("characters/") {
+        Some(i) => i,
+        None => {
+            return Some(DiskLayout { root, wad_subfolder: String::new() });
+        }
+    };
+    let wad_subfolder = normalized[after_assets_idx..after_assets_idx + chars_idx].to_string();
+
+    Some(DiskLayout { root, wad_subfolder })
+}
+
+/// Same as [`find_skin_bin`] but for disk-source previews. Walks up
+/// from the SKN path until it finds an `assets/` segment, then tries
+/// both `data/<wad_subfolder>/...` and plain `data/...` to construct
+/// the canonical skin-BIN candidate. Returns the absolute disk path
+/// of the first existing BIN.
+///
+/// Why try both: re-paths can be *asymmetric*. A mod can repath only
+/// `assets/` (e.g. `assets/4c4b59aa/characters/...`) while keeping
+/// `data/` at the canonical layout (`data/characters/...`). The
+/// reverse also exists. We don't know which side carries the
+/// subfolder until we look, so we probe both.
+pub fn find_skin_bin_disk(skn_disk_path: &str) -> Option<String> {
+    let layout = disk_layout_for_skn(skn_disk_path)?;
+    // Normalise to forward slashes for the candidate generator —
+    // it splits on both, but the join we do below assumes one.
+    let normalized = skn_disk_path.replace('\\', "/").to_lowercase();
+
+    // Reuse the canonical-BIN candidate logic — same skin/champ
+    // extraction the WAD path goes through.
+    let candidates = candidate_skin_bin_paths(&normalized);
+    for candidate in candidates {
+        for variant in data_path_variants(&candidate, &layout) {
+            if std::path::Path::new(&variant).is_file() {
+                return Some(variant);
+            }
+        }
+    }
+    None
+}
+
+/// Build absolute-path candidates for a `data/`-rooted relative path.
+/// Tries the `wad_subfolder`-injected form first, then the plain form
+/// — order matters only when both files exist (preferred = the one
+/// that matches the SKN's own subtree).
+pub fn data_path_variants(rel: &str, layout: &DiskLayout) -> Vec<String> {
+    let mut out = Vec::with_capacity(2);
+    let injected = rejoin_under_data(rel, &layout.wad_subfolder);
+    out.push(format!("{}{}", layout.root, injected));
+    // If subfolder is empty, `injected == rel` and the plain push is
+    // redundant — skip it to keep the candidate list dedup'd.
+    if !layout.wad_subfolder.is_empty() {
+        out.push(format!("{}{}", layout.root, rel));
+    }
+    out
+}
+
+/// Build absolute-path candidates for a BIN-string `assets/`-rooted
+/// relative path (the leading `assets/` already stripped by the caller).
+/// Tries `<root>assets/<wad_subfolder><rel>` first, then
+/// `<root>assets/<rel>` as a fallback. Asymmetric repaths can have
+/// `assets/` carry the subfolder but BIN strings reference the
+/// canonical path — or vice versa.
+pub fn assets_path_variants(rel: &str, layout: &DiskLayout) -> Vec<String> {
+    let mut out = Vec::with_capacity(2);
+    out.push(format!(
+        "{}assets/{}{}",
+        layout.root, layout.wad_subfolder, rel
+    ));
+    if !layout.wad_subfolder.is_empty() {
+        out.push(format!("{}assets/{}", layout.root, rel));
+    }
+    out
+}
+
+/// Inject `wad_subfolder` after the `data/` prefix of a canonical
+/// relative path. `data/characters/x/y` + `Sett.wad/` →
+/// `data/Sett.wad/characters/x/y`. Empty subfolder is a no-op.
+pub fn rejoin_under_data(rel: &str, wad_subfolder: &str) -> String {
+    if wad_subfolder.is_empty() {
+        return rel.to_string();
+    }
+    if let Some(rest) = rel.strip_prefix("data/") {
+        format!("data/{}{}", wad_subfolder, rest)
+    } else {
+        rel.to_string()
+    }
+}
+
 /// Generate every `data/characters/{champion}/skins/{skin}.bin` candidate
 /// for a given SKN path. Multiple variants because Riot is inconsistent
 /// — sometimes the mesh sits under `assets/`, sometimes `data/`,
@@ -234,4 +371,107 @@ mod tests {
         let cand = candidate_skin_bin_paths("data/characters/lux/skins/skin11/lux.skn");
         assert_eq!(cand, vec!["data/characters/lux/skins/skin11.bin".to_string()]);
     }
+
+    /// Canonical layout: `assets/` directly contains `characters/`.
+    /// `wad_subfolder` must be empty so existing mods keep working.
+    #[test]
+    fn disk_layout_canonical_has_empty_subfolder() {
+        let layout = disk_layout_for_skn(
+            "C:/extracted/MyMod/assets/characters/sett/skins/skin0/sett.skn",
+        )
+        .expect("layout");
+        assert_eq!(layout.root, "C:/extracted/MyMod/");
+        assert_eq!(layout.wad_subfolder, "");
+    }
+
+    /// Re-pathed mod: the contents of a WAD are placed under a named
+    /// subfolder of `assets/` (and the matching `data/` mirror keeps
+    /// the same subfolder). We must capture that name so callers can
+    /// inject it back.
+    #[test]
+    fn disk_layout_repathed_captures_subfolder() {
+        let layout = disk_layout_for_skn(
+            "C:/extracted/MyMod/assets/Sett.wad/characters/sett/skins/skin0/sett.skn",
+        )
+        .expect("layout");
+        assert_eq!(layout.root, "C:/extracted/MyMod/");
+        assert_eq!(layout.wad_subfolder, "Sett.wad/");
+    }
+
+    /// The subfolder might itself be a multi-segment path. We
+    /// preserve it verbatim — we don't care what it's named, only
+    /// that it sits between `assets/` and `characters/`.
+    #[test]
+    fn disk_layout_multi_segment_subfolder() {
+        let layout = disk_layout_for_skn(
+            "C:/extracted/assets/wad_dir/sub_dir/characters/sett/skins/skin0/sett.skn",
+        )
+        .expect("layout");
+        assert_eq!(layout.wad_subfolder, "wad_dir/sub_dir/");
+    }
+
+    #[test]
+    fn rejoin_under_data_inserts_subfolder() {
+        assert_eq!(
+            rejoin_under_data("data/characters/sett/skins/skin0.bin", "Sett.wad/"),
+            "data/Sett.wad/characters/sett/skins/skin0.bin"
+        );
+    }
+
+    #[test]
+    fn rejoin_under_data_no_op_on_empty_subfolder() {
+        let p = "data/characters/sett/skins/skin0.bin";
+        assert_eq!(rejoin_under_data(p, ""), p);
+    }
+
+    /// data_path_variants must produce TWO candidates when a subfolder
+    /// is present — injected-first, then plain. The plain variant is
+    /// what catches asymmetric repaths (Sett.wad case: `assets/`
+    /// carries a subfolder but `data/` is canonical).
+    #[test]
+    fn data_path_variants_emits_injected_then_plain() {
+        let layout = DiskLayout {
+            root: "C:/mod/".to_string(),
+            wad_subfolder: "4c4b59aa/".to_string(),
+        };
+        let variants = data_path_variants("data/characters/sett/skins/skin0.bin", &layout);
+        assert_eq!(
+            variants,
+            vec![
+                "C:/mod/data/4c4b59aa/characters/sett/skins/skin0.bin".to_string(),
+                "C:/mod/data/characters/sett/skins/skin0.bin".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn data_path_variants_skips_redundant_when_no_subfolder() {
+        let layout = DiskLayout {
+            root: "C:/mod/".to_string(),
+            wad_subfolder: String::new(),
+        };
+        let variants = data_path_variants("data/characters/sett/skins/skin0.bin", &layout);
+        assert_eq!(variants, vec!["C:/mod/data/characters/sett/skins/skin0.bin"]);
+    }
+
+    /// Assets-side resolution: the BIN string is stripped of `assets/`
+    /// by the caller, then we re-prefix with each candidate. Subfolder
+    /// candidate first, plain fallback second.
+    #[test]
+    fn assets_path_variants_tries_both_forms() {
+        let layout = DiskLayout {
+            root: "C:/mod/".to_string(),
+            wad_subfolder: "4c4b59aa/".to_string(),
+        };
+        let variants =
+            assets_path_variants("characters/sett/skins/base/sett_base_tx_cm.dds", &layout);
+        assert_eq!(
+            variants,
+            vec![
+                "C:/mod/assets/4c4b59aa/characters/sett/skins/base/sett_base_tx_cm.dds".to_string(),
+                "C:/mod/assets/characters/sett/skins/base/sett_base_tx_cm.dds".to_string(),
+            ]
+        );
+    }
+
 }

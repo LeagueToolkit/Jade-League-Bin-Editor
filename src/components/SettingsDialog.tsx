@@ -511,12 +511,12 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose }) => {
 
             <h3 className="settings-section-title" style={{ fontSize: 16 }}>Active hash sources</h3>
             <p className="settings-section-subtitle">
-                Jade reads BIN field-name hashes from the text files (loaded into RAM at startup) and WAD path hashes from the shared LMDB. The text load is what makes BIN conversion fast — conversions wait for it to finish before running.
+                Jade reads BIN hashes from the text files and WAD hashes from the local database.
             </p>
 
             <div className="settings-row" style={{ marginBottom: 8 }}>
                 <div className="settings-row-header">
-                    <span className="settings-row-title">BIN names — text in RAM</span>
+                    <span className="settings-row-title">BIN names - text in RAM</span>
                     {binHashStatus?.ready ? (
                         <span className="success-text" style={{ fontSize: 12 }}>
                             {binHashStatus.count.toLocaleString()} loaded · {binHashStatus.memory_mb.toFixed(0)} MB
@@ -528,7 +528,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose }) => {
                     )}
                 </div>
                 <p className="settings-row-desc">
-                    FNV1a-keyed lookups for BIN property/class names. Loaded once per session from <code>%APPDATA%\FrogTools\hashes\*.txt</code>.
+                    Text file hashes. Loaded into memory once at startup.
                 </p>
                 {!binHashStatus?.ready && (
                     <button
@@ -543,13 +543,13 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, onClose }) => {
 
             <div className="settings-row" style={{ marginBottom: 12 }}>
                 <div className="settings-row-header">
-                    <span className="settings-row-title">WAD paths — LMDB</span>
+                    <span className="settings-row-title">WAD paths - LMDB</span>
                     <span className="success-text" style={{ fontSize: 12 }}>
                         {hashStatus?.format && hashStatus.format !== 'None' ? hashStatus.format : 'not present'}
                     </span>
                 </div>
                 <p className="settings-row-desc">
-                    xxh64-keyed WAD path resolution. Read directly from the shared LMDB (combined or split layout) — same file Quartz uses, no duplication in process memory.
+                    Read hashes from the local database on demand, shared with Quartz.
                 </p>
             </div>
 

@@ -11,7 +11,7 @@ import ExtractionSettingsDialog from './ExtractionSettingsDialog';
 import { MeshPreview } from './MeshPreview';
 import Editor from '@monaco-editor/react';
 import {
-    RITOBIN_LANGUAGE_ID, RITOBIN_THEME_ID,
+    RITOBIN_LANGUAGE_ID,
     registerRitobinLanguage, registerRitobinTheme,
 } from '../lib/ritobinLanguage';
 import {
@@ -2563,7 +2563,7 @@ function ExtractView({
                             </div>
                         </div>
                     )}
-                    {previewItem && ['.skn', '.scb', '.sco'].includes(previewItem.ext.toLowerCase()) && (
+                    {previewItem && ['.skn', '.scb', '.sco', '.skl'].includes(previewItem.ext.toLowerCase()) && (
                         <div className="welcome-preview-detail welcome-preview-detail-mesh">
                             <div className="welcome-preview-mesh">
                                 <MeshPreview
@@ -2585,7 +2585,7 @@ function ExtractView({
                             </div>
                         </div>
                     )}
-                    {previewItem && !['.skn', '.scb', '.sco'].includes(previewItem.ext.toLowerCase()) && (
+                    {previewItem && !['.skn', '.scb', '.sco', '.skl'].includes(previewItem.ext.toLowerCase()) && (
                         <div className="welcome-preview-detail">
                             {previewState.dataUrl && (
                                 <div
@@ -2622,10 +2622,30 @@ function ExtractView({
                                         <Editor
                                             height="100%"
                                             defaultLanguage={RITOBIN_LANGUAGE_ID}
-                                            theme={RITOBIN_THEME_ID}
+                                            // Always use the editor's active dynamic theme so
+                                            // the welcome preview matches the app theme and
+                                            // doesn't clobber the global Monaco theme. Earlier
+                                            // we passed `ritobin-dark` here: that's a static
+                                            // hardcoded theme, and Monaco's `setTheme` is
+                                            // GLOBAL — once welcome's preview mounted it, the
+                                            // background editor instance also flipped to
+                                            // `ritobin-dark`. Since the editor's own theme
+                                            // prop never changed, the React wrapper never
+                                            // re-called `setTheme` to restore `jade-dynamic`,
+                                            // leaving syntax + sticky-scroll wrong until a
+                                            // theme switch or app restart. Using
+                                            // `jade-dynamic` everywhere avoids the clobber.
+                                            theme="jade-dynamic"
                                             value={previewState.binText}
                                             beforeMount={(monaco) => {
                                                 registerRitobinLanguage(monaco);
+                                                // Keep registering the static theme as a
+                                                // fallback — `jade-dynamic` is defined by
+                                                // the main editor's mount at app boot, so it
+                                                // is always available by the time the user
+                                                // clicks a BIN preview, but the static one
+                                                // gives Monaco a sane default if anyone
+                                                // requests it.
                                                 registerRitobinTheme(monaco);
                                             }}
                                             onMount={(editor) => {

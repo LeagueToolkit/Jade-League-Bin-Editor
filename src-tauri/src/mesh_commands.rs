@@ -6,7 +6,9 @@ use crate::core::bin::read_bin_ltk;
 use crate::core::mesh::skin_textures::find_static_mesh_texture;
 use crate::core::mesh::texture_decode::decode_auto;
 use crate::core::mesh::{
-    find_skin_bin, parse_scb, parse_skn, parse_sco, read_skin_textures_for_skn, SkinBinMatch,
+    find_skin_bin, parse_anm, parse_scb, parse_skl, parse_skn, parse_sco,
+    read_skin_textures_for_skn, read_skin_textures_for_skn_disk, read_skn_animations,
+    read_skn_animations_disk, AnimationListing, BakedAnimation, SkinBinMatch, SklSkeleton,
     SknMesh, StaticMesh,
 };
 use crate::core::wad::{read_chunk_decompressed_bytes, with_mount};
@@ -137,6 +139,103 @@ pub async fn wad_read_sco_mesh(id: u64, path_hash_hex: String) -> Result<StaticM
     parse_sco(&bytes).map_err(|e| e.to_string())
 }
 
+// ── SKL (skeleton) ───────────────────────────────────────────────────
+//
+// Two consumers:
+//  1. Standalone `.skl` preview — same shape as SKN, just renders the
+//     bone hierarchy without any geometry.
+//  2. SKN overlay — when the SKN preview is loaded with the "show
+//     skeleton" toggle on, we look up the sibling .skl (same path,
+//     different extension) and add its bones to the scene.
+//
+// `wad_find_sibling_skl` exists for case 2: from an SKN's path hash
+// it derives the matching .skl path, hashes that, and returns the
+// .skl's path hash if a chunk with that hash lives in the same mount.
+
+#[tauri::command]
+pub async fn read_skl_skeleton(path: String) -> Result<SklSkeleton, String> {
+    let pb = PathBuf::from(&path);
+    let bytes = tokio::task::spawn_blocking(move || std::fs::read(&pb))
+        .await
+        .map_err(|e| format!("Read task join failed: {}", e))?
+        .map_err(|e| format!("Read SKL '{}': {}", path, e))?;
+    parse_skl(&bytes).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn wad_read_skl_skeleton(id: u64, path_hash_hex: String) -> Result<SklSkeleton, String> {
+    let trimmed = path_hash_hex
+        .trim()
+        .trim_start_matches("0x")
+        .trim_start_matches("0X");
+    let hash = u64::from_str_radix(trimmed, 16)
+        .map_err(|e| format!("Invalid hex hash '{}': {}", path_hash_hex, e))?;
+
+    let info = with_mount(id, |m| {
+        m.chunks
+            .iter()
+            .find(|c| c.path_hash == hash)
+            .map(|c| (m.path.clone(), *c))
+    })
+    .flatten()
+    .ok_or_else(|| format!("Chunk {} not in mount {}", path_hash_hex, id))?;
+
+    let (wad_path, chunk) = info;
+    let bytes = tokio::task::spawn_blocking(move || read_chunk_decompressed_bytes(&wad_path, &chunk))
+        .await
+        .map_err(|e| format!("Read task join failed: {}", e))?
+        .map_err(|e| e.to_string())?;
+
+    parse_skl(&bytes).map_err(|e| e.to_string())
+}
+
+/// Find the SKL chunk that lives next to the given SKN inside the same
+/// mount. Returns `null` when the SKN's path isn't resolved (we can't
+/// derive the .skl name from a hash-only path) or when the .skl isn't
+/// in this WAD. Frontend uses this to layer a skeleton overlay over
+/// the SKN preview.
+#[tauri::command]
+pub async fn wad_find_sibling_skl(
+    id: u64,
+    skn_path_hash_hex: String,
+) -> Result<Option<String>, String> {
+    let trimmed = skn_path_hash_hex
+        .trim()
+        .trim_start_matches("0x")
+        .trim_start_matches("0X");
+    let skn_hash = u64::from_str_radix(trimmed, 16)
+        .map_err(|e| format!("Invalid hex hash '{}': {}", skn_path_hash_hex, e))?;
+
+    // Need the SKN's resolved path to construct the sibling .skl path.
+    // If we only have the hex fallback, there's no way to derive it.
+    let skn_path: Option<String> = with_mount(id, |m| m.resolved.get(&skn_hash).cloned()).flatten();
+    let Some(skn_path) = skn_path else {
+        return Ok(None);
+    };
+
+    // Build candidate .skl paths by extension swap. Riot's tooling
+    // outputs both lowercase and (rarely) capitalised paths; the
+    // candidates list mirrors the same fallbacks `wad_guess_textures`
+    // uses so we don't miss a sibling that happens to be cased
+    // differently.
+    let lower = skn_path.to_lowercase();
+    let stem_end = lower.rfind('.').unwrap_or(lower.len());
+    let skl_lower = format!("{}.skl", &lower[..stem_end]);
+
+    let chunk_hashes: HashSet<u64> = with_mount(id, |m| {
+        m.chunks.iter().map(|c| c.path_hash).collect()
+    })
+    .unwrap_or_default();
+
+    for candidate in path_candidates(&skl_lower) {
+        let h = xxh64_lower(&candidate);
+        if chunk_hashes.contains(&h) {
+            return Ok(Some(format!("{:016x}", h)));
+        }
+    }
+    Ok(None)
+}
+
 /// Locate the skin BIN (`data/characters/{champion}/skins/{skin}.bin`)
 /// for a given SKN path inside a mounted WAD. Returns `null` if the SKN
 /// isn't in the mount, isn't resolved, or no candidate BIN exists in
@@ -168,6 +267,11 @@ pub struct TextureBinding {
     /// or the path uses an `assets/...` prefix that doesn't match
     /// any chunk's resolved name).
     pub chunk_hash_hex: Option<String>,
+    /// Disk path to the texture file when the SKN was loaded from
+    /// disk and the file exists. `None` for WAD-source previews;
+    /// the frontend uses `chunk_hash_hex` in that case.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub texture_disk_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -176,7 +280,161 @@ pub struct SknTextureBindings {
     pub bin_path_hash_hex: String,
     pub default_texture: Option<String>,
     pub default_chunk_hash_hex: Option<String>,
+    /// Disk path to the BASE texture when the SKN was loaded from
+    /// disk and the file exists. `None` for WAD-source previews.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_texture_disk_path: Option<String>,
     pub bindings: Vec<TextureBinding>,
+}
+
+/// Read + parse an ANM chunk from a mounted WAD into a baked
+/// per-joint frame table. Heavy enough on big animations (200 joints
+/// × 100 frames) that we run on the blocking pool. Compressed ANMs
+/// produce a clean error surfaced to the frontend; only uncompressed
+/// (v3/v4/v5) plays in v1.
+#[tauri::command]
+pub async fn wad_load_animation(
+    id: u64,
+    path_hash_hex: String,
+) -> Result<BakedAnimation, String> {
+    let trimmed = path_hash_hex
+        .trim()
+        .trim_start_matches("0x")
+        .trim_start_matches("0X");
+    let hash = u64::from_str_radix(trimmed, 16)
+        .map_err(|e| format!("Invalid hex hash '{}': {}", path_hash_hex, e))?;
+
+    let info = with_mount(id, |m| {
+        m.chunks
+            .iter()
+            .find(|c| c.path_hash == hash)
+            .map(|c| (m.path.clone(), *c))
+    })
+    .flatten()
+    .ok_or_else(|| format!("ANM chunk {} not in mount {}", path_hash_hex, id))?;
+    let (wad_path, chunk) = info;
+
+    let baked = tokio::task::spawn_blocking(move || -> Result<BakedAnimation, String> {
+        let bytes = read_chunk_decompressed_bytes(&wad_path, &chunk)
+            .map_err(|e| format!("read ANM chunk: {e}"))?;
+        parse_anm(&bytes).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| format!("ANM task join failed: {e}"))??;
+
+    Ok(baked)
+}
+
+/// Disk-source counterpart of [`wad_load_animation`]. Reads the ANM
+/// straight from the given path (no WAD lookup) and parses it into
+/// the same `BakedAnimation` shape, so the frontend's player works
+/// identically across sources.
+#[tauri::command]
+pub async fn read_animation(path: String) -> Result<BakedAnimation, String> {
+    let pb = PathBuf::from(&path);
+    let baked = tokio::task::spawn_blocking(move || -> Result<BakedAnimation, String> {
+        let bytes = std::fs::read(&pb).map_err(|e| format!("read ANM '{}': {}", pb.display(), e))?;
+        parse_anm(&bytes).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| format!("ANM task join failed: {e}"))??;
+    Ok(baked)
+}
+
+/// Disk-source counterpart of [`wad_read_skn_animations`]. Walks up
+/// from the SKN path to find the skin BIN and animation BIN on disk,
+/// returning the same listing shape — except clips carry
+/// `anm_disk_path` instead of `anm_chunk_hash_hex`.
+#[tauri::command]
+pub async fn read_skn_animations_disk_cmd(
+    skn_path: String,
+) -> Result<Option<AnimationListing>, String> {
+    tokio::task::spawn_blocking(move || read_skn_animations_disk(&skn_path))
+        .await
+        .map_err(|e| format!("animations disk task join failed: {e}"))?
+}
+
+/// Disk-source counterpart of [`wad_read_skin_textures`]. Walks the
+/// SKN's sibling skin BIN and resolves each material's texture path
+/// to a file on disk under the same root.
+#[tauri::command]
+pub async fn read_skn_textures_disk(
+    skn_path: String,
+) -> Result<Option<SknTextureBindings>, String> {
+    let map = tokio::task::spawn_blocking({
+        let p = skn_path.clone();
+        move || read_skin_textures_for_skn_disk(&p)
+    })
+    .await
+    .map_err(|e| format!("textures disk task join: {e}"))??;
+
+    let Some(map) = map else { return Ok(None) };
+
+    // Reconstruct disk paths through the same DiskLayout the BIN /
+    // animation walkers use. `texture_path` strings live in the BIN
+    // as `ASSETS/...` (uppercase by Riot convention); we try each
+    // candidate form (with `wad_subfolder` injected, then without)
+    // since re-paths can be asymmetric — asset side may carry a
+    // subfolder while BIN strings still reference the canonical path,
+    // or vice versa.
+    use crate::core::mesh::skin_bin::{assets_path_variants, disk_layout_for_skn};
+    let layout = match disk_layout_for_skn(&skn_path) {
+        Some(l) => l,
+        None => return Ok(None),
+    };
+
+    let resolve = |bin_path: &str| -> Option<String> {
+        let lower = bin_path.to_lowercase();
+        let rel = lower.strip_prefix("assets/").unwrap_or(&lower);
+        assets_path_variants(rel, &layout)
+            .into_iter()
+            .find(|p| std::path::Path::new(p).is_file())
+    };
+
+    let default_texture_disk_path = map.default_texture.as_deref().and_then(resolve);
+    let bindings = map
+        .materials
+        .into_iter()
+        .map(|m| TextureBinding {
+            texture_disk_path: resolve(&m.texture_path),
+            chunk_hash_hex: None,
+            material: m.material,
+            texture_path: m.texture_path,
+        })
+        .collect();
+
+    Ok(Some(SknTextureBindings {
+        bin_path: map.bin_path,
+        bin_path_hash_hex: map.bin_path_hash_hex,
+        default_texture: map.default_texture,
+        default_chunk_hash_hex: None,
+        default_texture_disk_path,
+        bindings,
+    }))
+}
+
+/// Resolve the SKN's skin BIN → AnimationGraphData link → animation
+/// BIN, and return its `AtomicClipData` clips with resolved chunk
+/// hashes. Returns `null` for any structural miss (no skin BIN, no
+/// animation graph, animation BIN not in mount). Heavy enough on
+/// big champion BINs that we run on the blocking pool.
+#[tauri::command]
+pub async fn wad_read_skn_animations(
+    id: u64,
+    path_hash_hex: String,
+) -> Result<Option<AnimationListing>, String> {
+    let trimmed = path_hash_hex
+        .trim()
+        .trim_start_matches("0x")
+        .trim_start_matches("0X");
+    let hash = u64::from_str_radix(trimmed, 16)
+        .map_err(|e| format!("Invalid hex hash '{}': {}", path_hash_hex, e))?;
+
+    let listing = tokio::task::spawn_blocking(move || read_skn_animations(id, hash))
+        .await
+        .map_err(|e| format!("animations task join failed: {e}"))??;
+
+    Ok(listing)
 }
 
 /// Resolve every texture path the SKN's skin BIN references to its
@@ -231,6 +489,7 @@ pub async fn wad_read_skin_textures(
             chunk_hash_hex: resolve(&m.texture_path),
             material: m.material,
             texture_path: m.texture_path,
+            texture_disk_path: None,
         })
         .collect();
 
@@ -239,6 +498,7 @@ pub async fn wad_read_skin_textures(
         bin_path_hash_hex: map.bin_path_hash_hex,
         default_texture: map.default_texture,
         default_chunk_hash_hex,
+        default_texture_disk_path: None,
         bindings,
     }))
 }
@@ -320,6 +580,7 @@ pub async fn wad_find_static_mesh_texture(
         material: bin_match.path,
         texture_path,
         chunk_hash_hex,
+        texture_disk_path: None,
     }))
 }
 
@@ -378,6 +639,7 @@ pub async fn wad_guess_textures(
                 material: name,
                 texture_path: String::new(),
                 chunk_hash_hex: None,
+                texture_disk_path: None,
             })
             .collect());
     };
@@ -414,6 +676,7 @@ pub async fn wad_guess_textures(
                 material: name,
                 texture_path: String::new(),
                 chunk_hash_hex: None,
+                texture_disk_path: None,
             })
             .collect());
     }
@@ -462,6 +725,7 @@ pub async fn wad_guess_textures(
             material: raw_name,
             texture_path: path,
             chunk_hash_hex: hex,
+            texture_disk_path: None,
         });
     }
 
@@ -610,6 +874,34 @@ pub async fn wad_decode_texture(
 
         // Build the [16-byte header | RGBA] payload. Pre-allocate so
         // we don't realloc once the RGBA chunk lands.
+        let mut out = Vec::with_capacity(TEX_HEADER_LEN + decoded.rgba.len());
+        out.extend_from_slice(&decoded.width.to_le_bytes());
+        out.extend_from_slice(&decoded.height.to_le_bytes());
+        let flags = if decoded.has_alpha { FLAG_HAS_ALPHA } else { 0 };
+        out.extend_from_slice(&flags.to_le_bytes());
+        out.extend_from_slice(&0u32.to_le_bytes()); // reserved
+        debug_assert_eq!(out.len(), TEX_HEADER_LEN);
+        out.extend_from_slice(&decoded.rgba);
+        Ok(out)
+    })
+    .await
+    .map_err(|e| format!("decode task join failed: {e}"))??;
+
+    Ok(tauri::ipc::Response::new(blob))
+}
+
+/// Disk-source counterpart of [`wad_decode_texture`]. Reads the
+/// texture (.tex / .dds) straight from `path` and returns the same
+/// `[16-byte header | RGBA]` payload, so the frontend's RGBA upload
+/// path stays a single code path regardless of source.
+#[tauri::command]
+pub async fn decode_texture_disk(
+    path: String,
+) -> Result<tauri::ipc::Response, String> {
+    let pb = PathBuf::from(&path);
+    let blob = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, String> {
+        let bytes = std::fs::read(&pb).map_err(|e| format!("read texture '{}': {}", pb.display(), e))?;
+        let decoded = decode_auto(&bytes).map_err(|e| format!("decode: {e}"))?;
         let mut out = Vec::with_capacity(TEX_HEADER_LEN + decoded.rgba.len());
         out.extend_from_slice(&decoded.width.to_le_bytes());
         out.extend_from_slice(&decoded.height.to_le_bytes());

@@ -148,6 +148,50 @@ export interface ShellContextValue {
     monacoModelsRef: React.MutableRefObject<Map<string, MonacoType.editor.ITextModel>>;
     monacoRef: React.MutableRefObject<Monaco | null>;
 
+    // -- Split-pane mode
+    //    Toggling `splitMode` opens a second full Monaco instance
+    //    next to the main editor. Each pane has its OWN tab bar
+    //    (filtered by `tab.pane`) and its OWN active tab id, so the
+    //    user can show a different file in each pane. Tabs are a
+    //    shared pool — drag-drop between the two tab bars flips a
+    //    tab's `pane` field.
+    //
+    //    `splitRatio` is the left pane's fraction of the container
+    //    width, clamped to [0.1, 0.9].
+    //
+    //    `focusedPane` tracks the pane the user last interacted with
+    //    so shell-level keyboard shortcuts (save, find, etc.) target
+    //    the right editor and new files open into the right pane.
+    splitMode: boolean;
+    setSplitMode: (b: boolean) => void;
+    splitRatio: number;
+    setSplitRatio: (n: number) => void;
+    leftActiveTabId: string | null;
+    rightActiveTabId: string | null;
+    focusedPane: 'left' | 'right';
+    setFocusedPane: (p: 'left' | 'right') => void;
+    /** Move a tab into a different pane. Used by the tab bars' drag-
+     *  and-drop targets. If the moved tab was the active tab in its
+     *  origin pane, picks another tab in that pane (or null if empty);
+     *  if the destination pane had no active tab, the moved tab
+     *  becomes active there. */
+    onTabSetPane: (tabId: string, pane: 'left' | 'right') => void;
+    /** Idempotent model-resolver — returns the existing Monaco model
+     *  for `tabId`, or creates a fresh one from the tab's content if
+     *  the cached entry is missing or disposed. Both panes use this
+     *  to make sure they don't try to attach to a dangling model
+     *  after a shell remount (which disposes editors but leaves the
+     *  registry pointing at the corpses). */
+    ensureModelForTab: (tabId: string) => MonacoType.editor.ITextModel | null;
+    /** Per-editor feature registration for the SECONDARY (right) pane.
+     *  Wires image-path swatches, material-jump arrows + click, and
+     *  the texture popup click — the same surface the primary editor
+     *  gets through `handleEditorMount` but without writing to
+     *  shell-level refs. Returns a cleanup function the caller must
+     *  invoke on unmount so the disposables don't leak across shell
+     *  remounts. */
+    setupRightEditor: (editor: MonacoType.editor.IStandaloneCodeEditor) => () => void;
+
     // -- Edit panel callbacks
     handleGeneralEditContentChange: (newContent: string) => void;
     handleScrollToLine: (line: number) => void;

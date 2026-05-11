@@ -9,6 +9,11 @@ export interface EditorTab {
     content: string;
     isModified: boolean;
     isPinned: boolean;
+    /** Which pane this tab belongs to when split-pane mode is on.
+     *  Defaults to `'left'`; ignored when split is off (the single
+     *  tab bar shows every tab regardless of this field). Drag-and-
+     *  drop between the two tab bars flips this field. */
+    pane?: 'left' | 'right';
     /** 'editor' (default), 'texture-preview', 'quartz-diff', or 'markdown-preview' */
     tabType?: 'editor' | 'texture-preview' | 'quartz-diff' | 'markdown-preview';
     /** For markdown-preview tabs: id of the source editor tab whose content we render. */
@@ -48,6 +53,23 @@ interface TabBarProps {
     /** Pointer-down on a tab — used by the VS shell to start a tab-drag
      *  gesture for popping the document out into a floating window. */
     onTabPointerDown?: (e: React.PointerEvent, tabId: string) => void;
+    /** When set, renders a Split / Unsplit toggle button next to the
+     *  Close All button. `splitMode` controls the button's pressed
+     *  state and tooltip. The actual layout change happens in
+     *  `EditorPane` — this is just the UI affordance to trigger it.
+     *  Pass `splitDisabled` to grey it out (we gate on tabs.length>=2). */
+    splitMode?: boolean;
+    onToggleSplit?: () => void;
+    splitDisabled?: boolean;
+    /** Pane filter — when present, only tabs whose `pane` matches are
+     *  shown. The two tab bars in split mode pass `'left'` and
+     *  `'right'` respectively. Tabs missing a `pane` field are
+     *  treated as left. */
+    paneFilter?: 'left' | 'right';
+    /** Drag-drop reassignment — fired when the user drops a tab from
+     *  the OTHER tab bar onto this one. The TabBar handles the drag/
+     *  drop events; this just delivers the result. */
+    onDropTabIntoPane?: (tabId: string, pane: 'left' | 'right') => void;
 }
 
 export default function TabBar({
@@ -58,7 +80,18 @@ export default function TabBar({
     onTabCloseAll,
     onTabPin,
     onTabPointerDown,
+    splitMode,
+    onToggleSplit,
+    splitDisabled,
+    paneFilter,
+    onDropTabIntoPane,
 }: TabBarProps) {
+    // Apply the pane filter — tabs with no `pane` field count as
+    // left, mirroring how the App side treats them. Without this
+    // filter (single-pane mode) every tab is shown regardless.
+    const visibleTabs = paneFilter
+        ? tabs.filter(t => (t.pane ?? 'left') === paneFilter)
+        : tabs;
     const tabsContainerRef = useRef<HTMLDivElement>(null);
 
     // Scroll active tab into view when it changes
@@ -107,25 +140,130 @@ export default function TabBar({
         }
     };
 
+    // Don't render when there are zero tabs (single-pane mode) OR
+    // when the pane filter excludes all tabs AND there's no drop
+    // target (otherwise we still want a visible empty drop zone).
     if (tabs.length === 0) {
         return null;
     }
+    // Note: in split mode we ALWAYS render even when this pane is
+    // empty — the empty bar is the visual cue + drop target the
+    // user needs to populate the other side.
+
+    // Pointer-event-driven cross-pane drag. We can't use HTML5
+    // dataTransfer because:
+    //   - Tauri's webview2 has flaky support for custom MIME types
+    //     in dataTransfer, so the drop target can't reliably read
+    //     the payload back.
+    //   - The Visual Studio shell already uses pointer events on
+    //     tabs for the pop-out gesture; mixing HTML5 dragstart and
+    //     pointerdown on the same element produces "drag does
+    //     nothing or just pops out" — exactly what the user saw.
+    // The flow:
+    //   1. pointerdown on a tab inside a pane-filtered bar →
+    //      stash the tab id + origin pane in a ref.
+    //   2. pointermove past a small threshold → set body cursor.
+    //   3. pointerup → use `document.elementFromPoint(...)` to find
+    //      which tab bar is under the cursor (we tag each bar with
+    //      `data-pane`) and fire `onDropTabIntoPane` if it's the
+    //      OTHER pane.
+    // This bypasses HTML5 drag entirely and works in any webview.
+    const onTabPointerDownInternal = (e: React.PointerEvent, tabId: string) => {
+        // Only the LEFT mouse button — right-click + middle-click are
+        // already wired to context-menu and close, respectively.
+        if (e.button !== 0) return;
+        if (!paneFilter || !onDropTabIntoPane) return;
+
+        const startX = e.clientX;
+        const startY = e.clientY;
+        let dragging = false;
+        const DRAG_THRESHOLD = 6;
+
+        const onMove = (ev: PointerEvent) => {
+            if (!dragging) {
+                const dx = ev.clientX - startX;
+                const dy = ev.clientY - startY;
+                if (dx * dx + dy * dy < DRAG_THRESHOLD * DRAG_THRESHOLD) return;
+                dragging = true;
+                document.body.style.cursor = 'grabbing';
+            }
+        };
+        const onUp = (ev: PointerEvent) => {
+            document.removeEventListener('pointermove', onMove);
+            document.removeEventListener('pointerup', onUp);
+            document.body.style.cursor = '';
+            if (!dragging) return;
+            // Find the tab bar element under the cursor on release.
+            // Each pane-filtered bar carries `data-pane="left|right"`
+            // (set on the wrapper div below), so we walk up from the
+            // hit element looking for that attribute.
+            const hit = document.elementFromPoint(ev.clientX, ev.clientY);
+            let node: Element | null = hit;
+            while (node && node !== document.body) {
+                const dp = (node as HTMLElement).dataset?.pane;
+                if (dp === 'left' || dp === 'right') {
+                    if (dp !== paneFilter) {
+                        onDropTabIntoPane(tabId, dp);
+                    }
+                    return;
+                }
+                node = node.parentElement;
+            }
+        };
+        document.addEventListener('pointermove', onMove);
+        document.addEventListener('pointerup', onUp);
+    };
 
     return (
-        <div className="tab-bar">
+        <div
+            className={`tab-bar${paneFilter ? ` tab-bar-pane-${paneFilter}` : ''}`}
+            data-pane={paneFilter}
+        >
             <div
                 className="tabs-container"
                 ref={tabsContainerRef}
                 onWheel={handleWheel}
             >
-                {tabs.map((tab) => (
+                {/* Empty-pane hint — visible in split mode when a
+                    pane has no tabs assigned to it. Doubles as a
+                    drop target via the parent `.tab-bar` (which
+                    already has the `data-pane` + pointerup hit
+                    detection wired). */}
+                {paneFilter && visibleTabs.length === 0 && (
+                    <div
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            paddingLeft: 12,
+                            fontSize: 11,
+                            fontStyle: 'italic',
+                            color: 'var(--text-secondary, #9DA5B4)',
+                            opacity: 0.7,
+                            pointerEvents: 'none',
+                        }}
+                    >
+                        Drag a tab here
+                    </div>
+                )}
+                {visibleTabs.map((tab) => (
                     <div
                         key={tab.id}
                         data-tab-id={tab.id}
                         className={`tab ${activeTabId === tab.id ? 'active' : ''} ${tab.isModified ? 'modified' : ''} ${tab.isPinned ? 'pinned' : ''}`}
                         onClick={() => onTabSelect(tab.id)}
                         onMouseDown={(e) => handleMouseDown(e, tab.id)}
-                        onPointerDown={(e) => onTabPointerDown?.(e, tab.id)}
+                        onPointerDown={(e) => {
+                            // In split mode the cross-pane drag
+                            // handler takes priority; the existing
+                            // VS-shell pop-out drag still runs
+                            // afterwards because the threshold/up
+                            // listeners are document-scoped and the
+                            // shell's drag tracker is unaffected.
+                            if (paneFilter && onDropTabIntoPane) {
+                                onTabPointerDownInternal(e, tab.id);
+                            }
+                            onTabPointerDown?.(e, tab.id);
+                        }}
                         onContextMenu={(e) => handleContextMenu(e, tab)}
                         onDoubleClick={(e) => handleDoubleClick(e, tab.id)}
                         title={tab.filePath || tab.fileName}
@@ -149,15 +287,58 @@ export default function TabBar({
                 ))}
             </div>
 
-            {tabs.length > 1 && (
+            {(tabs.length > 1 || onToggleSplit) && (
                 <div className="tabs-actions">
-                    <button
-                        className="close-all-btn"
-                        onClick={onTabCloseAll}
-                        title="Close All Tabs"
-                    >
-                        <CloseIcon size={12} /> All
-                    </button>
+                    {/* The split button is only useful when at least
+                        two tabs exist — splitting with a single tab
+                        leaves the right pane empty until the user
+                        opens another file, which the user explicitly
+                        called out as confusing. We hide it entirely
+                        rather than greying out, so the actions row
+                        stays clean for single-tab sessions. */}
+                    {onToggleSplit && !splitDisabled && (
+                        <button
+                            className={`tab-split-btn${splitMode ? ' active' : ''}`}
+                            onClick={onToggleSplit}
+                            title={splitMode ? 'Unsplit editor' : 'Split editor right'}
+                        >
+                            {/* Two-rectangle glyph — left rect outlined,
+                                right rect filled when active. Pure
+                                inline SVG so we don't drag in another
+                                icon dependency. */}
+                            <svg width="14" height="12" viewBox="0 0 14 12" aria-hidden="true">
+                                <rect
+                                    x="1"
+                                    y="1"
+                                    width="5"
+                                    height="10"
+                                    rx="1"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="1.2"
+                                />
+                                <rect
+                                    x="8"
+                                    y="1"
+                                    width="5"
+                                    height="10"
+                                    rx="1"
+                                    fill={splitMode ? 'currentColor' : 'none'}
+                                    stroke="currentColor"
+                                    strokeWidth="1.2"
+                                />
+                            </svg>
+                        </button>
+                    )}
+                    {tabs.length > 1 && (
+                        <button
+                            className="close-all-btn"
+                            onClick={onTabCloseAll}
+                            title="Close All Tabs"
+                        >
+                            <CloseIcon size={12} /> All
+                        </button>
+                    )}
                 </div>
             )}
         </div>

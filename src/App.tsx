@@ -106,7 +106,19 @@ function getMonacoLanguageForPath(filePath: string | null): string {
 function App() {
   // Tab management - start with NO tabs (empty)
   const [tabs, setTabs] = useState<EditorTab[]>([]);
-  const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  // Per-pane active-tab ids. The exposed `activeTabId` below is a
+  // DERIVED value: whichever pane is focused, that pane's active tab
+  // is the "current" tab from the shell's perspective. This keeps
+  // every existing `activeTabId` consumer working without changes —
+  // they just follow focus automatically.
+  //
+  // The `setActiveTabId` wrapper routes writes to the corresponding
+  // per-pane state based on which pane the target tab lives in (its
+  // `pane` field). New tabs created via the focused pane therefore
+  // become active in THAT pane, and clicks in either tab bar follow
+  // naturally.
+  const [leftActiveTabId, setLeftActiveTabId] = useState<string | null>(null);
+  const [rightActiveTabIdState, setRightActiveTabIdState] = useState<string | null>(null);
   const viewStatesRef = useRef<Map<string, EditorViewState>>(new Map());
 
   // UI state
@@ -181,6 +193,185 @@ function App() {
   // even with zero tabs. Auto-resets whenever tab count changes so a
   // newly-opened file naturally lands on the editor.
   const [welcomeOverride, setWelcomeOverride] = useState<'force' | 'hide' | null>(null);
+  // Split-pane mode opens a second full Monaco instance next to the
+  // main one. Tabs are split between two pane-filtered tab bars via
+  // each tab's `pane` field; each pane tracks its own active tab id.
+  // `splitRatio` is the left pane's fraction of the container width;
+  // clamped to [0.1, 0.9] by the divider's drag handler. `focusedPane`
+  // tracks the pane the user last interacted with so shell-level
+  // shortcuts (save, find, etc.) and new file opens go to that pane.
+  const [splitMode, setSplitModeState] = useState(false);
+  const [splitRatio, setSplitRatioState] = useState(0.5);
+  const [focusedPane, setFocusedPane] = useState<'left' | 'right'>('left');
+
+  // The exposed `activeTabId` is whichever pane is focused, so every
+  // existing consumer (and the existing 17 `setActiveTabId` call
+  // sites) keeps working without change. `setActiveTabId` writes are
+  // ROUTED below to the per-pane state matching the target tab's
+  // `pane` field.
+  const activeTabId = (splitMode && focusedPane === 'right')
+    ? rightActiveTabIdState
+    : leftActiveTabId;
+  // Expose under the existing name. Real consumers downstream read
+  // `rightActiveTabId` from this same value.
+  const rightActiveTabId = rightActiveTabIdState;
+
+  const setSplitMode = useCallback((b: boolean) => {
+    setSplitModeState(b);
+    if (b) {
+      // Turning split ON: immediately move the currently-active tab
+      // to the RIGHT pane so the user doesn't have to manually drag
+      // anything to get a useful side-by-side view. The left pane
+      // falls back to whichever other tab is available.
+      //
+      // We read `tabs` / active id from the latest closure values
+      // and use functional setters to avoid stale reads when this
+      // gets called inside an async toggle.
+      const currentActive = activeTabId;
+      if (currentActive && tabs.length >= 2) {
+        setTabs(prev => prev.map(t =>
+          t.id === currentActive ? { ...t, pane: 'right' } : t
+        ));
+        setRightActiveTabIdState(currentActive);
+        // Pick any other tab to keep the left pane non-empty.
+        const fallback = tabs.find(t => t.id !== currentActive);
+        setLeftActiveTabId(fallback?.id ?? null);
+        setFocusedPane('right');
+      }
+    } else {
+      // Turning split OFF: collapse all tabs back into the left
+      // pane (so the single-pane tab bar shows everything), preserve
+      // whichever tab was active, and clear right-pane state.
+      setTabs(prev => prev.map(t => t.pane === 'right' ? { ...t, pane: 'left' } : t));
+      setRightActiveTabIdState(null);
+      setFocusedPane('left');
+    }
+  }, [activeTabId, tabs]);
+
+  // Auto-collapse split when fewer than two files remain — splitting
+  // with one tab open is useless and (per the user's report) makes
+  // the layout feel stuck. Toggling off here runs the same collapse
+  // path as the manual toggle, so the lone tab returns to the left.
+  useEffect(() => {
+    if (splitMode && tabs.length < 2) {
+      setSplitModeState(false);
+      setTabs(prev => prev.map(t => t.pane === 'right' ? { ...t, pane: 'left' } : t));
+      setRightActiveTabIdState(null);
+      setFocusedPane('left');
+    }
+  }, [splitMode, tabs.length]);
+  const setSplitRatio = useCallback((n: number) => {
+    setSplitRatioState(Math.max(0.1, Math.min(0.9, n)));
+  }, []);
+
+  // Wrap the per-pane active-tab setters into the legacy
+  // `setActiveTabId(id)` shape so existing code doesn't need to
+  // change. Routes the write based on which pane the target tab
+  // belongs to, and pulls focus to that pane.
+  const setActiveTabId = useCallback((id: string | null) => {
+    if (id === null) {
+      setLeftActiveTabId(null);
+      setRightActiveTabIdState(null);
+      return;
+    }
+    // Look up the tab's pane (default left). When split is OFF
+    // every tab is effectively on the left pane.
+    const tab = tabs.find(t => t.id === id);
+    const pane = (splitMode && tab?.pane === 'right') ? 'right' : 'left';
+    if (pane === 'right') {
+      setRightActiveTabIdState(id);
+      setFocusedPane('right');
+    } else {
+      setLeftActiveTabId(id);
+      if (splitMode) setFocusedPane('left');
+    }
+  }, [tabs, splitMode]);
+
+  // Tab close cleanup: if either pane's active tab no longer exists,
+  // clear or fall back to another tab in the same pane.
+  useEffect(() => {
+    const ids = new Set(tabs.map(t => t.id));
+    if (leftActiveTabId && !ids.has(leftActiveTabId)) {
+      const fallback = tabs.find(t => (t.pane ?? 'left') === 'left');
+      setLeftActiveTabId(fallback?.id ?? null);
+    }
+    if (rightActiveTabIdState && !ids.has(rightActiveTabIdState)) {
+      const fallback = tabs.find(t => t.pane === 'right');
+      setRightActiveTabIdState(fallback?.id ?? null);
+    }
+  }, [tabs, leftActiveTabId, rightActiveTabIdState]);
+
+  // Drag-drop tab between panes. Reassigns the tab's `pane` field
+  // and reshuffles active-tab pointers so the moved tab becomes
+  // active in its new pane (matches VSCode's behavior) while the
+  // origin pane falls back to a sibling.
+  const onTabSetPane = useCallback((tabId: string, pane: 'left' | 'right') => {
+    setTabs(prev => {
+      const tab = prev.find(t => t.id === tabId);
+      if (!tab) return prev;
+      const currentPane = tab.pane ?? 'left';
+      if (currentPane === pane) return prev;
+      return prev.map(t => t.id === tabId ? { ...t, pane } : t);
+    });
+    // Pull active state after reshuffle. Read latest via functional
+    // update on each setter to avoid stale closures.
+    setLeftActiveTabId(prev => {
+      if (pane === 'right' && prev === tabId) {
+        // Moved away from left — pick another left tab as fallback
+        const fallback = tabs.find(t => t.id !== tabId && (t.pane ?? 'left') === 'left');
+        return fallback?.id ?? null;
+      }
+      if (pane === 'left' && prev !== tabId) {
+        return tabId; // make it active in left
+      }
+      return prev;
+    });
+    setRightActiveTabIdState(prev => {
+      if (pane === 'left' && prev === tabId) {
+        const fallback = tabs.find(t => t.id !== tabId && t.pane === 'right');
+        return fallback?.id ?? null;
+      }
+      if (pane === 'right' && prev !== tabId) {
+        return tabId;
+      }
+      return prev;
+    });
+    setFocusedPane(pane);
+  }, [tabs]);
+
+  // Model creation helper that's safe to call from anywhere — both
+  // App's tab-switch effect AND the right pane's mount can hit this
+  // and get back the SAME Monaco model for a given tab id. Fixes
+  // the "right pane goes blank after a shell switch" cascade where
+  // the cached model gets disposed but the registry still holds a
+  // dangling reference.
+  const ensureModelForTab = useCallback(
+    (tabId: string): MonacoType.editor.ITextModel | null => {
+      const monaco = monacoRef.current;
+      if (!monaco) return null;
+      const tab = tabs.find(t => t.id === tabId);
+      if (!tab) return null;
+      const cached = monacoModelsRef.current.get(tabId);
+      if (cached && !cached.isDisposed()) return cached;
+      const uri = tab.filePath
+        ? monaco.Uri.file(tab.filePath)
+        : monaco.Uri.parse(`inmemory://tab/${tabId}`);
+      const existing = monaco.editor.getModel(uri);
+      if (existing && !existing.isDisposed()) {
+        monacoModelsRef.current.set(tabId, existing);
+        return existing;
+      }
+      const fresh = monaco.editor.createModel(
+        tab.content,
+        getMonacoLanguageForPath(tab.filePath ?? tab.fileName),
+        uri,
+      );
+      monacoModelsRef.current.set(tabId, fresh);
+      return fresh;
+    },
+    [tabs],
+  );
+
   useEffect(() => {
     setWelcomeOverride(null);
   }, [tabs.length]);
@@ -1541,13 +1732,14 @@ function App() {
     }
   }, [activeTabId]);
 
-  // Tab operations
+  // Tab operations. `setActiveTabId` itself routes to the correct
+  // pane via the tab's `pane` field, so this handler is now just
+  // about view-state preservation.
   const handleTabSelect = useCallback((tabId: string) => {
     if (tabId === activeTabId) return;
     saveCurrentViewState();
     setActiveTabId(tabId);
-    // Model switching and view state restoration handled by the activeTabId useEffect
-  }, [activeTabId, saveCurrentViewState]);
+  }, [activeTabId, saveCurrentViewState, setActiveTabId]);
 
   const handleTabClose = useCallback(async (tabId: string) => {
     const recentlyRejected = lastRejectedTabCloseRef.current;
@@ -1822,11 +2014,21 @@ function App() {
     });
   }
 
-  // Model-based tab switching: swap Monaco model when active tab changes
-  // This is the core fix for the RAM leak - no more editor remounts
+  // Model-based tab switching: swap the LEFT editor's Monaco model
+  // when the LEFT pane's active tab changes. Per-pane: this effect
+  // targets `editorRef.current` which always points at the LEFT
+  // editor; the RIGHT editor (when split is on) has its own model-
+  // swap effect inside its component, keyed on `rightActiveTabId`.
+  // Using `leftActiveTabId` rather than the derived `activeTabId`
+  // avoids the left editor flipping its model whenever the user
+  // simply focuses the right pane.
   useEffect(() => {
     const editor = editorRef.current;
     const monaco = monacoRef.current;
+    // Local alias so the rest of the (long) effect body stays as
+    // close to the pre-split form as possible — the substitution is
+    // a no-op when split is off, since leftActiveTabId === activeTabId.
+    const activeTabId = leftActiveTabId;
     if (!editor || !monaco || !activeTabId) return;
 
     // Guard: bail out if the editor's DOM container is gone (disposed / unmounted)
@@ -1930,7 +2132,8 @@ function App() {
     updateEmitterNameDecorations(editor);
     // Run syntax checker for this model
     updateSyntaxMarkers(editor);
-  }, [activeTabId]); // Only re-run when active tab changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leftActiveTabId]); // Left editor only re-mounts on left-pane tab changes
 
   const handleThemeApplied = () => {
     if (monacoInstance) {
@@ -2528,6 +2731,199 @@ function App() {
     syntaxDecorationIds.current = model.deltaDecorations(syntaxDecorationIds.current, decorations);
   }, []);
 
+  /**
+   * Register the "per-editor" features on a SECONDARY Monaco editor
+   * instance — the right pane of split mode. The left/primary editor
+   * gets all this (and more) through `handleEditorMount`, but that
+   * function is hard-wired to write to shell-level refs and disposes
+   * the previous editor's handlers on mount, so we can't just reuse
+   * it for the second pane.
+   *
+   * Features wired here:
+   *   - Inline image-path swatches (the `.tex` path decorations)
+   *   - Material-jump arrows + click-to-jump for `material: link` ↔
+   *     `StaticMaterialDef` pairs
+   *   - Texture popup on swatch click (the hover/click preview the
+   *     main editor surfaces too)
+   *
+   * Returns a cleanup function the caller MUST invoke on unmount so
+   * the disposables / debounce timers don't leak.
+   */
+  const setupRightEditor = useCallback((editor: MonacoType.editor.IStandaloneCodeEditor) => {
+    const disposables: { dispose: () => void }[] = [];
+
+    // -- Image path decorations (the inline `.tex` swatch boxes) --
+    let imgPathDecorations: string[] = [];
+    let imgDecDebounce: ReturnType<typeof setTimeout> | null = null;
+    const refreshImg = () => {
+      const m = editor.getModel();
+      if (!m) return;
+      imgPathDecorations = editor.deltaDecorations(imgPathDecorations, findAllImagePaths(m));
+    };
+    const debouncedRefreshImg = () => {
+      if (imgDecDebounce) clearTimeout(imgDecDebounce);
+      imgDecDebounce = setTimeout(refreshImg, 300);
+    };
+    refreshImg();
+    disposables.push(editor.onDidChangeModelContent(() => debouncedRefreshImg()));
+    disposables.push(editor.onDidChangeModel(() => refreshImg()));
+    disposables.push({
+      dispose: () => {
+        if (imgDecDebounce) clearTimeout(imgDecDebounce);
+        editor.deltaDecorations(imgPathDecorations, []);
+      },
+    });
+
+    // -- Material jump arrows --
+    let matJumpDecorations: string[] = [];
+    let matJumpDebounce: ReturnType<typeof setTimeout> | null = null;
+    const refreshMatJump = () => {
+      const m = editor.getModel();
+      if (!m) return;
+      matJumpDecorations = editor.deltaDecorations(matJumpDecorations, findMaterialJumpDecorations(m));
+    };
+    const debouncedRefreshMatJump = () => {
+      if (matJumpDebounce) clearTimeout(matJumpDebounce);
+      matJumpDebounce = setTimeout(refreshMatJump, 300);
+    };
+    refreshMatJump();
+    disposables.push(editor.onDidChangeModelContent(() => debouncedRefreshMatJump()));
+    disposables.push(editor.onDidChangeModel(() => refreshMatJump()));
+    disposables.push({
+      dispose: () => {
+        if (matJumpDebounce) clearTimeout(matJumpDebounce);
+        editor.deltaDecorations(matJumpDecorations, []);
+      },
+    });
+    disposables.push(editor.onMouseDown((e) => {
+      const target = e.event.browserEvent.target as HTMLElement | null;
+      if (!target || !target.classList.contains('jade-jump-arrow')) return;
+      const match = Array.from(target.classList).find((c) => c.startsWith('jade-jump-to-'));
+      if (!match) return;
+      const targetLine = parseInt(match.slice('jade-jump-to-'.length), 10);
+      if (!Number.isFinite(targetLine)) return;
+      e.event.preventDefault();
+      e.event.stopPropagation();
+      editor.revealLineInCenter(targetLine, 0);
+      editor.setPosition({ lineNumber: targetLine, column: 1 });
+      editor.focus();
+    }));
+
+    // -- Texture popup: shared helper for both click and hover --
+    //
+    // Mirrors the primary editor's flow (compute anchor from
+    // bounding rect, extract the path off the swatch's host line,
+    // delegate to `loadTextureForPopup`) but inlined so we don't
+    // have to surface every helper through context. The popup
+    // state itself is shared App-level state, so opening from
+    // either pane is fine.
+    const openPopupFromSwatch = (swatchEl: HTMLElement) => {
+      const model = editor.getModel();
+      if (!model) return;
+      const rect = swatchEl.getBoundingClientRect();
+      // Probe just to the right of the swatch to land on the path text.
+      const probeX = rect.right + 4;
+      const probeY = rect.top + rect.height / 2;
+      const pos = editor.getTargetAtClientPoint(probeX, probeY);
+      if (!pos?.position) return;
+      const line = model.getLineContent(pos.position.lineNumber);
+      const imgMatch = extractImagePathAtColumn(line, pos.position.column);
+      if (!imgMatch) return;
+      // Toggle off if already open for the same path.
+      if (texPopupRef.current?.rawPath === imgMatch.path) {
+        setTexPopup(null);
+        return;
+      }
+      // Anchor math MUST match the left pane's `computeAnchorFromSwatch`
+      // exactly — the `TexHoverPopup` component does its own offset
+      // math (adds GAP, uses `bottom: window.innerHeight - top + GAP`
+      // when `above`). So `top` is just the swatch edge; subtracting
+      // POPUP_H here is what was throwing the popup off-screen.
+      const POPUP_H = 320;
+      const above = rect.top > POPUP_H + 8;
+      setTexPopup({
+        top: above ? rect.top : rect.bottom,
+        left: rect.left,
+        above,
+        rawPath: imgMatch.path,
+        resolvedPath: null,
+        imageDataUrl: null,
+        texWidth: 0,
+        texHeight: 0,
+        formatStr: '',
+        formatNum: 0,
+        error: null,
+      });
+      const baseFile = activeTabRef.current?.filePath ?? null;
+      loadTextureForPopup(imgMatch.path, baseFile);
+    };
+
+    // Click → toggle popup.
+    disposables.push(editor.onMouseDown((e) => {
+      const target = e.event.browserEvent.target as HTMLElement | null;
+      if (!target?.classList.contains('image-path-swatch')) return;
+      e.event.preventDefault();
+      e.event.stopPropagation();
+      openPopupFromSwatch(target);
+    }));
+
+    // Hover → open after a short dwell, dismiss when the cursor
+    // leaves the swatch (unless it lands on the popup itself, which
+    // sets `isOverTexPopupRef.current = true` and cancels dismiss).
+    let swatchHoverTimeout: ReturnType<typeof setTimeout> | null = null;
+    let swatchDismissTimeout: ReturnType<typeof setTimeout> | null = null;
+    let hoveredSwatchEl: HTMLElement | null = null;
+    const clearSwatchHover = () => {
+      if (swatchHoverTimeout) { clearTimeout(swatchHoverTimeout); swatchHoverTimeout = null; }
+      hoveredSwatchEl = null;
+    };
+    const clearSwatchDismiss = () => {
+      if (swatchDismissTimeout) { clearTimeout(swatchDismissTimeout); swatchDismissTimeout = null; }
+    };
+    const scheduleSwatchDismiss = () => {
+      clearSwatchDismiss();
+      swatchDismissTimeout = setTimeout(() => {
+        if (!isOverTexPopupRef.current) setTexPopup(null);
+      }, 350);
+    };
+    disposables.push(editor.onMouseMove((e) => {
+      const target = e.event.browserEvent.target as HTMLElement | null;
+      if (!target?.classList.contains('image-path-swatch')) {
+        if (hoveredSwatchEl) {
+          clearSwatchHover();
+          if (texPopupRef.current) scheduleSwatchDismiss();
+        }
+        return;
+      }
+      clearSwatchDismiss();
+      if (target === hoveredSwatchEl) return;
+      clearSwatchHover();
+      hoveredSwatchEl = target;
+      swatchHoverTimeout = setTimeout(() => {
+        swatchHoverTimeout = null;
+        if (hoveredSwatchEl === target && !texPopupRef.current) {
+          openPopupFromSwatch(target);
+        }
+      }, 400);
+    }));
+    disposables.push(editor.onMouseLeave(() => {
+      if (hoveredSwatchEl) clearSwatchHover();
+      if (texPopupRef.current) scheduleSwatchDismiss();
+    }));
+    disposables.push({ dispose: () => { clearSwatchHover(); clearSwatchDismiss(); } });
+    // Dismiss on scroll so the popup doesn't float detached from
+    // the text when the user moves the viewport.
+    disposables.push(editor.onDidScrollChange(() => {
+      if (texPopupRef.current) setTexPopup(null);
+    }));
+
+    return () => {
+      for (const d of disposables) {
+        try { d.dispose(); } catch {}
+      }
+    };
+  }, [loadTextureForPopup]);
+
   const handleEditorMount = (editor: MonacoType.editor.IStandaloneCodeEditor) => {
     // Clean up any previous subscriptions before creating new ones
     editorDisposablesRef.current.forEach(disposable => {
@@ -2787,17 +3183,23 @@ function App() {
     editorDisposablesRef.current.push({ dispose: () => { window.removeEventListener('focus', onWindowFocus); } });
 
     // Restore view state for active tab (model-switching effect will handle this on tab changes)
-    // On initial mount, trigger model setup for the first tab
-    if (activeTabId) {
+    // On initial mount, trigger model setup for the LEFT pane's tab —
+    // pin to `leftActiveTabId`, NOT the derived `activeTabId`.
+    // Otherwise, when shells remount with the right pane focused
+    // (activeTabId === rightActiveTabId), this block would attach the
+    // right pane's model to the new LEFT editor, swapping panes
+    // visually. Pinning to leftActiveTabId keeps each editor lined
+    // up with its own pane across shell switches.
+    const leftBootTabId = leftActiveTabId;
+    if (leftBootTabId) {
       // Trigger the model-switching effect by forcing a re-evaluation
-      // The effect depends on activeTabId which is already set
       setTimeout(() => {
         const monaco = monacoRef.current;
-        const activeTabData = tabs.find(t => t.id === activeTabId);
+        const activeTabData = tabs.find(t => t.id === leftBootTabId);
         if (monaco && activeTabData && editor) {
           const uri = activeTabData.filePath
             ? monaco.Uri.file(activeTabData.filePath)
-            : monaco.Uri.parse(`inmemory://tab/${activeTabId}`);
+            : monaco.Uri.parse(`inmemory://tab/${leftBootTabId}`);
           const existing = monaco.editor.getModel(uri);
           let model: MonacoType.editor.ITextModel;
           if (existing && !existing.isDisposed()) {
@@ -2805,9 +3207,9 @@ function App() {
           } else {
             model = monaco.editor.createModel(activeTabData.content, getMonacoLanguageForPath(activeTabData.filePath ?? activeTabData.fileName), uri);
           }
-          monacoModelsRef.current.set(activeTabId, model);
+          monacoModelsRef.current.set(leftBootTabId, model);
           editor.setModel(model);
-          const savedState = viewStatesRef.current.get(activeTabId);
+          const savedState = viewStatesRef.current.get(leftBootTabId);
           if (savedState?.viewState) {
             editor.restoreViewState(savedState.viewState);
           }
@@ -4251,6 +4653,11 @@ function App() {
     editorTheme, editorFontFamily, perfPrefs, bigFileLines: BIG_FILE_LINES,
     handleBeforeMount, handleEditorMount, handleEditorChange,
     editorRef, monacoModelsRef, monacoRef,
+
+    // -- Split pane
+    splitMode, setSplitMode, splitRatio, setSplitRatio,
+    leftActiveTabId, rightActiveTabId, focusedPane, setFocusedPane,
+    onTabSetPane, ensureModelForTab, setupRightEditor,
 
     // -- Edit panel callbacks
     handleGeneralEditContentChange, handleScrollToLine,
